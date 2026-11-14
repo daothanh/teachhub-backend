@@ -30,7 +30,7 @@ jobs:
       - uses: ./.github/actions/setup
       - run: pnpm test
 
-  # Migration thật bằng drizzle-kit + vai trò teachhub_owner, như job migrate khi deploy (ADR-TH-BE-001).
+  # Migration thật bằng scripts/migrate.mjs + vai trò teachhub_owner, đúng lệnh của image khi deploy (ADR-TH-BE-001).
   migrate:
     runs-on: ubuntu-latest
     services:
@@ -62,8 +62,8 @@ jobs:
         run: psql -v ON_ERROR_STOP=1 -f docker/postgres-init/01-roles.sql
       - name: Migration trên CSDL trống, chạy lại lần hai không lỗi
         run: |
-          node ./node_modules/drizzle-kit/bin.cjs migrate
-          node ./node_modules/drizzle-kit/bin.cjs migrate
+          node scripts/migrate.mjs
+          node scripts/migrate.mjs
 
   # R1 (§4.5): bảng public thiếu enable/force RLS → đỏ.
   rls:
