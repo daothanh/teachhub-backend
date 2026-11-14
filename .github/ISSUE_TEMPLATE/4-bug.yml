@@ -1,0 +1,31 @@
+name: Bug
+description: Báo lỗi — gắn Story gốc nếu có
+title: "[Bug] <mô tả ngắn>"
+labels: ["type:bug"]
+body:
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Mức độ (gắn nhãn severity:* tương ứng)
+      options:
+        - Critical — lộ dữ liệu, sai tiền, mất dữ liệu điểm danh, không đăng nhập được (sửa ngay, chặn release)
+        - High — sửa trong sprint
+        - Medium — vào backlog
+        - Low — vào backlog
+    validations: { required: true }
+  - type: input
+    id: story
+    attributes: { label: Story gốc, placeholder: "#123" }
+  - type: textarea
+    id: steps
+    attributes: { label: Các bước tái hiện }
+    validations: { required: true }
+  - type: textarea
+    id: expected
+    attributes: { label: Kết quả mong đợi và thực tế }
+    validations: { required: true }
+  - type: input
+    id: env
+    attributes: { label: Môi trường và thiết bị, placeholder: "dev, Android 12 Samsung A52, app 0.1.0+5" }
+  - type: markdown
+    attributes: { value: "Không dán PII thật (tên học sinh, SĐT, email, token, OTP) vào issue." }

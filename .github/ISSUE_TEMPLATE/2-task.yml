@@ -1,0 +1,19 @@
+name: Task
+description: Task theo nền tảng, ≤ 2 ngày công, là sub-issue của một Story
+title: "[BE|FL|WEB|QA|CT] S<sprint>-<nhóm>-<số> <tên>"
+labels: ["type:task"]
+body:
+  - type: input
+    id: story
+    attributes: { label: Story gốc, placeholder: "#123 (US-0.1)" }
+  - type: textarea
+    id: scope
+    attributes: { label: Việc cần làm }
+    validations: { required: true }
+  - type: textarea
+    id: verify
+    attributes: { label: Kết quả kiểm chứng được, description: "Như cột cuối của bảng task trong kế hoạch" }
+    validations: { required: true }
+  - type: input
+    id: deps
+    attributes: { label: Phụ thuộc, description: "Ghi vào trường Blocked by trên project nếu bị chặn bởi nhóm khác" }

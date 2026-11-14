@@ -1,0 +1,16 @@
+name: ADR
+description: Đề xuất quyết định kiến trúc; file ADR nằm trong docs/adr/ của repo
+title: "[ADR] <quyết định>"
+labels: ["type:adr"]
+body:
+  - type: textarea
+    id: context
+    attributes: { label: Bối cảnh }
+    validations: { required: true }
+  - type: textarea
+    id: options
+    attributes: { label: Các phương án đã xét }
+  - type: textarea
+    id: decision
+    attributes: { label: Quyết định đề xuất và hệ quả }
+    validations: { required: true }

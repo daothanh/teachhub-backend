@@ -1,0 +1,50 @@
+name: Story
+description: Story US-x.y — chỉ kéo vào sprint khi đạt đủ Definition of Ready (Mục 6.1)
+title: "[Story] US-x.y <tên>"
+labels: ["type:story"]
+body:
+  - type: input
+    id: us
+    attributes: { label: Mã story, placeholder: "US-0.1" }
+    validations: { required: true }
+  - type: textarea
+    id: story
+    attributes: { label: Mô tả, description: "Là… tôi muốn… để…" }
+    validations: { required: true }
+  - type: textarea
+    id: ac
+    attributes: { label: Tiêu chí chấp nhận (AC), description: "Đánh số, kiểm chứng được; giữ nguyên AC trong User Stories" }
+    validations: { required: true }
+  - type: textarea
+    id: screens
+    attributes: { label: Màn hình và Figma HiFi, description: "Mã màn (T/P/S…) + link, gồm trạng thái rỗng, đang tải, lỗi, ngoại tuyến" }
+  - type: textarea
+    id: contract
+    attributes: { label: Hợp đồng API, description: "Link PR [CT] vào contracts/openapi.json; mã lỗi mới trong error_codes.json" }
+  - type: textarea
+    id: data
+    attributes: { label: Thay đổi dữ liệu, description: "Bảng/cột mới; có trong ERD đích hay thay đổi so với Technical Spec (nếu thay đổi → cập nhật Spec cùng lúc)" }
+  - type: checkboxes
+    id: risk
+    attributes:
+      label: Risk tags (gắn nhãn risk:* tương ứng)
+      options:
+        - label: tenant-isolation / pii-child → DoR/DoD Mục 6.4
+        - label: money → DoR/DoD Mục 6.5
+        - label: offline → DoR/DoD Mục 6.6
+        - label: notification → DoD Mục 6.7
+        - label: store-policy
+  - type: checkboxes
+    id: dor
+    attributes:
+      label: Definition of Ready (Mục 6.1)
+      options:
+        - label: R1 — Có mã US, mô tả "Là… tôi muốn… để…", AC đánh số và kiểm chứng được
+        - label: R2 — Có mã màn hình và link Figma HiFi cho mọi màn liên quan, gồm trạng thái rỗng/đang tải/lỗi/ngoại tuyến
+        - label: R3 — Hợp đồng API đã duyệt (PR [CT] đã merge hoặc đã duyệt), mã lỗi mới đã vào error_codes.json
+        - label: R4 — Thay đổi dữ liệu đã xác định
+        - label: R5 — Phụ thuộc đã rõ, xong hoặc sẽ xong trước ngày 5 của sprint
+        - label: R6 — Đã tách task theo nền tảng (mỗi task ≤ 2 ngày công), story ≤ 8 điểm
+        - label: R7 — QA đã viết hoặc phác ca kiểm thử chính, gồm ca âm
+        - label: R8 — Đã gắn Risk tags đúng; đạt DoR bổ sung nếu có tag
+        - label: R9 — Sự kiện analytics cần bắn (nếu có) đã ghi tên và thuộc tính

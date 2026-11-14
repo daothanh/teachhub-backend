@@ -1,0 +1,16 @@
+name: Epic
+description: Epic theo module M0–M9 của PRD (chỉ tạo ở teachhub-backend)
+title: "[Epic] E<số> <tên module>"
+labels: ["type:epic"]
+body:
+  - type: input
+    id: module
+    attributes: { label: Module, placeholder: "M0 Tài khoản" }
+    validations: { required: true }
+  - type: textarea
+    id: goal
+    attributes: { label: Mục tiêu, description: Kết quả người dùng nhận được khi epic xong }
+    validations: { required: true }
+  - type: textarea
+    id: stories
+    attributes: { label: Story thuộc epic, description: "Thêm story làm sub-issue; liệt kê mã US ở đây để tra nhanh" }

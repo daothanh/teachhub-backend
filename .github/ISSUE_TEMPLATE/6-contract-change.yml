@@ -1,0 +1,25 @@
+name: Contract change
+description: Thay đổi phá vỡ hợp đồng API /v1 — cần TL + đại diện từng client duyệt (Mục 4, nguyên tắc 6)
+title: "[Contract change] <endpoint/trường>"
+labels: ["type:contract-change"]
+body:
+  - type: textarea
+    id: change
+    attributes: { label: Thay đổi, description: "Endpoint, trường, mã lỗi bị đổi tên/xóa/đổi kiểu" }
+    validations: { required: true }
+  - type: textarea
+    id: why
+    attributes: { label: Lý do không thể chỉ thêm trường tùy chọn }
+    validations: { required: true }
+  - type: textarea
+    id: migration
+    attributes: { label: Lộ trình chuyển đổi, description: "Expand → migrate → contract qua 2 bản phát hành; minSupportedVersion nếu cần" }
+    validations: { required: true }
+  - type: checkboxes
+    id: approvals
+    attributes:
+      label: Duyệt
+      options:
+        - label: TL
+        - label: Đại diện Flutter
+        - label: Đại diện Web

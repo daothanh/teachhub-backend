@@ -1,0 +1,17 @@
+name: Spike
+description: Thử nghiệm có time-box; đầu ra là ADR hoặc quyết định
+title: "[Spike] <câu hỏi cần trả lời>"
+labels: ["type:spike"]
+body:
+  - type: textarea
+    id: question
+    attributes: { label: Câu hỏi cần trả lời }
+    validations: { required: true }
+  - type: input
+    id: timebox
+    attributes: { label: Time-box, placeholder: "2d" }
+    validations: { required: true }
+  - type: textarea
+    id: output
+    attributes: { label: Đầu ra, description: "ADR, số đo, quyết định PO… và phương án dự phòng nếu không đạt" }
+    validations: { required: true }
