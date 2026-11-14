@@ -17,21 +17,15 @@ permissions:
 jobs:
   image:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: teachhub-backend # api + worker (khác lệnh chạy)
-            target: runtime
-          - name: teachhub-migrate
-            target: migrate
+    env:
+      NAME: teachhub-backend # một image cho api, worker, migrate (khác lệnh chạy)
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v4
       - uses: docker/metadata-action@v6
         id: meta
         with:
-          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}
+          images: ghcr.io/${{ github.repository_owner }}/${{ env.NAME }}
           tags: |
             type=sha,format=long
             type=raw,value=main,enable={{is_default_branch}}
@@ -39,12 +33,12 @@ jobs:
         with:
           context: .
           file: docker/Dockerfile
-          target: ${{ matrix.target }}
+          target: runtime
           load: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=${{ matrix.name }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
       # Chạy Trivy bằng image ghim phiên bản thay cho trivy-action (tag của action từng bị chiếm quyền).
       - name: Trivy (CRITICAL, HIGH có bản vá → đỏ)
         run: >
@@ -59,4 +53,4 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - if: github.event_name == 'push'
         # Tên image GHCR phải viết thường (org có thể có chữ hoa).
-        run: docker push --all-tags "$(echo 'ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}' | tr '[:upper:]' '[:lower:]')"
+        run: docker push --all-tags "$(echo "ghcr.io/${{ github.repository_owner }}/$NAME" | tr '[:upper:]' '[:lower:]')"

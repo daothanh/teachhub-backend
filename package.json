@@ -21,7 +21,7 @@
     "test:cov": "vitest run --coverage",
     "test:e2e": "vitest run --config ./vitest.config.e2e.ts",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "node --env-file=.env ./node_modules/drizzle-kit/bin.cjs migrate",
+    "db:migrate": "node --env-file=.env scripts/migrate.mjs",
     "openapi:gen": "UPDATE_OPENAPI=1 vitest run apps/api/src/openapi.spec.ts",
     "db:check": "node scripts/check-migrations.mjs"
   },

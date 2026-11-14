@@ -51,7 +51,7 @@ pnpm build
 pnpm db:check                 # thứ tự migration (ADR-TH-BE-001 §5)
 ```
 
-CI (`.github/workflows/ci.yml`) tách check riêng trên PR: `lint`, `unit` (gồm `openapi.json` khớp mã), `migrate` (drizzle-kit trên CSDL trống, chạy 2 lần, thứ tự so với nhánh đích), `rls`, `e2e`, `build`, `openapi-breaking` (`oasdiff`). `image.yml` build image `teachhub-backend` (api/worker) và `teachhub-migrate`, quét Trivy; merge `main` thì push GHCR với tag `sha-<commit>` và `main`.
+CI (`.github/workflows/ci.yml`) tách check riêng trên PR: `lint`, `unit` (gồm `openapi.json` khớp mã), `migrate` (`scripts/migrate.mjs` trên CSDL trống, chạy 2 lần, thứ tự so với nhánh đích), `rls`, `e2e`, `build`, `openapi-breaking` (`oasdiff`). `image.yml` build một image `teachhub-backend` cho api, worker và migration (`node scripts/migrate.mjs`), quét Trivy; merge `main` thì push GHCR với tag `sha-<commit>` và `main`.
 
 Dùng colima: đặt `DOCKER_HOST=unix://$HOME/.colima/default/docker.sock` và `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock` trước khi chạy `test:e2e`.
 
