@@ -3,23 +3,31 @@ import {
   RedisContainer,
   type StartedRedisContainer,
 } from '@testcontainers/redis';
-import { startTestDb, type TestDb } from './containers.js';
+import {
+  startTestDb,
+  startTestS3,
+  type TestDb,
+  type TestS3,
+} from './containers.js';
 
 describe('api (e2e)', () => {
   let db: TestDb;
   let redis: StartedRedisContainer;
+  let s3: TestS3;
   let app: NestFastifyApplication;
 
   beforeAll(async () => {
-    [db, redis] = await Promise.all([
+    [db, redis, s3] = await Promise.all([
       startTestDb(),
       new RedisContainer('redis:7-alpine').start(),
+      startTestS3(),
     ]);
     Object.assign(process.env, {
       NODE_ENV: 'test',
       LOG_LEVEL: 'warn',
       DATABASE_URL: db.url('teachhub_app'),
       REDIS_URL: redis.getConnectionUrl(),
+      ...s3.env,
     });
     // Import sau khi đặt env: cấu hình được kiểm tra lúc nạp module.
     const { createApp } = await import('../apps/api/src/app.js');
@@ -30,15 +38,19 @@ describe('api (e2e)', () => {
 
   afterAll(async () => {
     await app?.close();
-    await Promise.all([db?.container.stop(), redis?.stop()]);
+    await Promise.all([
+      db?.container.stop(),
+      redis?.stop(),
+      s3?.container.stop(),
+    ]);
   });
 
-  it('GET /health/ready kiểm tra PostgreSQL và Redis', async () => {
+  it('GET /health/ready kiểm tra PostgreSQL, Redis và kho S3', async () => {
     const res = await app.inject({ method: 'GET', url: '/health/ready' });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({
       status: 'ok',
-      checks: { db: true, redis: true },
+      checks: { db: true, redis: true, s3: true },
     });
   });
 
@@ -61,5 +73,16 @@ describe('api (e2e)', () => {
     expect(
       (await app.inject({ method: 'GET', url: '/v1/health/live' })).statusCode,
     ).toBe(404);
+  });
+
+  // Chạy cuối: dừng MinIO thật.
+  it('kho S3 không truy cập được → 503, chỉ rõ phụ thuộc lỗi', async () => {
+    await s3.container.stop();
+    const res = await app.inject({ method: 'GET', url: '/health/ready' });
+    expect(res.statusCode).toBe(503);
+    expect(res.json()).toMatchObject({
+      code: 'SERVICE_UNAVAILABLE',
+      details: { db: true, redis: true, s3: false },
+    });
   });
 });

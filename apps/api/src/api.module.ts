@@ -6,11 +6,16 @@ import {
   validationPipe,
 } from '@teachhub/core';
 import { DbModule } from '@teachhub/db';
-import { RedisModule } from '@teachhub/infra';
+import { ObjectStorageModule, RedisModule } from '@teachhub/infra';
 import { HealthController } from './health/health.controller.js';
 
 @Module({
-  imports: [CoreModule, DbModule.register('DATABASE_URL'), RedisModule],
+  imports: [
+    CoreModule,
+    DbModule.register('DATABASE_URL'),
+    RedisModule,
+    ObjectStorageModule,
+  ],
   controllers: [HealthController],
   providers: [
     { provide: APP_PIPE, useValue: validationPipe },

@@ -2,7 +2,7 @@
 
 Backend TeachHub — NestJS 12 modular monolith, một codebase hai tiến trình (Technical Spec MVP, Mục 2.4, 3, 8.2):
 
-- `apps/api` — HTTP REST `/v1/**` (Fastify), health `/health/live`, `/health/ready`
+- `apps/api` — HTTP REST `/v1/**` (Fastify), health `/health/live`, `/health/ready` (PostgreSQL, Redis, kho S3)
 - `apps/worker` — BullMQ consumer, outbox relay, job scheduler (không mở HTTP)
 
 ## Cấu trúc
@@ -12,7 +12,7 @@ apps/api/src/        main.ts, app.ts (createApp dùng chung cho test), api.modul
 apps/worker/src/     main.ts, worker.module.ts
 libs/core/           config (zod), CoreModule (config + pino), AppException, GlobalExceptionFilter, validationPipe, request id
 libs/db/             DbModule (pg Pool + Drizzle), TxService (BEGIN + SET LOCAL app.user_id), schema/, migrations/
-libs/infra/          RedisModule (sau này: R2, FCM, Web Push, SES, PDF, Excel)
+libs/infra/          RedisModule, ObjectStorage (kho S3: MinIO/R2); sau này: FCM, Web Push, SES, PDF, Excel
 libs/modules/        (Sprint 1+) auth, identity, tenancy, … — mỗi module: http/ application/ domain/ infrastructure/ jobs/ index.ts
 contracts/           error_codes.json (nguồn duy nhất cho API, web, app)
 docker/              Dockerfile (api + worker + target migrate), postgres-init/ (vai trò DB local)

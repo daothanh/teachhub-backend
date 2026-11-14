@@ -58,7 +58,13 @@ describe('validateEnv', () => {
       DATABASE_URL: 'postgres://a@b/c',
       REDIS_URL: 'redis://x',
       CORS_ORIGINS: 'a, b',
+      S3_REGION: 'us-east-1',
+      S3_FORCE_PATH_STYLE: 'true',
+      S3_ACCESS_KEY_ID: 'k',
+      S3_SECRET_ACCESS_KEY: 's',
+      S3_BUCKET_PRIVATE: 'b',
     });
     expect(env.CORS_ORIGINS).toEqual(['a', 'b']);
+    expect(env.S3_FORCE_PATH_STYLE).toBe(true);
   });
 });
