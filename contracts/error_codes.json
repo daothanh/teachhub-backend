@@ -1,0 +1,19 @@
+{
+  "BAD_REQUEST": { "http": 400, "message": "Yêu cầu không hợp lệ." },
+  "VALIDATION_FAILED": { "http": 422, "message": "Dữ liệu chưa hợp lệ." },
+  "IDEMPOTENCY_KEY_REUSED": { "http": 422, "message": "Idempotency-Key đã dùng cho yêu cầu khác." },
+  "UNAUTHENTICATED": { "http": 401, "message": "Bạn cần đăng nhập." },
+  "TOKEN_EXPIRED": { "http": 401, "message": "Phiên đăng nhập đã hết hạn." },
+  "OTP_INVALID": { "http": 401, "message": "Mã xác thực không đúng." },
+  "PLAN_LIMIT_EXCEEDED": { "http": 402, "message": "Đã vượt giới hạn của gói." },
+  "FEATURE_REQUIRES_PRO": { "http": 402, "message": "Tính năng cần gói Pro." },
+  "READONLY_PLAN_LIMIT": { "http": 402, "message": "Gói đang ở chế độ chỉ đọc." },
+  "FORBIDDEN": { "http": 403, "message": "Bạn không có quyền thực hiện thao tác này." },
+  "CONSENT_REQUIRED": { "http": 403, "message": "Cần đồng ý xử lý dữ liệu." },
+  "NOT_FOUND": { "http": 404, "message": "Không tìm thấy." },
+  "CONFLICT_STALE": { "http": 409, "message": "Dữ liệu đã thay đổi, vui lòng tải lại." },
+  "IDEMPOTENCY_IN_PROGRESS": { "http": 409, "message": "Yêu cầu đang được xử lý." },
+  "RATE_LIMITED": { "http": 429, "message": "Bạn thao tác quá nhanh, vui lòng thử lại sau." },
+  "INTERNAL_ERROR": { "http": 500, "message": "Đã có lỗi xảy ra." },
+  "SERVICE_UNAVAILABLE": { "http": 503, "message": "Hệ thống đang bảo trì hoặc quá tải." }
+}

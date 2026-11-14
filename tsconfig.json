@@ -1,0 +1,60 @@
+{
+  "compilerOptions": {
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "resolvePackageJsonExports": true,
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "declaration": true,
+    "removeComments": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "allowSyntheticDefaultImports": true,
+    "target": "ES2023",
+    "sourceMap": true,
+    "outDir": "./dist",
+    "rootDir": ".",
+    "incremental": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "strictPropertyInitialization": false,
+    "types": [
+      "vitest/globals",
+      "node"
+    ],
+    "paths": {
+      "@teachhub/core": [
+        "./libs/core/src/index.ts"
+      ],
+      "@teachhub/core/*": [
+        "./libs/core/src/*"
+      ],
+      "@teachhub/db": [
+        "./libs/db/src/index.ts"
+      ],
+      "@teachhub/db/*": [
+        "./libs/db/src/*"
+      ],
+      "@teachhub/infra": [
+        "./libs/infra/src/index.ts"
+      ],
+      "@teachhub/infra/*": [
+        "./libs/infra/src/*"
+      ]
+    },
+    "resolveJsonModule": true,
+    "noUncheckedIndexedAccess": true
+  },
+  "files": [],
+  "references": [
+    {
+      "path": "./apps/worker/tsconfig.app.json"
+    },
+    {
+      "path": "./apps/api/tsconfig.app.json"
+    },
+    {
+      "path": "./tsconfig.spec.json"
+    }
+  ]
+}

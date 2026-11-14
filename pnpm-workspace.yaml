@@ -1,0 +1,8 @@
+# pnpm 12 chặn script cài đặt của dependency nếu chưa duyệt. Các gói dưới đây không cần build
+# (esbuild dùng binary qua optionalDependencies; còn lại là phần native tùy chọn của testcontainers/bullmq).
+allowBuilds:
+  cpu-features: false
+  esbuild: false
+  msgpackr-extract: false
+  protobufjs: false
+  ssh2: false
