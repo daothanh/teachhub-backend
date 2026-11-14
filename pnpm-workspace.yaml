@@ -1,6 +1,8 @@
 # pnpm 12 chặn script cài đặt của dependency nếu chưa duyệt. Các gói dưới đây không cần build
-# (esbuild dùng binary qua optionalDependencies; còn lại là phần native tùy chọn của testcontainers/bullmq).
+# (esbuild dùng binary qua optionalDependencies; còn lại là phần native tùy chọn của testcontainers/bullmq;
+# @scarf/scarf là script thống kê lượt cài của swagger-ui-dist).
 allowBuilds:
+  '@scarf/scarf': false
   cpu-features: false
   esbuild: false
   msgpackr-extract: false
