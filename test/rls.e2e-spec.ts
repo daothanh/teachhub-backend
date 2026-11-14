@@ -66,4 +66,16 @@ describe('TxService + RLS', () => {
     );
     expect(leaked.rows[0]?.v || '').toBe('');
   });
+
+  // ADR-TH-BE-001 §2: api chạy bằng vai trò không vượt được RLS và không sở hữu bảng.
+  it('teachhub_app không BYPASSRLS, không superuser, không sở hữu bảng nào', async () => {
+    const role = await appPool.query(
+      `select rolbypassrls, rolsuper from pg_roles where rolname = current_user`,
+    );
+    expect(role.rows[0]).toEqual({ rolbypassrls: false, rolsuper: false });
+    const owned = await appPool.query(
+      `select count(*)::int as n from pg_tables where tableowner = current_user`,
+    );
+    expect(owned.rows[0]?.n).toBe(0);
+  });
 });
