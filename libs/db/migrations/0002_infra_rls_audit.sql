@@ -86,8 +86,8 @@ end;
 $$;
 --> statement-breakpoint
 
--- Trigger tổng quát: gắn bằng app_private.enable_audit('<bảng>'). Bỏ phone/email khỏi before/after (Mục 4.8);
--- bỏ qua UPDATE không đổi gì.
+-- Trigger tổng quát: gắn bằng app_private.enable_audit('<bảng>'). Bỏ phone/email khỏi before/after (Mục 4.8)
+-- nhưng vẫn ghi dòng audit (kèm `redacted_changed`) khi chỉ phone/email đổi; bỏ qua UPDATE không đổi gì.
 create or replace function app_private.audit_trigger() returns trigger
 language plpgsql security definer set search_path = '' as $$
 declare
@@ -95,8 +95,14 @@ declare
   new_row jsonb := case when tg_op in ('INSERT', 'UPDATE') then to_jsonb(new) - 'phone' - 'email' end;
   row_data jsonb := coalesce(new_row, old_row);
 begin
-  if tg_op = 'UPDATE' and old_row = new_row then
-    return null;
+  if tg_op = 'UPDATE' then
+    -- So cả dòng trước khi bỏ PII: đổi riêng phone/email vẫn phải để lại dấu vết.
+    if to_jsonb(old) = to_jsonb(new) then
+      return null;
+    end if;
+    if old_row = new_row then
+      new_row := new_row || jsonb_build_object('redacted_changed', true);
+    end if;
   end if;
   perform app_private.audit_insert(
     (row_data ->> 'tenant_id')::uuid,

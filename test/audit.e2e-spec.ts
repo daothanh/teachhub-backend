@@ -59,12 +59,21 @@ describe('audit_logs + bảng hạ tầng', () => {
     await tx.run({ userId: actor }, (t) =>
       t.execute(sql`update audit_probes set note = 'b' where id = ${id}`),
     );
+    // Chỉ đổi phone → vẫn có dòng audit, không lộ giá trị phone.
+    await tx.run({ userId: actor }, (t) =>
+      t.execute(sql`update audit_probes set phone = '0999' where id = ${id}`),
+    );
     await tx.run({ userId: null }, (t) =>
       t.execute(sql`delete from audit_probes where id = ${id}`),
     );
 
     const rows = await auditRows(id);
-    expect(rows.map((r) => r.action)).toEqual(['insert', 'update', 'delete']);
+    expect(rows.map((r) => r.action)).toEqual([
+      'insert',
+      'update',
+      'update',
+      'delete',
+    ]);
     expect(rows[0]).toMatchObject({
       tenant_id: tenant,
       actor_user_id: actor,
@@ -77,7 +86,9 @@ describe('audit_logs + bảng hạ tầng', () => {
       before_data: { note: 'a' },
       after_data: { note: 'b' },
     });
-    expect(rows[2]).toMatchObject({ actor_user_id: null, after_data: null });
+    expect(rows[2]?.after_data).toMatchObject({ redacted_changed: true });
+    expect(JSON.stringify(rows[2])).not.toContain('0999');
+    expect(rows[3]).toMatchObject({ actor_user_id: null, after_data: null });
   });
 
   it('api không đọc, không ghi, không sửa được audit_logs', async () => {
