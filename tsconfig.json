@@ -40,6 +40,9 @@
       ],
       "@teachhub/infra/*": [
         "./libs/infra/src/*"
+      ],
+      "@teachhub/modules/*": [
+        "./libs/modules/*/index.ts"
       ]
     },
     "resolveJsonModule": true,

@@ -80,6 +80,24 @@ describe('api (e2e)', () => {
     });
   });
 
+  it('endpoint Sprint 1 đã có hợp đồng: validate theo schema, thân hàm trả 501 tới khi làm', async () => {
+    const bad = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/login',
+      payload: { method: 'email_otp', email: 'khong-phai-email', code: '12' },
+    });
+    expect(bad.statusCode).toBe(422);
+    expect(Object.keys(bad.json().errors).sort()).toEqual(['code', 'email']);
+
+    const ok = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/otp/send',
+      payload: { email: 'co.lan@example.com' },
+    });
+    expect(ok.statusCode).toBe(501);
+    expect(ok.json().code).toBe('NOT_IMPLEMENTED');
+  });
+
   it('health nằm ngoài tiền tố /v1', async () => {
     expect(
       (await app.inject({ method: 'GET', url: '/v1/health/live' })).statusCode,
