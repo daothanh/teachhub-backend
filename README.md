@@ -10,7 +10,7 @@ Backend TeachHub — NestJS 12 modular monolith, một codebase hai tiến trìn
 ```text
 apps/api/src/        main.ts, app.ts (createApp dùng chung cho test), api.module.ts, health/
 apps/worker/src/     main.ts, worker.module.ts
-libs/core/           config (zod), CoreModule (config + pino), AppException, GlobalExceptionFilter, validationPipe, request id
+libs/core/           config (zod), CoreModule (config + pino), AppException, GlobalExceptionFilter, validationPipe, request id, RequestContext, phân trang
 libs/db/             DbModule (pg Pool + Drizzle), TxService (BEGIN + SET LOCAL app.user_id), schema/, migrations/
 libs/infra/          RedisModule, ObjectStorage (kho S3: MinIO/R2); sau này: FCM, Web Push, SES, PDF, Excel
 libs/modules/        (Sprint 1+) auth, identity, tenancy, … — mỗi module: http/ application/ domain/ infrastructure/ jobs/ index.ts
@@ -56,6 +56,7 @@ Dùng colima: đặt `DOCKER_HOST=unix://$HOME/.colima/default/docker.sock` và 
 
 - Lỗi trả `{ code, message, details?, errors?, requestId }`; ném `new AppException('CODE', details)`, mã khai trong `contracts/error_codes.json`.
 - Validate bằng zod: `@Body({ schema: createClassRequestSchema }) body: CreateClassRequest` — sai → 422 `VALIDATION_FAILED` + `errors: { field: string[] }`.
-- Lệnh ghi chạy trong `txService.run({ userId }, async (tx) => …)` để RLS có `app.user_id`.
+- Lệnh ghi chạy trong `txService.run(ctx, async (tx) => …)` để RLS có `app.user_id`; `ctx` lấy bằng `@Ctx() ctx: RequestContext`.
+- Danh sách có tổng: query `pageQuerySchema` → `toLimitOffset` → trả `paginated(items, total, query)` = `{ items, total, page, pageSize }` (Mục 5.5).
 - Bảng nghiệp vụ mới: `enable` + `force row level security` và policy cho `teachhub_app` (mẫu ở `test/rls.e2e-spec.ts`). Quy ước migration đầy đủ: [ADR-TH-BE-001](docs/adr/ADR-TH-BE-001-migration-va-csdl-lon-dan.md).
 - File `kebab-case.<loại>.ts`, route `/v1/<tài-nguyên-số-nhiều>`, JSON `camelCase`, SQL `snake_case` (Mục 8.5).
