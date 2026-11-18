@@ -34,7 +34,7 @@ export const envSchema = z
       ),
     /** SMTP gửi email (OTP…): Mailpit ở local/dev (smtp://127.0.0.1:1025), SES SMTP ở staging/production. */
     SMTP_URL: z.url().default('smtp://127.0.0.1:1025'),
-    EMAIL_FROM: z.string().min(1).default('TeachHub <no-reply@teachhub.vn>'),
+    EMAIL_FROM: z.string().min(1).default('DayHoc <no-reply@dayhoc.app>'),
     /** Khóa ký access token ES256, PEM PKCS#8 (`\n` được chấp nhận). Bỏ trống chỉ ở local/test: sinh khóa tạm. */
     JWT_PRIVATE_KEY: z.string().optional(),
     JWT_KID: z.string().min(1).default('local'),
