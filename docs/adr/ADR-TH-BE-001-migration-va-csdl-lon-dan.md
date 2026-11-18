@@ -1,7 +1,7 @@
 # ADR-TH-BE-001: Quy ước migration và CSDL lớn dần
 
 - Trạng thái: Proposed · 15/11/2026 (chờ TL duyệt trong PR)
-- Liên quan: Technical Spec MVP §2.5, §4.1, §4.4, §4.5 (R1–R6), §9.2; Kế hoạch triển khai §1.2, §6.3; S0-BE-04 (#31)
+- Liên quan: Technical Spec MVP §2.4, §2.5, §4.1, §4.4, §4.5 (R1–R6), §5.1, §9.2; Kế hoạch triển khai §1.2, §6.3; S0-BE-04 (#31), S0-BE-07 (#34)
 
 ## Bối cảnh
 
@@ -91,10 +91,22 @@ không có phân vùng `default` để lỗi lộ ra sớm thay vì dồn dữ l
 để tránh mất audit khi worker chưa chạy; job của worker chỉ **xóa** phân vùng quá hạn lưu (§4.8, khi có).
 Mỗi phân vùng bật + ép RLS, không policy: không ai đọc thẳng phân vùng để né policy của bảng cha.
 
+### 7. Hợp đồng OpenAPI (bổ sung ở S0-BE-07)
+
+Đã kiểm 15/11/2026: `nestjs-zod` 5.6 khai peer `@nestjs/common ^10 || ^11` — **không hỗ trợ NestJS 12**.
+Không cần nó: NestJS 12 validate bằng Standard Schema (`@Body({ schema })`) và `@nestjs/swagger` 12 sinh
+OpenAPI 3.1 trực tiếp từ schema zod 4 (`@ApiOkResponse({ standardSchema })`, request lấy từ `schema`
+của decorator tham số). Cũng không cần `zod-openapi`; chỉ dùng tới nó qua `standardSchemaConverter`
+nếu chuyển đổi gốc thiếu tính năng.
+
+- `contracts/openapi.json` sinh bằng `pnpm openapi:gen`, commit cùng PR; `apps/api/src/openapi.spec.ts`
+  đỏ khi file lệch mã.
+- Job CI `openapi-breaking` chạy `oasdiff breaking` so với nhánh đích, lỗi mức ERR → PR đỏ.
+- Route ngoài hợp đồng (health) gắn `@ApiExcludeController()`.
+
 ## Hệ quả
 
 - Mỗi sprint có migration nhỏ, review được; ERD vẫn là đích nên tên bảng ổn định cho client.
 - Người review migration dùng checklist ở PR template (§6.3 kế hoạch) — trùng mục 3–4 ở trên.
 - Đổi tên/xóa cột tốn 2 bản phát hành: chấp nhận đổi lại sự an toàn khi deploy cuốn chiếu.
-- Còn mở: cơ chế index `CONCURRENTLY` (mục 5); kiểm tương thích `nestjs-zod`/`@nestjs/swagger`
-  với NestJS 12 ghi bổ sung ở S0-BE-07.
+- Còn mở: cơ chế index `CONCURRENTLY` (mục 5).

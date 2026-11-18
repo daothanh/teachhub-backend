@@ -1,0 +1,68 @@
+{
+  "openapi": "3.1.0",
+  "paths": {
+    "/v1/app-config": {
+      "get": {
+        "operationId": "appConfig_get",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "minSupportedVersion": {
+                      "type": "object",
+                      "properties": {
+                        "android": {
+                          "type": "string",
+                          "pattern": "^\\d+\\.\\d+\\.\\d+$"
+                        },
+                        "ios": {
+                          "type": "string",
+                          "pattern": "^\\d+\\.\\d+\\.\\d+$"
+                        }
+                      },
+                      "required": [
+                        "android",
+                        "ios"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "minSupportedVersion"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "app-config"
+        ]
+      }
+    }
+  },
+  "info": {
+    "title": "TeachHub API",
+    "description": "",
+    "version": "1",
+    "contact": {}
+  },
+  "tags": [],
+  "servers": [],
+  "components": {
+    "securitySchemes": {
+      "bearer": {
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "type": "http"
+      }
+    },
+    "schemas": {}
+  }
+}

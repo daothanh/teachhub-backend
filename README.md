@@ -54,6 +54,8 @@ Dùng colima: đặt `DOCKER_HOST=unix://$HOME/.colima/default/docker.sock` và 
 
 ## Quy ước chính
 
+- Hợp đồng API: `contracts/openapi.json` sinh từ schema zod trên controller — đổi endpoint thì chạy `pnpm openapi:gen` và commit file; CI chặn file lệch mã và thay đổi phá vỡ (`oasdiff`). Schema request: `@Body({ schema })`/`@Query({ schema })`; response: `@ApiOkResponse({ standardSchema })`.
+
 - Lỗi trả `{ code, message, details?, errors?, requestId }`; ném `new AppException('CODE', details)`, mã khai trong `contracts/error_codes.json`.
 - Validate bằng zod: `@Body({ schema: createClassRequestSchema }) body: CreateClassRequest` — sai → 422 `VALIDATION_FAILED` + `errors: { field: string[] }`.
 - Lệnh ghi chạy trong `txService.run(ctx, async (tx) => …)` để RLS có `app.user_id`; `ctx` lấy bằng `@Ctx() ctx: RequestContext`.

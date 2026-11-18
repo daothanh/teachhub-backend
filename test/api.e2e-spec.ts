@@ -69,6 +69,17 @@ describe('api (e2e)', () => {
     });
   });
 
+  it('GET /v1/app-config công khai, trả phiên bản tối thiểu theo nền tảng', async () => {
+    const res = await app.inject({ method: 'GET', url: '/v1/app-config' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({
+      minSupportedVersion: {
+        android: expect.stringMatching(/^\d+\.\d+\.\d+$/),
+        ios: expect.stringMatching(/^\d+\.\d+\.\d+$/),
+      },
+    });
+  });
+
   it('health nằm ngoài tiền tố /v1', async () => {
     expect(
       (await app.inject({ method: 'GET', url: '/v1/health/live' })).statusCode,

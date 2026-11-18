@@ -7,6 +7,7 @@ import {
 } from '@teachhub/core';
 import { DbModule } from '@teachhub/db';
 import { ObjectStorageModule, RedisModule } from '@teachhub/infra';
+import { AppConfigController } from './app-config/app-config.controller.js';
 import { HealthController } from './health/health.controller.js';
 
 @Module({
@@ -16,7 +17,7 @@ import { HealthController } from './health/health.controller.js';
     RedisModule,
     ObjectStorageModule,
   ],
-  controllers: [HealthController],
+  controllers: [AppConfigController, HealthController],
   providers: [
     { provide: APP_PIPE, useValue: validationPipe },
     { provide: APP_FILTER, useClass: GlobalExceptionFilter },
