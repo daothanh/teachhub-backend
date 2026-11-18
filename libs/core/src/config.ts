@@ -35,6 +35,20 @@ export const envSchema = z
     /** SMTP gửi email (OTP…): Mailpit ở local/dev (smtp://127.0.0.1:1025), SES SMTP ở staging/production. */
     SMTP_URL: z.url().default('smtp://127.0.0.1:1025'),
     EMAIL_FROM: z.string().min(1).default('TeachHub <no-reply@teachhub.vn>'),
+    /** Client ID OAuth Google (iOS, Android, web), ngăn cách bởi dấu phẩy — `aud` hợp lệ của id_token. Trống = từ chối mọi id_token. */
+    GOOGLE_CLIENT_IDS: z
+      .string()
+      .default('')
+      .transform((v) =>
+        v
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean),
+      ),
+    /** Khóa công khai của Google; test trỏ về JWKS giả. */
+    GOOGLE_JWKS_URL: z
+      .url()
+      .default('https://www.googleapis.com/oauth2/v3/certs'),
     /** Khóa ký access token ES256, PEM PKCS#8 (`\n` được chấp nhận). Bỏ trống chỉ ở local/test: sinh khóa tạm. */
     JWT_PRIVATE_KEY: z.string().optional(),
     JWT_KID: z.string().min(1).default('local'),

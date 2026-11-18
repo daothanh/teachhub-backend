@@ -9,7 +9,6 @@ import {
 import { sql } from 'drizzle-orm';
 import {
   ApiErrors,
-  AppException,
   Ctx,
   Public,
   type RequestContext,
@@ -17,6 +16,7 @@ import {
 } from '@teachhub/core';
 import { TxService } from '@teachhub/db';
 import { Mailer } from '@teachhub/infra';
+import { GoogleIdTokenService } from '../google/google-id-token.service.js';
 import { OTP, OtpService } from '../otp/otp.service.js';
 import { SessionService } from '../session/session.service.js';
 import {
@@ -45,6 +45,7 @@ export class AuthController {
     private readonly mailer: Mailer,
     private readonly tx: TxService,
     private readonly session: SessionService,
+    private readonly google: GoogleIdTokenService,
   ) {}
 
   @Public()
@@ -87,14 +88,7 @@ export class AuthController {
   ): Promise<LoginResponse> {
     const email = body.email.toLowerCase();
     await this.otp.verify(email, body.code);
-    // Email chưa có tài khoản = đăng ký: user chưa có vai trò nào, không tạo tenant (AC1).
-    const userId = await this.tx.run({ userId: null }, async (t) => {
-      const { rows } = await t.execute<{ id: string }>(
-        sql`select app_private.sign_in_identity('email', ${email}, ${email}, ${uuidv7()}, ${uuidv7()}) as id`,
-      );
-      return rows[0]!.id;
-    });
-    return this.session.open(userId);
+    return this.signIn('email', email, email, null);
   }
 
   @Public()
@@ -107,10 +101,11 @@ export class AuthController {
   })
   @ApiOkResponse({ standardSchema: loginResponseSchema })
   @ApiErrors('VALIDATION_FAILED', 'UNAUTHENTICATED')
-  ssoGoogle(
-    @Body({ schema: googleSsoRequestSchema }) _body: GoogleSsoRequest,
-  ): LoginResponse {
-    throw new AppException('NOT_IMPLEMENTED');
+  async ssoGoogle(
+    @Body({ schema: googleSsoRequestSchema }) body: GoogleSsoRequest,
+  ): Promise<LoginResponse> {
+    const g = await this.google.verify(body.id_token);
+    return this.signIn('google', g.subject, g.email, g.name);
   }
 
   @Public()
@@ -146,5 +141,31 @@ export class AuthController {
   @ApiErrors('UNAUTHENTICATED', 'TOKEN_EXPIRED')
   me(@Ctx() ctx: RequestContext): Promise<User> {
     return this.session.user(ctx.userId!);
+  }
+
+  /**
+   * Sau khi danh tính đã xác minh: identity có sẵn → user cũ; email trùng user có sẵn → gắn vào user đó;
+   * chưa có → đăng ký (user chưa vai trò, không tenant — US-0.1 AC1). Rồi mở phiên.
+   */
+  private async signIn(
+    provider: 'email' | 'google',
+    subject: string,
+    email: string,
+    name: string | null,
+  ): Promise<LoginResponse> {
+    const userId = await this.tx.run({ userId: null }, async (t) => {
+      const { rows } = await t.execute<{ id: string }>(
+        sql`select app_private.sign_in_identity(${provider}, ${subject}, ${email}, ${uuidv7()}, ${uuidv7()}) as id`,
+      );
+      return rows[0]!.id;
+    });
+    if (name) {
+      await this.tx.run({ userId }, (t) =>
+        t.execute(
+          sql`update users set display_name = ${name} where id = ${userId} and display_name is null`,
+        ),
+      );
+    }
+    return this.session.open(userId);
   }
 }
