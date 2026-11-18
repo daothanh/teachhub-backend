@@ -1,0 +1,98 @@
+# ADR-TH-BE-001: Quy ước migration và CSDL lớn dần
+
+- Trạng thái: Proposed · 15/11/2026 (chờ TL duyệt trong PR)
+- Liên quan: Technical Spec MVP §2.5, §4.1, §4.4, §4.5 (R1–R6), §9.2; Kế hoạch triển khai §1.2, §6.3; S0-BE-04 (#31)
+
+## Bối cảnh
+
+ERD ở Technical Spec §4 có ~60 bảng. Dựng hết một lần thì bảng chưa có story dùng không có test,
+mỗi lần đổi nghiệp vụ phải sửa migration hàng loạt, và backend (đường găng) mất 2–3 tuần đầu
+mà client chưa có gì để gọi. Ta tạo bảng theo story, nhưng phải giữ ba bất biến từ ngày đầu:
+cách ly tenant bằng RLS, migration chạy lại được trên CSDL trống, và không phá bản đang chạy
+khi triển khai cuốn chiếu.
+
+Hiện trạng đã có: Drizzle ORM + `drizzle-kit`, migration `0000_init` (extension, schema
+`app_private`, quyền mặc định, `app_private.set_updated_at()`), 4 vai trò CSDL, `TxService`
+đặt `app.user_id` bằng `set_config(..., true)`, e2e RLS mẫu.
+
+## Quyết định
+
+### 1. Thiết kế đủ, migrate dần
+
+- ERD §4 là bản thiết kế đích: **giữ đúng tên bảng/cột** khi tạo. Đổi tên so với ERD phải sửa spec trong cùng PR.
+- Migration của một sprint chỉ chứa bảng mà story trong sprint đó dùng. Một PR migration ↔ một story.
+- Thứ dùng chung có từ Sprint 0–1 và không bao giờ "thêm sau": cột chuẩn, vai trò, helper RLS,
+  bảng hạ tầng `idempotency_keys`, `job_runs`, `audit_logs`.
+
+### 2. Công cụ và cách viết
+
+| Việc | Cách làm |
+| --- | --- |
+| Bảng, cột, index, khóa ngoại | Khai báo trong `libs/db/src/schema/<module>.ts`, sinh SQL bằng `pnpm db:generate --name <mo-ta>` |
+| RLS (policy), trigger, hàm `app_private`, partition, CHECK phức tạp | SQL viết tay trong migration rỗng: `pnpm db:generate --custom --name <mo-ta>` |
+| Tên file | `NNNN_<mô-tả-snake-case>.sql` (luôn truyền `--name`, không dùng tên ngẫu nhiên của drizzle-kit) |
+| Chạy | `drizzle-kit migrate` bằng vai trò **`teachhub_owner`** (`MIGRATION_DATABASE_URL`), là job riêng chạy **trước** khi deploy `api`/`worker` (image target `migrate`) |
+| Vai trò CSDL | Không tạo trong migration. Local: `docker/postgres-init/`; staging/production: Ansible, trước migration đầu tiên |
+
+Quyền: bảng do `teachhub_owner` tạo tự cấp DML cho `teachhub_app`/`teachhub_worker` và `select` cho
+`teachhub_readonly` (default privileges trong `0000_init`). `teachhub_app` **không** sở hữu bảng và
+**không** BYPASSRLS — có test e2e chứng minh (`test/rls.e2e-spec.ts`), chạy trong CI.
+
+### 3. Bảng nghiệp vụ mới — checklist bắt buộc trong cùng PR
+
+1. Cột chuẩn: `id uuid primary key` (UUID v7 **sinh ở ứng dụng/app**, không default ở CSDL),
+   `tenant_id uuid not null`, `branch_id uuid not null` nếu dữ liệu thuộc chi nhánh, `created_at`,
+   `updated_at` (trigger `trg_<bảng>_updated_at` gọi `app_private.set_updated_at()`), `created_by`,
+   `deleted_at` khi cần xóa mềm.
+2. `alter table … enable row level security; alter table … force row level security;` và policy
+   `to teachhub_app` cho cả `using` lẫn `with check`. Bảng hạ tầng chỉ api/worker dùng
+   (`idempotency_keys`, `job_runs`, `outbox_events`, `refresh_tokens`) cũng bật RLS, policy theo `app.user_id` hoặc
+   không có policy cho `teachhub_app` nếu chỉ worker đọc.
+3. Index truy vấn chính bắt đầu bằng `tenant_id`.
+4. Kiểu dữ liệu: tiền `bigint` (đồng), thời điểm `timestamptz`, ngày học `date`, điểm `numeric(5,2)`,
+   enum là `text` + `CHECK` (không `CREATE TYPE … ENUM`).
+5. Trigger audit (`audit_logs`, S0-BE-09) gắn vào bảng có dữ liệu nhạy cảm (§6.3: `attendance`,
+   `grades`, `invoices`, `invoice_lines`, `payments`, `payment_claims`).
+6. Test chéo tenant (khung ở S0-BE-06, R5): user tenant A đọc/ghi tenant B → 0 dòng / lỗi.
+7. CI chặn bảng `public` thiếu RLS (S0-BE-06, R1).
+
+### 4. Chỉ expand, không phá (triển khai cuốn chiếu)
+
+`api` bản cũ và bản mới chạy song song trong lúc deploy, và app mobile cũ còn sống nhiều tuần.
+Mỗi migration phải chạy được với **mã của bản phát hành trước**:
+
+| Muốn | Làm |
+| --- | --- |
+| Thêm cột | Cho phép null hoặc có default hằng số |
+| Đổi tên / đổi kiểu cột | Expand → migrate → contract qua **2 bản phát hành**: thêm cột mới, ghi cả hai, backfill; bản sau mới đọc cột mới; bản sau nữa mới xóa cột cũ |
+| Xóa cột/bảng | Chỉ khi không bản nào đang chạy còn đọc; luôn ở bản phát hành sau bản ngừng dùng |
+| `NOT NULL` cho cột đã có dữ liệu | Thêm `CHECK (…) NOT VALID` → `VALIDATE CONSTRAINT` ở migration sau |
+
+Migration đã merge vào `main` **không sửa nữa**; sai thì viết migration mới.
+
+### 5. Hai bẫy của drizzle-kit cần nhớ
+
+- **Thứ tự theo thời điểm sinh:** migrator chỉ chạy migration có `when` (trong `meta/_journal.json`)
+  **lớn hơn** migration mới nhất đã chạy. Hai nhánh cùng sinh migration song song → nhánh merge sau
+  có `when` cũ hơn sẽ **bị bỏ qua im lặng** trên môi trường đã migrate. Quy tắc: trước khi merge PR có
+  migration, rebase lên `main` rồi **xóa và sinh lại** migration của mình (số thứ tự và `when` mới).
+  CI kiểm `idx` liên tục và `when` tăng dần (S0-BE-08).
+- **Một giao dịch cho cả lô:** `migrate` chạy mọi migration đang chờ trong **một** giao dịch. Vì vậy
+  không dùng được `CREATE INDEX CONCURRENTLY`, `ALTER TYPE … ADD VALUE` trong migration. Bảng còn nhỏ
+  (MVP đến Sprint 6) thì tạo index thường; khi một bảng vượt ~1 triệu dòng, index lớn chạy bằng script
+  riêng ngoài drizzle theo runbook (quyết định cơ chế khi có production — trước Sprint 7).
+
+### 6. Bảng phân vùng
+
+`audit_logs` (và sau này `notifications`, `notification_deliveries`) phân vùng theo tháng (`partition by range (created_at)`).
+Migration tạo bảng cha + phân vùng tháng hiện tại và tháng sau; job `worker` tạo trước phân vùng
+các tháng tới và xóa phân vùng quá hạn lưu (§4.8). Không có phân vùng `default` để lỗi lộ ra sớm
+thay vì dồn dữ liệu vào một chỗ.
+
+## Hệ quả
+
+- Mỗi sprint có migration nhỏ, review được; ERD vẫn là đích nên tên bảng ổn định cho client.
+- Người review migration dùng checklist ở PR template (§6.3 kế hoạch) — trùng mục 3–4 ở trên.
+- Đổi tên/xóa cột tốn 2 bản phát hành: chấp nhận đổi lại sự an toàn khi deploy cuốn chiếu.
+- Còn mở: cơ chế index `CONCURRENTLY` (mục 5); kiểm tương thích `nestjs-zod`/`@nestjs/swagger`
+  với NestJS 12 ghi bổ sung ở S0-BE-07.
