@@ -42,6 +42,17 @@ pnpm start:worker
 
 Vai trò CSDL (Mục 2.5): `teachhub_owner` (migration), `teachhub_app` (api, không BYPASSRLS), `teachhub_worker` (worker, BYPASSRLS), `teachhub_readonly`. Local tạo bằng `docker/postgres-init/01-roles.sql`; staging/production tạo bằng Ansible **trước** khi chạy migration.
 
+## Mock API cho client (Prism)
+
+```bash
+pnpm mock                     # http://localhost:4010/v1 — trả ví dụ trong contracts/openapi.json
+```
+
+- Validate request theo schema (sai → 422), endpoint cần token mà thiếu `Authorization` → 401.
+- Chọn phản hồi khác: header `Prefer: code=429` (theo status) hoặc `Prefer: dynamic=true` (sinh dữ liệu ngẫu nhiên theo schema).
+- Đổi cổng: `MOCK_PORT=4011 pnpm mock`. Hợp đồng đổi → `docker compose --profile mock restart mock` (Prism không tự nạp lại qua thư mục mount).
+- App Flutter trỏ vào mock: xem `teachhub-app/app/docs/native-setup.md` mục "Chạy với mock API".
+
 ## Kiểm tra
 
 ```bash

@@ -35,7 +35,13 @@
                   "required": [
                     "minSupportedVersion"
                   ],
-                  "additionalProperties": false
+                  "additionalProperties": false,
+                  "example": {
+                    "minSupportedVersion": {
+                      "android": "0.0.0",
+                      "ios": "0.0.0"
+                    }
+                  }
                 }
               }
             }
