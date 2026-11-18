@@ -6,7 +6,11 @@ import {
   validationPipe,
 } from '@teachhub/core';
 import { DbModule } from '@teachhub/db';
-import { ObjectStorageModule, RedisModule } from '@teachhub/infra';
+import {
+  MailerModule,
+  ObjectStorageModule,
+  RedisModule,
+} from '@teachhub/infra';
 import { AuthModule } from '@teachhub/modules/auth';
 import { IdentityModule } from '@teachhub/modules/identity';
 import { TenancyModule } from '@teachhub/modules/tenancy';
@@ -19,6 +23,7 @@ import { HealthController } from './health/health.controller.js';
     DbModule.register('DATABASE_URL'),
     RedisModule,
     ObjectStorageModule,
+    MailerModule,
     AuthModule,
     IdentityModule,
     TenancyModule,

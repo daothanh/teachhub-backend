@@ -127,8 +127,8 @@ describe('api (e2e)', () => {
 
     const ok = await app.inject({
       method: 'POST',
-      url: '/v1/auth/otp/send',
-      payload: { email: 'co.lan@example.com' },
+      url: '/v1/auth/sso/google',
+      payload: { id_token: 'x' },
     });
     expect(ok.statusCode).toBe(501);
     expect(ok.json().code).toBe('NOT_IMPLEMENTED');
