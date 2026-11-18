@@ -36,7 +36,9 @@ export class DbModule implements OnApplicationShutdown {
         {
           provide: DB,
           inject: [DB_POOL],
-          useFactory: (pool: pg.Pool) => drizzle(pool, { schema }),
+          useFactory: (pool: pg.Pool) =>
+            // Cùng quy ước tên cột với drizzle.config.ts (camelCase trong TS → snake_case trong CSDL).
+            drizzle(pool, { schema, casing: 'snake_case' }),
         },
         TxService,
       ],

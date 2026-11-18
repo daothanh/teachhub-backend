@@ -5,6 +5,7 @@ import pg from 'pg';
 import { TxService } from '@teachhub/db';
 import { startTestDb, type TestDb } from './containers.js';
 import {
+  asPrivileged,
   expectInsertRejected,
   expectRowIsolated,
   makeActors,
@@ -27,25 +28,8 @@ describe('danh tính: users, auth_identities, refresh_tokens, memberships', () =
     ownerB: randomUUID(),
   };
 
-  /** Chạy bằng teachhub_worker với app.user_id = `userId` — thay cho hàm security definer cấp vai trò (S1-BE-08). */
-  const asPrivileged = async (
-    userId: string,
-    query: string,
-    params: unknown[],
-  ) => {
-    const c = await worker.connect();
-    try {
-      await c.query('begin');
-      await c.query(`select set_config('app.user_id', $1, true)`, [userId]);
-      await c.query(query, params);
-      await c.query('commit');
-    } catch (e) {
-      await c.query('rollback');
-      throw e;
-    } finally {
-      c.release();
-    }
-  };
+  const privileged = (userId: string, query: string, params: unknown[]) =>
+    asPrivileged(worker, userId, query, params);
 
   /** User tự tạo hồ sơ của mình (RLS `with check`); vai trò chủ tenant cấp qua đường đặc quyền. */
   const seed = async (userId: string, tenantId: string, ownerId: string) => {
@@ -54,7 +38,12 @@ describe('danh tính: users, auth_identities, refresh_tokens, memberships', () =
         sql`insert into users (id, email) values (${userId}, ${`${userId}@test.vn`})`,
       ),
     );
-    await asPrivileged(
+    await privileged(
+      userId,
+      `insert into tenants (id, type, name) values ($1, 'teacher', 'T')`,
+      [tenantId],
+    );
+    await privileged(
       userId,
       `insert into memberships (id, user_id, role, tenant_id) values ($1, $2, 'tenant_owner', $3)`,
       [ownerId, userId, tenantId],
@@ -71,9 +60,6 @@ describe('danh tính: users, auth_identities, refresh_tokens, memberships', () =
     await seed(B.userId, B.tenantId, ids.ownerB);
     await tx.run({ userId: A.userId }, async (t) => {
       await t.execute(
-        sql`insert into auth_identities (id, user_id, provider, subject) values (${ids.identityA}, ${A.userId}, 'google', 'g-sub-a')`,
-      );
-      await t.execute(
         sql`insert into refresh_tokens (id, user_id, session_id, family_id, token_hash, expires_at)
             values (${ids.tokenA}, ${A.userId}, ${randomUUID()}, ${randomUUID()}, 'hash-a', now() + interval '30 days')`,
       );
@@ -81,7 +67,13 @@ describe('danh tính: users, auth_identities, refresh_tokens, memberships', () =
         sql`insert into memberships (id, user_id, role) values (${ids.parentA}, ${A.userId}, 'parent')`,
       );
     });
-    await asPrivileged(
+    // Identity chỉ tạo qua app_private.sign_in_identity (migration 0007).
+    await privileged(
+      A.userId,
+      `insert into auth_identities (id, user_id, provider, subject) values ($1, $2, 'google', 'g-sub-a')`,
+      [ids.identityA, A.userId],
+    );
+    await privileged(
       A.userId,
       `insert into memberships (id, user_id, role, tenant_id, status) values ($1, $2, 'teacher', $3, 'revoked')`,
       [ids.revokedA, A.userId, B.tenantId],
@@ -143,6 +135,34 @@ describe('danh tính: users, auth_identities, refresh_tokens, memberships', () =
     expect(changed).toBe(0);
   });
 
+  it('app không tự gắn identity (kể cả cho chính mình): chỉ qua sign_in_identity', async () => {
+    await expectInsertRejected(
+      tx,
+      A.userId,
+      sql`insert into auth_identities (id, user_id, provider, subject) values (${randomUUID()}, ${A.userId}, 'google', 'g-sub-victim')`,
+    );
+  });
+
+  it('sign_in_identity: identity có sẵn → user cũ; email đã có → gắn vào user đó; mới → tạo user', async () => {
+    const call = (provider: string, subject: string, email: string) =>
+      tx.run(
+        { userId: null },
+        async (t) =>
+          (
+            await t.execute<{ id: string }>(
+              sql`select app_private.sign_in_identity(${provider}, ${subject}, ${email}, ${randomUUID()}, ${randomUUID()}) as id`,
+            )
+          ).rows[0]!.id,
+      );
+    expect(await call('google', 'g-sub-a', 'khac@test.vn')).toBe(A.userId);
+    expect(
+      await call('email', `${A.userId}@test.vn`, `${A.userId}@test.vn`),
+    ).toBe(A.userId);
+    const fresh = await call('email', 'moi@test.vn', 'moi@test.vn');
+    expect([A.userId, B.userId]).not.toContain(fresh);
+    expect(await call('email', 'moi@test.vn', 'moi@test.vn')).toBe(fresh);
+  });
+
   it('A không tạo dữ liệu đứng tên B', async () => {
     await expectInsertRejected(
       tx,
@@ -179,7 +199,7 @@ describe('danh tính: users, auth_identities, refresh_tokens, memberships', () =
 
   it('CHECK phạm vi vai trò: nhân sự phải có tenant, phụ huynh thì không', async () => {
     const insert = (role: string, tenantId: string | null) =>
-      asPrivileged(
+      privileged(
         A.userId,
         `insert into memberships (id, user_id, role, tenant_id) values ($1, $2, $3, $4)`,
         [randomUUID(), A.userId, role, tenantId],
@@ -211,7 +231,7 @@ describe('danh tính: users, auth_identities, refresh_tokens, memberships', () =
         ids.ownerA,
       ])
     ).rows[0]?.updated_at as Date;
-    await asPrivileged(
+    await privileged(
       A.userId,
       `update memberships set status = 'revoked' where id = $1`,
       [ids.ownerA],
