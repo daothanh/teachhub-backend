@@ -1,5 +1,5 @@
 {
-  "id": "8a0534cf-a1e8-418a-9718-36397024d900",
+  "id": "b2e4ef48-59f9-4a5d-bb83-4883fb95539e",
   "prevId": "e0ca4920-7052-4a55-9cc9-fe12c24c22d3",
   "version": "7",
   "dialect": "postgresql",
@@ -264,14 +264,16 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "memberships_branch_id_branches_id_fk": {
-          "name": "memberships_branch_id_branches_id_fk",
+        "memberships_tenant_branch_fk": {
+          "name": "memberships_tenant_branch_fk",
           "tableFrom": "memberships",
           "tableTo": "branches",
           "columnsFrom": [
+            "tenant_id",
             "branch_id"
           ],
           "columnsTo": [
+            "tenant_id",
             "id"
           ],
           "onDelete": "no action",
@@ -809,7 +811,16 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "branches_tenant_id_id_uq": {
+          "name": "branches_tenant_id_id_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "id"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false

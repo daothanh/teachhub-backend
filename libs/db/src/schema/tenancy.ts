@@ -2,6 +2,7 @@ import {
   boolean,
   check,
   index,
+  unique,
   jsonb,
   pgTable,
   text,
@@ -58,6 +59,8 @@ export const branches = pgTable(
       .on(t.tenantId)
       .where(sql`${t.isDefault}`),
     index('branches_tenant_id_idx').on(t.tenantId),
+    // Đích của FK (tenant_id, branch_id): bảng con không trỏ được chi nhánh của tenant khác.
+    unique('branches_tenant_id_id_uq').on(t.tenantId, t.id),
   ],
 );
 

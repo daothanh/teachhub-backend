@@ -6,7 +6,8 @@ CREATE TABLE "branches" (
 	"is_default" boolean DEFAULT false NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"deleted_at" timestamp with time zone
+	"deleted_at" timestamp with time zone,
+	CONSTRAINT "branches_tenant_id_id_uq" UNIQUE("tenant_id","id")
 );
 --> statement-breakpoint
 CREATE TABLE "plans" (
@@ -52,4 +53,4 @@ ALTER TABLE "subscriptions" ADD CONSTRAINT "subscriptions_plan_code_plans_code_f
 CREATE UNIQUE INDEX "branches_tenant_default_uq" ON "branches" USING btree ("tenant_id") WHERE "branches"."is_default";--> statement-breakpoint
 CREATE INDEX "branches_tenant_id_idx" ON "branches" USING btree ("tenant_id");--> statement-breakpoint
 ALTER TABLE "memberships" ADD CONSTRAINT "memberships_tenant_id_tenants_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "memberships" ADD CONSTRAINT "memberships_branch_id_branches_id_fk" FOREIGN KEY ("branch_id") REFERENCES "public"."branches"("id") ON DELETE no action ON UPDATE no action;
+ALTER TABLE "memberships" ADD CONSTRAINT "memberships_tenant_branch_fk" FOREIGN KEY ("tenant_id","branch_id") REFERENCES "public"."branches"("tenant_id","id") ON DELETE no action ON UPDATE no action;

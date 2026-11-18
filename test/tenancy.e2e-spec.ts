@@ -127,6 +127,19 @@ describe('tenancy: tenants, branches, plans, subscriptions', () => {
     );
   });
 
+  it('vai trò của tenant A không gắn được chi nhánh của tenant B', async () => {
+    const err = await asPrivileged(
+      worker,
+      A.userId,
+      `insert into memberships (id, user_id, role, tenant_id, branch_id) values ($1, $2, 'teacher', $3, $4)`,
+      [randomUUID(), A.userId, A.tenantId, rows.B.branch],
+    ).then(
+      () => '',
+      (e: Error) => e.message,
+    );
+    expect(err).toMatch(/memberships_tenant_branch_fk/);
+  });
+
   it('mỗi tenant chỉ một chi nhánh mặc định', async () => {
     const err = await asPrivileged(
       worker,

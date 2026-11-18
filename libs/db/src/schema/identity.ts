@@ -1,6 +1,7 @@
 import {
   type AnyPgColumn,
   check,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -96,7 +97,7 @@ export const memberships = pgTable(
     role: text().notNull(),
     tenantId: uuid().references(() => tenants.id),
     /** null = toàn tenant. */
-    branchId: uuid().references(() => branches.id),
+    branchId: uuid(),
     // FK tới students thêm khi có bảng (Sprint 2).
     studentId: uuid(),
     status: text().notNull().default('active'),
@@ -112,6 +113,11 @@ export const memberships = pgTable(
     ),
     index('memberships_user_id_status_idx').on(t.userId, t.status),
     index('memberships_tenant_id_idx').on(t.tenantId),
+    foreignKey({
+      name: 'memberships_tenant_branch_fk',
+      columns: [t.tenantId, t.branchId],
+      foreignColumns: [branches.tenantId, branches.id],
+    }),
     check(
       'memberships_role_check',
       sql`${t.role} in ('tenant_owner', 'teacher', 'accountant', 'branch_manager', 'parent', 'student')`,
