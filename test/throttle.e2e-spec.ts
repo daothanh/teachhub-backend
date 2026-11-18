@@ -68,6 +68,22 @@ describe('giới hạn tần suất theo IP (@nestjs/throttler + Redis)', () => 
     redis.disconnect();
   });
 
+  it('client tự chèn X-Forwarded-For không né được giới hạn (chỉ tin 1 proxy)', async () => {
+    const spoofed = (i: number) =>
+      app.inject({
+        method: 'POST',
+        url: '/v1/auth/refresh',
+        payload: { refresh_token: 'x' },
+        // Proxy (10.0.0.9) ghi IP thật 203.0.113.7 vào cuối; client chèn IP giả ở đầu, mỗi lần một khác.
+        remoteAddress: '10.0.0.9',
+        headers: { 'x-forwarded-for': `198.51.100.${i % 250}, 203.0.113.7` },
+      });
+    for (let i = 0; i < 60; i++) {
+      expect((await spoofed(i)).statusCode).toBe(401);
+    }
+    expect((await spoofed(60)).statusCode).toBe(429);
+  });
+
   it('otp/send chặt hơn mặc định: 10 request/phút/IP', async () => {
     const send = (i: number) =>
       app.inject({
