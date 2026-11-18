@@ -58,7 +58,10 @@ export class OtpService {
     return code;
   }
 
-  /** Đúng → mã bị hủy (dùng một lần). Sai/hết hạn → OTP_INVALID; sai lần thứ 5 → khóa, OTP_LOCKED. */
+  /**
+   * Đúng → mã bị hủy (dùng một lần). Sai/hết hạn → OTP_INVALID; lần thứ 5 sai → khóa 15 phút, OTP_LOCKED.
+   * Đếm lượt TRƯỚC khi so (INCR nguyên tử): request đoán mã gửi song song cũng chỉ được so tối đa 5 lần.
+   */
   async verify(email: string, code: string): Promise<void> {
     const lock = this.key('lock', email);
     const locked = await this.redis.ttl(lock);
@@ -67,24 +70,31 @@ export class OtpService {
     }
     const codeKey = this.key('code', email);
     const stored = await this.redis.get(codeKey);
-    const given = Buffer.from(this.hash(email, code));
+    // Không có mã thì không có gì để dò: không đếm, để người lạ không khóa được email của người khác.
+    if (!stored) throw new AppException('OTP_INVALID');
+
+    const attemptKey = this.key('fail', email);
+    const attempt = await this.redis.incr(attemptKey);
+    await this.redis.expire(attemptKey, OTP.lockSec, 'NX');
+    const lockNow = async () => {
+      await this.redis.set(lock, '1', 'EX', OTP.lockSec);
+      await this.redis.del(codeKey, attemptKey);
+      throw new AppException('OTP_LOCKED', { retryAfterSec: OTP.lockSec });
+    };
+    if (attempt > OTP.maxFails) return lockNow();
+
     if (
-      stored &&
-      timingSafeEqual(Buffer.from(stored), given) &&
+      timingSafeEqual(
+        Buffer.from(stored),
+        Buffer.from(this.hash(email, code)),
+      ) &&
       // Hai request đúng mã đồng thời: chỉ request xóa được mã mới thắng.
       (await this.redis.del(codeKey)) === 1
     ) {
-      await this.redis.del(this.key('fail', email));
+      await this.redis.del(attemptKey);
       return;
     }
-    const failKey = this.key('fail', email);
-    const fails = await this.redis.incr(failKey);
-    await this.redis.expire(failKey, OTP.lockSec, 'NX');
-    if (fails >= OTP.maxFails) {
-      await this.redis.set(lock, '1', 'EX', OTP.lockSec);
-      await this.redis.del(codeKey, failKey);
-      throw new AppException('OTP_LOCKED', { retryAfterSec: OTP.lockSec });
-    }
+    if (attempt >= OTP.maxFails) return lockNow();
     throw new AppException('OTP_INVALID');
   }
 }

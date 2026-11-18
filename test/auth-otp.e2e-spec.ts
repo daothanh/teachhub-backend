@@ -193,6 +193,29 @@ describe('email OTP: /v1/auth/otp/send, /v1/auth/login', () => {
     expect(during.json().details.retryAfterSec).toBeLessThanOrEqual(900);
   });
 
+  it('đoán mã song song không vượt được giới hạn 5 lần', async () => {
+    const email = 'song.song@example.com';
+    await send(email);
+    const code = await lastCode(email);
+    const res = await Promise.all(
+      Array.from({ length: 30 }, () => login(email, wrong(code))),
+    );
+    const codes = res.map((r) => r.json().code);
+    // Chỉ lượt 1–4 được báo sai mã; lượt 5 trở đi khóa.
+    expect(codes.filter((c) => c === 'OTP_INVALID').length).toBe(4);
+    expect(codes.filter((c) => c === 'OTP_LOCKED').length).toBe(26);
+    expect((await login(email, code)).json().code).toBe('OTP_LOCKED');
+  });
+
+  it('không có mã thì nhập sai không đếm: người lạ không khóa được email người khác', async () => {
+    const email = 'nan.nhan@example.com';
+    for (let i = 0; i < 10; i++) {
+      expect((await login(email, '000000')).json().code).toBe('OTP_INVALID');
+    }
+    await send(email);
+    expect((await login(email, await lastCode(email))).statusCode).toBe(200);
+  });
+
   it('AC3: mã hết hạn → OTP_INVALID', async () => {
     const email = 'het.han@example.com';
     await send(email);
