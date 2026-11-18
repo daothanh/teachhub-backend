@@ -37,6 +37,13 @@ export const membershipsResponseSchema = z
           tenantId: null,
           studentId: null,
         },
+        {
+          id: '019a8f3e-ac32-7a77-8e3f-4d5e6f7a8b92',
+          role: 'student',
+          label: 'Học sinh',
+          tenantId: null,
+          studentId: null,
+        },
       ],
       lastMembershipId: '019a8f3e-8a10-7e55-8c1d-2b3c4d5e6f70',
     },
@@ -59,6 +66,6 @@ export const membershipCreatedSchema = z
   .object({ membershipId: z.uuid() })
   .meta({
     id: 'MembershipCreated',
-    example: { membershipId: '019a8f3e-9b21-7f66-9d2e-3c4d5e6f7a81' },
+    example: { membershipId: '019a8f3e-ac32-7a77-8e3f-4d5e6f7a8b92' },
   });
 export type MembershipCreated = z.infer<typeof membershipCreatedSchema>;
