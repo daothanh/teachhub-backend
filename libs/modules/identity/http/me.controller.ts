@@ -28,6 +28,7 @@ import {
 } from '@teachhub/core';
 import { memberships, tenants, TxService, users } from '@teachhub/db';
 import { Idempotency } from '@teachhub/infra';
+import { MembershipCache } from '../membership-cache.service.js';
 import {
   type ActiveMembershipRequest,
   activeMembershipRequestSchema,
@@ -59,6 +60,7 @@ export class MeController {
   constructor(
     private readonly tx: TxService,
     private readonly idem: Idempotency,
+    private readonly cache: MembershipCache,
   ) {}
 
   @Get('memberships')
@@ -156,7 +158,7 @@ export class MeController {
     @Body({ schema: addRoleRequestSchema }) body: AddRoleRequest,
   ): Promise<MembershipCreated> {
     const userId = ctx.userId!;
-    return this.idem.run(req, reply, ctx, async (t) => {
+    const result = await this.idem.run(req, reply, ctx, async (t) => {
       const [created] = await t
         .insert(memberships)
         .values({ id: uuidv7(), userId, role: body.role })
@@ -184,5 +186,8 @@ export class MeController {
       if (existing?.status !== 'active') throw new AppException('FORBIDDEN');
       return { status: 200, body: { membershipId: existing.id } };
     });
+    // Vai trò mới phải có hiệu lực ngay với token đang dùng (S1-BE-07b).
+    await this.cache.invalidate(ctx);
+    return result;
   }
 }

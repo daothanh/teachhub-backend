@@ -17,6 +17,7 @@ import {
   uuidv7,
 } from '@teachhub/core';
 import { Idempotency } from '@teachhub/infra';
+import { MembershipCache } from '@teachhub/modules/identity';
 
 export const createWorkspaceRequestSchema = z.object({});
 export type CreateWorkspaceRequest = z.infer<
@@ -38,7 +39,10 @@ export type WorkspaceCreated = z.infer<typeof workspaceCreatedSchema>;
 @ApiBearerAuth('bearer')
 @Controller('workspaces')
 export class WorkspacesController {
-  constructor(private readonly idem: Idempotency) {}
+  constructor(
+    private readonly idem: Idempotency,
+    private readonly cache: MembershipCache,
+  ) {}
 
   @Post()
   @ApiOperation({
@@ -54,14 +58,14 @@ export class WorkspacesController {
   })
   @ApiIdempotencyKey()
   @ApiErrors('VALIDATION_FAILED', 'UNAUTHENTICATED', 'TOKEN_EXPIRED')
-  create(
+  async create(
     @Ctx() ctx: RequestContext,
     @Req() req: FastifyRequest,
     @Res({ passthrough: true }) reply: FastifyReply,
     @Body({ schema: createWorkspaceRequestSchema })
     _body: CreateWorkspaceRequest,
   ): Promise<WorkspaceCreated> {
-    return this.idem.run(req, reply, ctx, async (t) => {
+    const result = await this.idem.run(req, reply, ctx, async (t) => {
       const { rows } = await t.execute<{
         tenant_id: string;
         membership_id: string;
@@ -75,5 +79,8 @@ export class WorkspacesController {
         body: { tenantId: r.tenant_id, membershipId: r.membership_id },
       };
     });
+    // Vai trò Giáo viên có hiệu lực ngay với token đang dùng (S1-BE-07b).
+    await this.cache.invalidate(ctx);
+    return result;
   }
 }
