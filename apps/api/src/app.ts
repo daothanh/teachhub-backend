@@ -35,6 +35,7 @@ export async function createApp(): Promise<NestFastifyApplication> {
     exclude: [
       { path: 'health/live', method: RequestMethod.GET },
       { path: 'health/ready', method: RequestMethod.GET },
+      { path: '.well-known/jwks.json', method: RequestMethod.GET },
     ],
   });
   await app.register(helmet);

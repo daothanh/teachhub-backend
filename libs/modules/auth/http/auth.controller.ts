@@ -6,7 +6,7 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
-import { ApiErrors, AppException } from '@teachhub/core';
+import { ApiErrors, AppException, Public } from '@teachhub/core';
 import {
   type GoogleSsoRequest,
   googleSsoRequestSchema,
@@ -28,6 +28,7 @@ import {
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
+  @Public()
   @Post('otp/send')
   @HttpCode(204)
   @ApiOperation({
@@ -43,6 +44,7 @@ export class AuthController {
     throw new AppException('NOT_IMPLEMENTED');
   }
 
+  @Public()
   @Post('login')
   @HttpCode(200)
   @ApiOperation({
@@ -59,6 +61,7 @@ export class AuthController {
     throw new AppException('NOT_IMPLEMENTED');
   }
 
+  @Public()
   @Post('sso/google')
   @HttpCode(200)
   @ApiOperation({
@@ -74,6 +77,7 @@ export class AuthController {
     throw new AppException('NOT_IMPLEMENTED');
   }
 
+  @Public()
   @Post('refresh')
   @HttpCode(200)
   @ApiOperation({
