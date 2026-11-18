@@ -1,4 +1,4 @@
-import { createHash, randomInt, timingSafeEqual } from 'node:crypto';
+import { createHash, randomInt } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import type { Redis } from 'ioredis';
 import { AppException } from '@teachhub/core';
@@ -14,6 +14,9 @@ export const OTP = {
 } as const;
 
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
+
+/** So và tiêu mã trong một bước: mã đổi giữa chừng (gửi mã mới) không bị request cũ tiêu nhầm. */
+const CONSUME_IF_MATCH = `if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end return 0`;
 
 /** Mã OTP email trong Redis: chỉ lưu băm, khóa theo băm email (không để email thô trong Redis). */
 @Injectable()
@@ -39,6 +42,9 @@ export class OtpService {
 
   /** Sinh và lưu mã mới (thay mã cũ); trả mã để gửi email. */
   async issue(email: string): Promise<string> {
+    // Đang khóa thì không cấp mã mới: mã mới không mở khóa, chỉ thêm đường cho request đoán mã đang chạy dở.
+    const lock = this.key('lock', email);
+    if ((await this.redis.ttl(lock)) > 0) return this.rateLimited(lock);
     const cooldown = this.key('cooldown', email);
     if (!(await this.redis.set(cooldown, '1', 'EX', OTP.cooldownSec, 'NX'))) {
       return this.rateLimited(cooldown);
@@ -64,33 +70,38 @@ export class OtpService {
    */
   async verify(email: string, code: string): Promise<void> {
     const lock = this.key('lock', email);
-    const locked = await this.redis.ttl(lock);
-    if (locked > 0) {
-      throw new AppException('OTP_LOCKED', { retryAfterSec: locked });
-    }
+    const ensureUnlocked = async () => {
+      const locked = await this.redis.ttl(lock);
+      if (locked > 0) {
+        throw new AppException('OTP_LOCKED', { retryAfterSec: locked });
+      }
+    };
+    await ensureUnlocked();
     const codeKey = this.key('code', email);
-    const stored = await this.redis.get(codeKey);
     // Không có mã thì không có gì để dò: không đếm, để người lạ không khóa được email của người khác.
-    if (!stored) throw new AppException('OTP_INVALID');
+    if (!(await this.redis.exists(codeKey))) {
+      throw new AppException('OTP_INVALID');
+    }
 
     const attemptKey = this.key('fail', email);
     const attempt = await this.redis.incr(attemptKey);
     await this.redis.expire(attemptKey, OTP.lockSec, 'NX');
+    // Bộ đếm hết hạn cùng khóa (không xóa khi khóa): request đang chạy dở không được đếm lại từ đầu.
     const lockNow = async () => {
       await this.redis.set(lock, '1', 'EX', OTP.lockSec);
-      await this.redis.del(codeKey, attemptKey);
+      await this.redis.del(codeKey);
       throw new AppException('OTP_LOCKED', { retryAfterSec: OTP.lockSec });
     };
     if (attempt > OTP.maxFails) return lockNow();
+    await ensureUnlocked();
 
-    if (
-      timingSafeEqual(
-        Buffer.from(stored),
-        Buffer.from(this.hash(email, code)),
-      ) &&
-      // Hai request đúng mã đồng thời: chỉ request xóa được mã mới thắng.
-      (await this.redis.del(codeKey)) === 1
-    ) {
+    const consumed = await this.redis.eval(
+      CONSUME_IF_MATCH,
+      1,
+      codeKey,
+      this.hash(email, code),
+    );
+    if (consumed === 1) {
       await this.redis.del(attemptKey);
       return;
     }

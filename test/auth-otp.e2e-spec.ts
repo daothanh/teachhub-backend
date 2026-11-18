@@ -191,6 +191,12 @@ describe('email OTP: /v1/auth/otp/send, /v1/auth/login', () => {
     const during = await login(email, code);
     expect(during.json().code).toBe('OTP_LOCKED');
     expect(during.json().details.retryAfterSec).toBeLessThanOrEqual(900);
+
+    // Đang khóa thì không cấp mã mới.
+    await redis.del(keyOf('cooldown', email));
+    const resend = await send(email);
+    expect(resend.statusCode).toBe(429);
+    expect(resend.json().details.retryAfterSec).toBeGreaterThan(800);
   });
 
   it('đoán mã song song không vượt được giới hạn 5 lần', async () => {
