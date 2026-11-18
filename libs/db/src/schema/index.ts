@@ -1,2 +1,2 @@
-// Schema Drizzle theo module (users, memberships, tenants… từ Sprint 1) export tại đây.
-export {};
+// Schema Drizzle theo module export tại đây (ADR-TH-BE-001 §2).
+export * from './infra.js';

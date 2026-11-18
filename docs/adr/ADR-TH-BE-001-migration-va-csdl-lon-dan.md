@@ -84,10 +84,12 @@ Migration đã merge vào `main` **không sửa nữa**; sai thì viết migrati
 
 ### 6. Bảng phân vùng
 
-`audit_logs` (và sau này `notifications`, `notification_deliveries`) phân vùng theo tháng (`partition by range (created_at)`).
-Migration tạo bảng cha + phân vùng tháng hiện tại và tháng sau; job `worker` tạo trước phân vùng
-các tháng tới và xóa phân vùng quá hạn lưu (§4.8). Không có phân vùng `default` để lỗi lộ ra sớm
-thay vì dồn dữ liệu vào một chỗ.
+`audit_logs` (và sau này `notifications`, `notification_deliveries`) phân vùng theo tháng (`partition by range (created_at)`),
+không có phân vùng `default` để lỗi lộ ra sớm thay vì dồn dữ liệu vào một chỗ. Phân vùng **tự tạo khi cần**:
+`app_private.audit_insert` gọi `app_private.ensure_audit_partition(now())` trước khi ghi (một lần tra
+`to_regclass` mỗi dòng), migration tạo sẵn tháng hiện tại và tháng sau. Không phụ thuộc job của worker
+để tránh mất audit khi worker chưa chạy; job của worker chỉ **xóa** phân vùng quá hạn lưu (§4.8, khi có).
+Mỗi phân vùng bật + ép RLS, không policy: không ai đọc thẳng phân vùng để né policy của bảng cha.
 
 ## Hệ quả
 
