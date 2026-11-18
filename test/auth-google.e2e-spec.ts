@@ -132,6 +132,49 @@ describe('SSO Google: /v1/auth/sso/google', () => {
     expect(rows.map((r) => r.provider)).toEqual(['email', 'google']);
   });
 
+  it('email không phải Gmail/Workspace trùng user có sẵn → không gộp, yêu cầu OTP', async () => {
+    const email = 'chu.so@yahoo.com';
+    await app
+      .get(TxService)
+      .run({ userId: null }, (t) =>
+        t.execute(
+          sql`select app_private.sign_in_identity('email', ${email}, ${email}, ${randomUUID()}, ${randomUUID()})`,
+        ),
+      );
+    const res = await sso(await idToken({ sub: 'g-sub-yahoo', email }));
+    expect(res.statusCode).toBe(401);
+    expect(res.json().details).toEqual({ reason: 'EMAIL_REQUIRES_OTP' });
+    const { rows } = await worker.query(
+      `select count(*)::int n from auth_identities where subject = 'g-sub-yahoo'`,
+    );
+    expect(rows[0].n).toBe(0);
+  });
+
+  it('Workspace (hd khớp tên miền) được gộp; email ngoài Gmail chưa có tài khoản → tạo mới', async () => {
+    const email = 'gv@truong.edu.vn';
+    const otpUser = await app
+      .get(TxService)
+      .run(
+        { userId: null },
+        async (t) =>
+          (
+            await t.execute<{ id: string }>(
+              sql`select app_private.sign_in_identity('email', ${email}, ${email}, ${randomUUID()}, ${randomUUID()}) as id`,
+            )
+          ).rows[0]!.id,
+      );
+    const ws = await sso(
+      await idToken({ sub: 'g-sub-ws', email, hd: 'truong.edu.vn' }),
+    );
+    expect(ws.json().user.id).toBe(otpUser);
+
+    const fresh = await sso(
+      await idToken({ sub: 'g-sub-new', email: 'moi@outlook.com' }),
+    );
+    expect(fresh.statusCode).toBe(200);
+    expect(fresh.json().user.email).toBe('moi@outlook.com');
+  });
+
   it('iss dạng không https vẫn nhận', async () => {
     const res = await sso(
       await idToken({ sub: 'g-sub-2' }, { iss: 'accounts.google.com' }),

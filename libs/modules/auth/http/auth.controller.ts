@@ -9,6 +9,7 @@ import {
 import { sql } from 'drizzle-orm';
 import {
   ApiErrors,
+  AppException,
   Ctx,
   Public,
   type RequestContext,
@@ -88,7 +89,7 @@ export class AuthController {
   ): Promise<LoginResponse> {
     const email = body.email.toLowerCase();
     await this.otp.verify(email, body.code);
-    return this.signIn('email', email, email, null);
+    return this.signIn('email', email, email, null, true);
   }
 
   @Public()
@@ -105,7 +106,13 @@ export class AuthController {
     @Body({ schema: googleSsoRequestSchema }) body: GoogleSsoRequest,
   ): Promise<LoginResponse> {
     const g = await this.google.verify(body.id_token);
-    return this.signIn('google', g.subject, g.email, g.name);
+    return this.signIn(
+      'google',
+      g.subject,
+      g.email,
+      g.name,
+      g.emailAuthoritative,
+    );
   }
 
   @Public()
@@ -152,13 +159,21 @@ export class AuthController {
     subject: string,
     email: string,
     name: string | null,
+    /** Nhà cung cấp có thẩm quyền với email → gộp vào user cùng email; không thì chỉ tạo mới. */
+    linkByEmail: boolean,
   ): Promise<LoginResponse> {
     const userId = await this.tx.run({ userId: null }, async (t) => {
-      const { rows } = await t.execute<{ id: string }>(
-        sql`select app_private.sign_in_identity(${provider}, ${subject}, ${email}, ${uuidv7()}, ${uuidv7()}) as id`,
+      const { rows } = await t.execute<{ id: string | null }>(
+        sql`select app_private.sign_in_identity(${provider}, ${subject}, ${email}, ${uuidv7()}, ${uuidv7()}, ${linkByEmail}) as id`,
       );
-      return rows[0]!.id;
+      return rows[0]?.id;
     });
+    // Email đã có tài khoản mà nhà cung cấp không có thẩm quyền với nó: phải đăng nhập bằng OTP trước.
+    if (!userId) {
+      throw new AppException('UNAUTHENTICATED', {
+        reason: 'EMAIL_REQUIRES_OTP',
+      });
+    }
     if (name) {
       await this.tx.run({ userId }, (t) =>
         t.execute(

@@ -7,7 +7,11 @@ export interface GoogleIdentity {
   subject: string;
   email: string;
   name: string | null;
+  /** Google có thẩm quyền với email này (Gmail hoặc tên miền Workspace) → được gộp vào user cùng email. */
+  emailAuthoritative: boolean;
 }
+
+const GMAIL = ['gmail.com', 'googlemail.com'];
 
 // Hai dạng `iss` Google dùng cho id_token.
 const ISSUERS = ['https://accounts.google.com', 'accounts.google.com'];
@@ -43,10 +47,15 @@ export class GoogleIdTokenService {
       if (!email || !verified) {
         throw new AppException('UNAUTHENTICATED');
       }
+      const domain = email.split('@').pop()!;
       return {
         subject: payload.sub!,
         email,
         name: typeof payload.name === 'string' ? payload.name : null,
+        emailAuthoritative:
+          GMAIL.includes(domain) ||
+          (typeof payload.hd === 'string' &&
+            payload.hd.toLowerCase() === domain),
       };
     } catch (e) {
       if (e instanceof AppException) throw e;
