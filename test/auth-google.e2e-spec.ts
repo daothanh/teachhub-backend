@@ -150,7 +150,7 @@ describe('SSO Google: /v1/auth/sso/google', () => {
     expect(rows[0].n).toBe(0);
   });
 
-  it('Workspace (hd khớp tên miền) được gộp; email ngoài Gmail chưa có tài khoản → tạo mới', async () => {
+  it('Workspace (hd khớp tên miền) được gộp; email ngoài Gmail/Workspace không tạo tài khoản qua Google', async () => {
     const email = 'gv@truong.edu.vn';
     const otpUser = await app
       .get(TxService)
@@ -168,11 +168,16 @@ describe('SSO Google: /v1/auth/sso/google', () => {
     );
     expect(ws.json().user.id).toBe(otpUser);
 
+    // Chiếm trước: nếu tạo được, chủ thật đăng nhập OTP sau sẽ bị gộp vào tài khoản này.
     const fresh = await sso(
       await idToken({ sub: 'g-sub-new', email: 'moi@outlook.com' }),
     );
-    expect(fresh.statusCode).toBe(200);
-    expect(fresh.json().user.email).toBe('moi@outlook.com');
+    expect(fresh.statusCode).toBe(401);
+    expect(fresh.json().details).toEqual({ reason: 'EMAIL_REQUIRES_OTP' });
+    const { rows } = await worker.query(
+      `select count(*)::int n from users where email = 'moi@outlook.com'`,
+    );
+    expect(rows[0].n).toBe(0);
   });
 
   it('iss dạng không https vẫn nhận', async () => {

@@ -1,6 +1,7 @@
 -- SSO (S1-BE-06): chỉ gộp vào user có sẵn theo email khi nhà cung cấp có thẩm quyền với email đó
 -- (Google: @gmail.com, @googlemail.com, hoặc tên miền Workspace `hd`). Email OTP luôn có thẩm quyền
--- (đã chứng minh giữ hộp thư). Không có thẩm quyền mà email đã thuộc user khác → trả null, API từ chối.
+-- (đã chứng minh giữ hộp thư). Không có thẩm quyền → chỉ đăng nhập được identity đã có; không gộp, cũng
+-- không tạo user mới với email đó (tránh chiếm trước: chủ thật đăng nhập OTP sau sẽ bị gộp vào) → trả null.
 
 drop function app_private.sign_in_identity(text, text, text, uuid, uuid);
 --> statement-breakpoint
@@ -18,13 +19,14 @@ begin
     return uid;
   end if;
 
+  if not p_link_by_email then
+    return null;
+  end if;
+
   -- Hai lần đăng nhập đầu tiên đồng thời: on conflict + đọc lại thay vì lỗi unique.
   insert into public.users (id, email) values (p_new_user_id, p_email)
     on conflict (email) do nothing;
   select u.id into uid from public.users u where u.email = p_email;
-  if uid <> p_new_user_id and not p_link_by_email then
-    return null;
-  end if;
 
   insert into public.auth_identities (id, user_id, provider, subject)
     values (p_new_identity_id, uid, p_provider, p_subject)

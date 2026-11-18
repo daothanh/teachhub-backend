@@ -159,7 +159,7 @@ export class AuthController {
     subject: string,
     email: string,
     name: string | null,
-    /** Nhà cung cấp có thẩm quyền với email → gộp vào user cùng email; không thì chỉ tạo mới. */
+    /** Nhà cung cấp có thẩm quyền với email → được gộp/tạo user theo email; không thì chỉ identity đã có. */
     linkByEmail: boolean,
   ): Promise<LoginResponse> {
     const userId = await this.tx.run({ userId: null }, async (t) => {
@@ -168,7 +168,7 @@ export class AuthController {
       );
       return rows[0]?.id;
     });
-    // Email đã có tài khoản mà nhà cung cấp không có thẩm quyền với nó: phải đăng nhập bằng OTP trước.
+    // Nhà cung cấp không có thẩm quyền với email (Google với email ngoài Gmail/Workspace): dùng OTP.
     if (!userId) {
       throw new AppException('UNAUTHENTICATED', {
         reason: 'EMAIL_REQUIRES_OTP',
