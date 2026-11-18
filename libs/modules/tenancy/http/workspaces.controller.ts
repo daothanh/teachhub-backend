@@ -1,4 +1,4 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import { Body, Controller, Post, Req, Res } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiCreatedResponse,
@@ -6,8 +6,17 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
+import { sql } from 'drizzle-orm';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { ApiErrors, ApiIdempotencyKey, AppException } from '@teachhub/core';
+import {
+  ApiErrors,
+  ApiIdempotencyKey,
+  Ctx,
+  type RequestContext,
+  uuidv7,
+} from '@teachhub/core';
+import { Idempotency } from '@teachhub/infra';
 
 export const createWorkspaceRequestSchema = z.object({});
 export type CreateWorkspaceRequest = z.infer<
@@ -25,11 +34,12 @@ export const workspaceCreatedSchema = z
   });
 export type WorkspaceCreated = z.infer<typeof workspaceCreatedSchema>;
 
-// Hợp đồng Sprint 1 (S0-CT-01); thân hàm ở S1-BE-08.
 @ApiTags('workspaces')
 @ApiBearerAuth('bearer')
 @Controller('workspaces')
 export class WorkspacesController {
+  constructor(private readonly idem: Idempotency) {}
+
   @Post()
   @ApiOperation({
     summary: 'Tạo không gian Giáo viên (US-0.10 AC2)',
@@ -45,9 +55,25 @@ export class WorkspacesController {
   @ApiIdempotencyKey()
   @ApiErrors('VALIDATION_FAILED', 'UNAUTHENTICATED', 'TOKEN_EXPIRED')
   create(
+    @Ctx() ctx: RequestContext,
+    @Req() req: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
     @Body({ schema: createWorkspaceRequestSchema })
     _body: CreateWorkspaceRequest,
-  ): WorkspaceCreated {
-    throw new AppException('NOT_IMPLEMENTED');
+  ): Promise<WorkspaceCreated> {
+    return this.idem.run(req, reply, ctx, async (t) => {
+      const { rows } = await t.execute<{
+        tenant_id: string;
+        membership_id: string;
+        created: boolean;
+      }>(
+        sql`select * from app_private.create_teacher_workspace(${uuidv7()}, ${uuidv7()}, ${uuidv7()}, ${uuidv7()})`,
+      );
+      const r = rows[0]!;
+      return {
+        status: r.created ? 201 : 200,
+        body: { tenantId: r.tenant_id, membershipId: r.membership_id },
+      };
+    });
   }
 }
