@@ -113,6 +113,11 @@ export const memberships = pgTable(
     ),
     index('memberships_user_id_status_idx').on(t.userId, t.status),
     index('memberships_tenant_id_idx').on(t.tenantId),
+    // FK kép dạng MATCH SIMPLE bỏ qua khi tenant_id null → chặn riêng branch_id không có tenant.
+    check(
+      'memberships_branch_requires_tenant',
+      sql`${t.branchId} is null or ${t.tenantId} is not null`,
+    ),
     foreignKey({
       name: 'memberships_tenant_branch_fk',
       columns: [t.tenantId, t.branchId],

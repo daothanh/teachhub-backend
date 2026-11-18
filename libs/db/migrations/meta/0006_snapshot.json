@@ -1,6 +1,6 @@
 {
-  "id": "c4662c34-98e3-43e8-9ea6-4b62da159120",
-  "prevId": "b2e4ef48-59f9-4a5d-bb83-4883fb95539e",
+  "id": "d996d7da-1282-4c56-8596-176467bbca5c",
+  "prevId": "c61e33d2-5c46-45eb-8895-d1ae61dd34fb",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -284,6 +284,10 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
+        "memberships_branch_requires_tenant": {
+          "name": "memberships_branch_requires_tenant",
+          "value": "\"memberships\".\"branch_id\" is null or \"memberships\".\"tenant_id\" is not null"
+        },
         "memberships_role_check": {
           "name": "memberships_role_check",
           "value": "\"memberships\".\"role\" in ('tenant_owner', 'teacher', 'accountant', 'branch_manager', 'parent', 'student')"

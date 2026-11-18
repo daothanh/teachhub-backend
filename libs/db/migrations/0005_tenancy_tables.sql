@@ -53,4 +53,5 @@ ALTER TABLE "subscriptions" ADD CONSTRAINT "subscriptions_plan_code_plans_code_f
 CREATE UNIQUE INDEX "branches_tenant_default_uq" ON "branches" USING btree ("tenant_id") WHERE "branches"."is_default";--> statement-breakpoint
 CREATE INDEX "branches_tenant_id_idx" ON "branches" USING btree ("tenant_id");--> statement-breakpoint
 ALTER TABLE "memberships" ADD CONSTRAINT "memberships_tenant_id_tenants_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "memberships" ADD CONSTRAINT "memberships_tenant_branch_fk" FOREIGN KEY ("tenant_id","branch_id") REFERENCES "public"."branches"("tenant_id","id") ON DELETE no action ON UPDATE no action;
+ALTER TABLE "memberships" ADD CONSTRAINT "memberships_tenant_branch_fk" FOREIGN KEY ("tenant_id","branch_id") REFERENCES "public"."branches"("tenant_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "memberships" ADD CONSTRAINT "memberships_branch_requires_tenant" CHECK ("memberships"."branch_id" is null or "memberships"."tenant_id" is not null);

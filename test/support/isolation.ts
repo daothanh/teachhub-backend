@@ -64,6 +64,8 @@ export async function expectInsertRejected(
   tx: TxService,
   userId: string,
   insert: SQL,
+  /** Mặc định: lỗi RLS. Truyền regex khác khi ràng buộc CSDL chặn trước. */
+  expected: RegExp = /row-level security/,
 ): Promise<void> {
   const err: unknown = await tx
     .run({ userId }, (t) => t.execute(insert))
@@ -78,7 +80,7 @@ export async function expectInsertRejected(
         ? err.cause.message
         : err.message
       : '';
-  expect(message, 'ghi chéo phải bị RLS chặn').toMatch(/row-level security/);
+  expect(message, 'ghi chéo phải bị chặn').toMatch(expected);
 }
 
 /**

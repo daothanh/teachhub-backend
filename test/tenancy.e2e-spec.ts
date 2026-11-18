@@ -140,6 +140,15 @@ describe('tenancy: tenants, branches, plans, subscriptions', () => {
     expect(err).toMatch(/memberships_tenant_branch_fk/);
   });
 
+  it('vai trò không gắn tenant (phụ huynh) không mang được branch_id', async () => {
+    await expectInsertRejected(
+      tx,
+      A.userId,
+      sql`insert into memberships (id, user_id, role, branch_id) values (${randomUUID()}, ${A.userId}, 'parent', ${rows.B.branch})`,
+      /memberships_branch_requires_tenant/,
+    );
+  });
+
   it('mỗi tenant chỉ một chi nhánh mặc định', async () => {
     const err = await asPrivileged(
       worker,
