@@ -11,6 +11,7 @@ import {
   type StartedRedisContainer,
 } from '@testcontainers/redis';
 import { sql } from 'drizzle-orm';
+import { Redis } from 'ioredis';
 import pg from 'pg';
 import type { RequestContext } from '@teachhub/core';
 import { TxService } from '@teachhub/db';
@@ -107,8 +108,10 @@ describe('vai trò của user: /v1/me/*, @RequiresRole', () => {
       await import('@teachhub/core');
     const { DbModule } = await import('@teachhub/db');
     const { AuthModule } = await import('@teachhub/modules/auth');
-    const { RequiresRole } = await import('@teachhub/modules/identity');
-    const { RedisModule, MailerModule } = await import('@teachhub/infra');
+    const { IdentityModule, RequiresRole } =
+      await import('@teachhub/modules/identity');
+    const { IdempotencyModule, RedisModule, MailerModule } =
+      await import('@teachhub/infra');
     @Controller('probe')
     class ProbeController {
       @Get('teacher')
@@ -128,7 +131,9 @@ describe('vai trò của user: /v1/me/*, @RequiresRole', () => {
         DbModule.register('DATABASE_URL'),
         RedisModule,
         MailerModule,
+        IdempotencyModule,
         AuthModule,
+        IdentityModule,
       ],
       controllers: [ProbeController],
       providers: [{ provide: APP_FILTER, useClass: GlobalExceptionFilter }],
@@ -290,6 +295,54 @@ describe('vai trò của user: /v1/me/*, @RequiresRole', () => {
     expect(
       (await probe.inject({ method: 'GET', url: '/probe/teacher' })).statusCode,
     ).toBe(401);
+  });
+
+  it('S1-BE-07b: thêm vai trò có hiệu lực ngay với token đang dùng (xóa cache)', async () => {
+    const s = await login();
+    // Lần đầu: chưa vai trò → 403, kết quả rỗng nằm trong cache.
+    expect((await call(probe, s, 'GET', '/probe/family')).statusCode).toBe(403);
+    await call(app, s, 'POST', '/v1/me/roles', { role: 'parent' });
+    expect((await call(probe, s, 'GET', '/probe/family')).statusCode).toBe(200);
+  });
+
+  it('S1-BE-07b: cache theo mv — token mới đọc dữ liệu mới; invalidate chặn token cũ ngay', async () => {
+    const { SessionService } =
+      await import('../libs/modules/auth/session/session.service.js');
+    const s = await login();
+    const { membershipId } = await teacherOf(s.userId, 'Cô Mai');
+    expect((await call(probe, s, 'GET', '/probe/teacher')).statusCode).toBe(
+      200,
+    );
+    const cache = new Redis(redis.getConnectionUrl());
+    expect(await cache.exists(`mbr:${s.userId}:0:0`)).toBe(1);
+
+    // Thu hồi ngoài API (vd. quản trị): tăng mv như mọi thay đổi vai trò.
+    await worker.query(
+      `update memberships set status = 'revoked' where id = $1`,
+      [membershipId],
+    );
+    await worker.query(
+      `update users set memberships_version = memberships_version + 1 where id = $1`,
+      [s.userId],
+    );
+    // Token cũ (mv 0) còn dùng cache tới hết TTL 5 phút; token mới (mv 1) thấy ngay.
+    expect((await call(probe, s, 'GET', '/probe/teacher')).statusCode).toBe(
+      200,
+    );
+    const fresh = await app.get(SessionService).open(s.userId);
+    const s2 = { userId: s.userId, token: fresh.access_token };
+    expect((await call(probe, s2, 'GET', '/probe/teacher')).statusCode).toBe(
+      403,
+    );
+    expect(await cache.ttl(`mbr:${s.userId}:0:1`)).toBeGreaterThan(290);
+
+    // Thu hồi qua code (gọi invalidate) → token cũ trên mọi thiết bị bị chặn ngay.
+    const { MembershipCache } = await import('@teachhub/modules/identity');
+    await app.get(MembershipCache).invalidate(s.userId);
+    expect((await call(probe, s, 'GET', '/probe/teacher')).statusCode).toBe(
+      403,
+    );
+    cache.disconnect();
   });
 
   it('không token → 401 cho mọi /me', async () => {

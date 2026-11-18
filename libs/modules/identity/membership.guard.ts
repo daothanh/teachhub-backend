@@ -7,10 +7,9 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { and, eq, inArray } from 'drizzle-orm';
 import type { FastifyRequest } from 'fastify';
 import { AppException, requestContextOf } from '@teachhub/core';
-import { memberships, TxService } from '@teachhub/db';
+import { MembershipCache } from './membership-cache.service.js';
 
 export type Role =
   | 'tenant_owner'
@@ -31,7 +30,7 @@ const ROLES = 'requiredRoles';
 export class MembershipGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
-    private readonly tx: TxService,
+    private readonly cache: MembershipCache,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -43,19 +42,8 @@ export class MembershipGuard implements CanActivate {
     const req = context.switchToHttp().getRequest<FastifyRequest>();
     const ctx = requestContextOf(req);
     if (!ctx.userId) throw new AppException('UNAUTHENTICATED');
-    const [m] = await this.tx.run({ userId: ctx.userId }, (t) =>
-      t
-        .select({ tenantId: memberships.tenantId })
-        .from(memberships)
-        .where(
-          and(
-            eq(memberships.userId, ctx.userId!),
-            eq(memberships.status, 'active'),
-            inArray(memberships.role, roles),
-          ),
-        )
-        .orderBy(memberships.createdAt)
-        .limit(1),
+    const m = (await this.cache.active(ctx)).find((x) =>
+      roles.includes(x.role as Role),
     );
     if (!m) throw new AppException('FORBIDDEN');
     req.ctx = { ...ctx, tenantId: m.tenantId };
