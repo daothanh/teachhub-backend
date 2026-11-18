@@ -24,6 +24,7 @@
     "db:migrate": "node --env-file=.env ./node_modules/drizzle-kit/bin.cjs migrate"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1168.0",
     "@fastify/helmet": "^13.2.0",
     "@nestjs/bullmq": "^12.0.1",
     "@nestjs/common": "^12.0.1",
@@ -47,6 +48,7 @@
     "@nestjs/schematics": "^12.0.0",
     "@nestjs/testing": "^12.0.1",
     "@rspack/core": "^2.1.10",
+    "@testcontainers/minio": "12.2.1",
     "@testcontainers/postgresql": "^12.2.1",
     "@testcontainers/redis": "^12.2.1",
     "@types/node": "^24.0.0",

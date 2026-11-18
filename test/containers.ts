@@ -3,6 +3,11 @@ import {
   PostgreSqlContainer,
   type StartedPostgreSqlContainer,
 } from '@testcontainers/postgresql';
+import { CreateBucketCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  MinioContainer,
+  type StartedMinioContainer,
+} from '@testcontainers/minio';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import pg from 'pg';
@@ -49,4 +54,38 @@ export async function startTestDb(): Promise<TestDb> {
   await owner.end();
 
   return { container, url };
+}
+
+// Cùng image đã ghim trong docker-compose.yml (minio/minio không còn trên Docker Hub).
+export const MINIO_IMAGE =
+  'chainguard/minio@sha256:0f9fda72fbc6bd3560ea903aec2ceefa20f6ba82628d67656f37fb370c39ae9c';
+
+export interface TestS3 {
+  container: StartedMinioContainer;
+  /** Biến `S3_*` trỏ vào container, bucket private đã tạo. */
+  env: Record<string, string>;
+}
+
+export async function startTestS3(): Promise<TestS3> {
+  const container = await new MinioContainer(MINIO_IMAGE).start();
+  const env = {
+    S3_ENDPOINT: container.getConnectionUrl(),
+    S3_REGION: 'us-east-1',
+    S3_FORCE_PATH_STYLE: 'true',
+    S3_ACCESS_KEY_ID: container.getUsername(),
+    S3_SECRET_ACCESS_KEY: container.getPassword(),
+    S3_BUCKET_PRIVATE: 'teachhub-test-private',
+  };
+  const s3 = new S3Client({
+    endpoint: env.S3_ENDPOINT,
+    region: env.S3_REGION,
+    forcePathStyle: true,
+    credentials: {
+      accessKeyId: env.S3_ACCESS_KEY_ID,
+      secretAccessKey: env.S3_SECRET_ACCESS_KEY,
+    },
+  });
+  await s3.send(new CreateBucketCommand({ Bucket: env.S3_BUCKET_PRIVATE }));
+  s3.destroy();
+  return { container, env };
 }
