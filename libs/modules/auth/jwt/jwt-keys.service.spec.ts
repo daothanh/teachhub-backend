@@ -28,16 +28,23 @@ const service = (env: Partial<Env>) =>
     get: (k: keyof Env) => ({ JWT_KID: 'k1', ...env })[k],
   } as unknown as ConfigService<Env, true>);
 
-const claims = { userId: 'u-1', sessionId: 's-1', membershipsVersion: 3 };
+const USER = '019a8f3e-7c1b-7d2a-9b3e-5f6a7b8c9d0e';
+const claims = { userId: USER, sessionId: 's-1', membershipsVersion: 3 };
 
 /** Token tự ký để thử các ca lỗi. */
 const forge = (
   key: KeyObject | Uint8Array,
-  opts: { kid?: string; alg?: string; exp?: number | string; payload?: object },
+  opts: {
+    kid?: string;
+    alg?: string;
+    exp?: number | string;
+    payload?: object;
+    sub?: string;
+  },
 ) =>
   new SignJWT({ sid: 's-1', mv: 3, ...opts.payload })
     .setProtectedHeader({ alg: opts.alg ?? 'ES256', kid: opts.kid ?? 'k1' })
-    .setSubject('u-1')
+    .setSubject(opts.sub ?? USER)
     .setIssuedAt()
     .setExpirationTime(opts.exp ?? '15m')
     .sign(key);
@@ -80,6 +87,7 @@ describe('JwtKeysService (S1-BE-03)', () => {
       () => forge(current.privateKey, { payload: { sid: undefined, mv: 'x' } }),
     ],
     ['chuỗi rác', () => Promise.resolve('abc.def.ghi')],
+    ['sub không phải UUID', () => forge(current.privateKey, { sub: 'u-1' })],
   ])('%s → UNAUTHENTICATED', async (_, make) => {
     expect(await codeOf(jwt.verify(await make()))).toBe('UNAUTHENTICATED');
   });
@@ -87,7 +95,12 @@ describe('JwtKeysService (S1-BE-03)', () => {
   it('sửa payload sau khi ký → UNAUTHENTICATED', async () => {
     const [h, , s] = (await jwt.sign(claims)).split('.');
     const body = Buffer.from(
-      JSON.stringify({ sub: 'u-2', sid: 's-1', mv: 3, exp: 9e9 }),
+      JSON.stringify({
+        sub: USER.replace('9d0e', '9d0f'),
+        sid: 's-1',
+        mv: 3,
+        exp: 9e9,
+      }),
     ).toString('base64url');
     expect(await codeOf(jwt.verify(`${h}.${body}.${s}`))).toBe(
       'UNAUTHENTICATED',

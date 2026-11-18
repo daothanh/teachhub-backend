@@ -7,7 +7,14 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { sql } from 'drizzle-orm';
-import { ApiErrors, AppException, Public, uuidv7 } from '@teachhub/core';
+import {
+  ApiErrors,
+  AppException,
+  Ctx,
+  Public,
+  type RequestContext,
+  uuidv7,
+} from '@teachhub/core';
 import { TxService } from '@teachhub/db';
 import { Mailer } from '@teachhub/infra';
 import { OTP, OtpService } from '../otp/otp.service.js';
@@ -117,9 +124,9 @@ export class AuthController {
   @ApiOkResponse({ standardSchema: refreshResponseSchema })
   @ApiErrors('VALIDATION_FAILED', 'TOKEN_EXPIRED', 'UNAUTHENTICATED')
   refresh(
-    @Body({ schema: refreshRequestSchema }) _body: RefreshRequest,
-  ): RefreshResponse {
-    throw new AppException('NOT_IMPLEMENTED');
+    @Body({ schema: refreshRequestSchema }) body: RefreshRequest,
+  ): Promise<RefreshResponse> {
+    return this.session.refresh(body.refresh_token);
   }
 
   @Post('logout')
@@ -128,8 +135,8 @@ export class AuthController {
   @ApiOperation({ summary: 'Thu hồi phiên hiện tại' })
   @ApiNoContentResponse()
   @ApiErrors('UNAUTHENTICATED')
-  logout(): void {
-    throw new AppException('NOT_IMPLEMENTED');
+  logout(@Ctx() ctx: RequestContext): Promise<void> {
+    return this.session.close(ctx.userId!, ctx.sessionId!);
   }
 
   @Get('me')
@@ -137,7 +144,7 @@ export class AuthController {
   @ApiOperation({ summary: 'Thông tin user đang đăng nhập' })
   @ApiOkResponse({ standardSchema: userSchema })
   @ApiErrors('UNAUTHENTICATED', 'TOKEN_EXPIRED')
-  me(): User {
-    throw new AppException('NOT_IMPLEMENTED');
+  me(@Ctx() ctx: RequestContext): Promise<User> {
+    return this.session.user(ctx.userId!);
   }
 }

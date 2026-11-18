@@ -69,13 +69,15 @@ describe('api (e2e)', () => {
     expect(bad.json().code).toBe('UNAUTHENTICATED');
 
     const { JwtKeysService } = await import('@teachhub/modules/auth');
-    const token = await app
-      .get(JwtKeysService)
-      .sign({ userId: 'u-1', sessionId: 's-1', membershipsVersion: 0 });
-    // Qua guard → tới handler (còn 501 tới S1-BE-05).
+    const token = await app.get(JwtKeysService).sign({
+      userId: '019a8f3e-7c1b-7d2a-9b3e-5f6a7b8c9d0e',
+      sessionId: 's-1',
+      membershipsVersion: 0,
+    });
+    // Qua guard → tới handler (còn 501 tới S1-BE-07).
     const ok = await app.inject({
       method: 'GET',
-      url: '/v1/auth/me',
+      url: '/v1/me/memberships',
       headers: { authorization: `Bearer ${token}` },
     });
     expect(ok.statusCode).toBe(501);
