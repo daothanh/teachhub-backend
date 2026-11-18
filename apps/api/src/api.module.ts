@@ -7,6 +7,7 @@ import {
 } from '@teachhub/core';
 import { DbModule } from '@teachhub/db';
 import {
+  IdempotencyModule,
   MailerModule,
   ObjectStorageModule,
   RedisModule,
@@ -24,6 +25,7 @@ import { HealthController } from './health/health.controller.js';
     RedisModule,
     ObjectStorageModule,
     MailerModule,
+    IdempotencyModule,
     AuthModule,
     IdentityModule,
     TenancyModule,

@@ -5,6 +5,7 @@ import {
   HttpCode,
   Post,
   Put,
+  Req,
   Res,
 } from '@nestjs/common';
 import {
@@ -16,7 +17,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
-import type { FastifyReply } from 'fastify';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import {
   ApiErrors,
   ApiIdempotencyKey,
@@ -26,6 +27,7 @@ import {
   uuidv7,
 } from '@teachhub/core';
 import { memberships, tenants, TxService, users } from '@teachhub/db';
+import { Idempotency } from '@teachhub/infra';
 import {
   type ActiveMembershipRequest,
   activeMembershipRequestSchema,
@@ -54,7 +56,10 @@ const label = (role: MvpRole, tenantName: string | null) =>
 @ApiErrors('UNAUTHENTICATED', 'TOKEN_EXPIRED')
 @Controller('me')
 export class MeController {
-  constructor(private readonly tx: TxService) {}
+  constructor(
+    private readonly tx: TxService,
+    private readonly idem: Idempotency,
+  ) {}
 
   @Get('memberships')
   @ApiOperation({
@@ -146,11 +151,12 @@ export class MeController {
   @ApiErrors('VALIDATION_FAILED')
   async addRole(
     @Ctx() ctx: RequestContext,
-    @Body({ schema: addRoleRequestSchema }) body: AddRoleRequest,
+    @Req() req: FastifyRequest,
     @Res({ passthrough: true }) reply: FastifyReply,
+    @Body({ schema: addRoleRequestSchema }) body: AddRoleRequest,
   ): Promise<MembershipCreated> {
     const userId = ctx.userId!;
-    const result = await this.tx.run({ userId }, async (t) => {
+    return this.idem.run(req, reply, ctx, async (t) => {
       const [created] = await t
         .insert(memberships)
         .values({ id: uuidv7(), userId, role: body.role })
@@ -162,7 +168,7 @@ export class MeController {
           .update(users)
           .set({ membershipsVersion: sql`${users.membershipsVersion} + 1` })
           .where(eq(users.id, userId));
-        return { id: created.id, created: true };
+        return { status: 201, body: { membershipId: created.id } };
       }
       const [existing] = await t
         .select({ id: memberships.id, status: memberships.status })
@@ -174,13 +180,9 @@ export class MeController {
             sql`${memberships.tenantId} is null and ${memberships.studentId} is null`,
           ),
         );
-      return existing ? { ...existing, created: false } : undefined;
+      // Vai trò bị thu hồi chỉ người có quyền mới kích hoạt lại được.
+      if (existing?.status !== 'active') throw new AppException('FORBIDDEN');
+      return { status: 200, body: { membershipId: existing.id } };
     });
-    // Vai trò bị thu hồi chỉ người có quyền mới kích hoạt lại được.
-    if (!result || ('status' in result && result.status !== 'active')) {
-      throw new AppException('FORBIDDEN');
-    }
-    if (!result.created) void reply.status(200);
-    return { membershipId: result.id };
   }
 }

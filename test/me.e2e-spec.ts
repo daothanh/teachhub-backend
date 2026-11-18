@@ -69,7 +69,11 @@ describe('vai trò của user: /v1/me/*, @RequiresRole', () => {
       method,
       url,
       payload,
-      headers: { authorization: `Bearer ${s.token}` },
+      headers: {
+        authorization: `Bearer ${s.token}`,
+        // Mỗi lần gọi một ý định mới (S1-BE-08).
+        ...(method === 'POST' ? { 'idempotency-key': randomUUID() } : {}),
+      },
     });
 
   beforeAll(async () => {
