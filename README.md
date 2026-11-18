@@ -48,7 +48,10 @@ Vai trò CSDL (Mục 2.5): `teachhub_owner` (migration), `teachhub_app` (api, kh
 pnpm check                    # lint + typecheck + unit test
 pnpm test:e2e                 # cần Docker đang chạy (Testcontainers)
 pnpm build
+pnpm db:check                 # thứ tự migration (ADR-TH-BE-001 §5)
 ```
+
+CI (`.github/workflows/ci.yml`) tách check riêng trên PR: `lint`, `unit` (gồm `openapi.json` khớp mã), `migrate` (`scripts/migrate.mjs` trên CSDL trống, chạy 2 lần, thứ tự so với nhánh đích), `rls`, `e2e`, `build`, `openapi-breaking` (`oasdiff`). `image.yml` build một image `teachhub-backend` cho api, worker và migration (`node scripts/migrate.mjs`), quét Trivy; merge `main` thì push GHCR với tag `sha-<commit>` và `main`.
 
 Dùng colima: đặt `DOCKER_HOST=unix://$HOME/.colima/default/docker.sock` và `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock` trước khi chạy `test:e2e`.
 

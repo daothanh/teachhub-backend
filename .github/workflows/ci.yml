@@ -5,25 +5,90 @@ on:
   push:
     branches: [main]
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# Mỗi job là một check riêng trên PR (DoD Sprint 0 #5): lint, unit (gồm openapi.json khớp mã),
+# migrate, rls, e2e, build, openapi-breaking.
 jobs:
-  check:
+  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/setup
       - run: pnpm lint
       - run: pnpm typecheck
+
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
       - run: pnpm test
-      # Testcontainers (PostgreSQL 17, Redis) dùng Docker sẵn có trên runner.
+
+  # Migration thật bằng scripts/migrate.mjs + vai trò teachhub_owner, đúng lệnh của image khi deploy (ADR-TH-BE-001).
+  migrate:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-retries 10
+    env:
+      PGHOST: localhost
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      MIGRATION_DATABASE_URL: postgres://teachhub_owner:teachhub_owner@localhost:5432/teachhub
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup
+      - name: Thứ tự migration (so với nhánh đích)
+        run: |
+          base="$RUNNER_TEMP/base-journal.json"
+          if [ -n "${{ github.base_ref }}" ]; then
+            git show "origin/${{ github.base_ref }}:libs/db/migrations/meta/_journal.json" > "$base" 2>/dev/null || rm -f "$base"
+          fi
+          node scripts/check-migrations.mjs "$base"
+      - name: Vai trò CSDL (như Ansible ở staging/production)
+        run: psql -v ON_ERROR_STOP=1 -f docker/postgres-init/01-roles.sql
+      - name: Migration trên CSDL trống, chạy lại lần hai không lỗi
+        run: |
+          node scripts/migrate.mjs
+          node scripts/migrate.mjs
+
+  # R1 (§4.5): bảng public thiếu enable/force RLS → đỏ.
+  rls:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - run: pnpm vitest run --config ./vitest.config.e2e.ts test/rls-coverage.e2e-spec.ts
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      # Testcontainers (PostgreSQL 17, Redis 7, MinIO) dùng Docker sẵn có trên runner.
       - run: pnpm test:e2e
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
       - run: pnpm build
 
-  # Chặn thay đổi phá vỡ hợp đồng so với nhánh đích (Mục 5.1). Lệch mã ↔ openapi.json đã bắt ở `pnpm test`.
+  # Chặn thay đổi phá vỡ hợp đồng so với nhánh đích (Mục 5.1). Lệch mã ↔ openapi.json đã bắt ở job unit.
   openapi-breaking:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest

@@ -31,7 +31,7 @@ Hiện trạng đã có: Drizzle ORM + `drizzle-kit`, migration `0000_init` (ext
 | Bảng, cột, index, khóa ngoại | Khai báo trong `libs/db/src/schema/<module>.ts`, sinh SQL bằng `pnpm db:generate --name <mo-ta>` |
 | RLS (policy), trigger, hàm `app_private`, partition, CHECK phức tạp | SQL viết tay trong migration rỗng: `pnpm db:generate --custom --name <mo-ta>` |
 | Tên file | `NNNN_<mô-tả-snake-case>.sql` (luôn truyền `--name`, không dùng tên ngẫu nhiên của drizzle-kit) |
-| Chạy | `drizzle-kit migrate` bằng vai trò **`teachhub_owner`** (`MIGRATION_DATABASE_URL`), là job riêng chạy **trước** khi deploy `api`/`worker` (image target `migrate`) |
+| Chạy | `node scripts/migrate.mjs` (migrator của `drizzle-orm`, cùng cơ chế `drizzle-kit migrate`) bằng vai trò **`teachhub_owner`** (`MIGRATION_DATABASE_URL`), chạy **trước** khi deploy `api`/`worker`, cùng image với lệnh khác |
 | Vai trò CSDL | Không tạo trong migration. Local: `docker/postgres-init/`; staging/production: Ansible, trước migration đầu tiên |
 
 Quyền: bảng do `teachhub_owner` tạo tự cấp DML cho `teachhub_app`/`teachhub_worker` và `select` cho
