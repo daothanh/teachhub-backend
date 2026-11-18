@@ -7,6 +7,9 @@ import {
 } from '@teachhub/core';
 import { DbModule } from '@teachhub/db';
 import { ObjectStorageModule, RedisModule } from '@teachhub/infra';
+import { AuthModule } from '@teachhub/modules/auth';
+import { IdentityModule } from '@teachhub/modules/identity';
+import { TenancyModule } from '@teachhub/modules/tenancy';
 import { AppConfigController } from './app-config/app-config.controller.js';
 import { HealthController } from './health/health.controller.js';
 
@@ -16,6 +19,9 @@ import { HealthController } from './health/health.controller.js';
     DbModule.register('DATABASE_URL'),
     RedisModule,
     ObjectStorageModule,
+    AuthModule,
+    IdentityModule,
+    TenancyModule,
   ],
   controllers: [AppConfigController, HealthController],
   providers: [

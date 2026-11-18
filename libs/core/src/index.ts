@@ -7,3 +7,4 @@ export * from './request-id.js';
 export * from './validation.js';
 export * from './pagination.js';
 export * from './request-context.js';
+export * from './http-contract.js';

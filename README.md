@@ -13,14 +13,14 @@ apps/worker/src/     main.ts, worker.module.ts
 libs/core/           config (zod), CoreModule (config + pino), AppException, GlobalExceptionFilter, validationPipe, request id, RequestContext, phân trang
 libs/db/             DbModule (pg Pool + Drizzle), TxService (BEGIN + SET LOCAL app.user_id), schema/, migrations/
 libs/infra/          RedisModule, ObjectStorage (kho S3: MinIO/R2); sau này: FCM, Web Push, SES, PDF, Excel
-libs/modules/        (Sprint 1+) auth, identity, tenancy, … — mỗi module: http/ application/ domain/ infrastructure/ jobs/ index.ts
+libs/modules/        auth, identity, tenancy (hợp đồng Sprint 1, thân hàm trả 501 tới S1-BE-*), … — mỗi module: http/ application/ domain/ infrastructure/ jobs/ index.ts
 docs/adr/            quyết định kiến trúc backend (ADR-TH-BE-xxx)
 contracts/           error_codes.json (nguồn duy nhất cho API, web, app)
 docker/              Dockerfile (api + worker + target migrate), postgres-init/ (vai trò DB local)
 test/                e2e/integration với Testcontainers (PostgreSQL 17, Redis 7)
 ```
 
-Import giữa lib dùng alias `@teachhub/core`, `@teachhub/db`, `@teachhub/infra`.
+Import giữa lib dùng alias `@teachhub/core`, `@teachhub/db`, `@teachhub/infra`, `@teachhub/modules/<module>` (chỉ qua `index.ts`).
 
 ## Chạy local
 
@@ -57,7 +57,7 @@ Dùng colima: đặt `DOCKER_HOST=unix://$HOME/.colima/default/docker.sock` và 
 
 ## Quy ước chính
 
-- Hợp đồng API: `contracts/openapi.json` sinh từ schema zod trên controller — đổi endpoint thì chạy `pnpm openapi:gen` và commit file; CI chặn file lệch mã và thay đổi phá vỡ (`oasdiff`). Schema request: `@Body({ schema })`/`@Query({ schema })`; response: `@ApiOkResponse({ standardSchema })`.
+- Hợp đồng API: `contracts/openapi.json` sinh từ schema zod trên controller — đổi endpoint thì chạy `pnpm openapi:gen` và commit file; CI chặn file lệch mã và thay đổi phá vỡ (`oasdiff`). Schema request: `@Body({ schema })`/`@Query({ schema })`; response: `@ApiOkResponse({ standardSchema })`; lỗi: `@ApiErrors('CODE', …)`; lệnh ghi: `@ApiIdempotencyKey()`. Trường token/SSO snake_case (`access_token`, `id_token` — cố định bởi `tasco_auth`), mọi trường khác camelCase.
 
 - Lỗi trả `{ code, message, details?, errors?, requestId }`; ném `new AppException('CODE', details)`, mã khai trong `contracts/error_codes.json`.
 - Validate bằng zod: `@Body({ schema: createClassRequestSchema }) body: CreateClassRequest` — sai → 422 `VALIDATION_FAILED` + `errors: { field: string[] }`.

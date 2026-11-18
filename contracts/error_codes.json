@@ -14,6 +14,8 @@
   "CONFLICT_STALE": { "http": 409, "message": "Dữ liệu đã thay đổi, vui lòng tải lại." },
   "IDEMPOTENCY_IN_PROGRESS": { "http": 409, "message": "Yêu cầu đang được xử lý." },
   "RATE_LIMITED": { "http": 429, "message": "Bạn thao tác quá nhanh, vui lòng thử lại sau." },
+  "OTP_LOCKED": { "http": 429, "message": "Bạn nhập sai mã quá nhiều lần, vui lòng thử lại sau." },
   "INTERNAL_ERROR": { "http": 500, "message": "Đã có lỗi xảy ra." },
+  "NOT_IMPLEMENTED": { "http": 501, "message": "Tính năng đang được phát triển." },
   "SERVICE_UNAVAILABLE": { "http": 503, "message": "Hệ thống đang bảo trì hoặc quá tải." }
 }
