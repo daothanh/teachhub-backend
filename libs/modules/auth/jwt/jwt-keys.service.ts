@@ -26,6 +26,7 @@ export interface AccessClaims {
 }
 
 const pem = (v: string) => v.replace(/\\n/g, '\n');
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Ký và xác minh access token ES256 có `kid`; công bố khóa công khai ở JWKS để xoay vòng khóa. */
 @Injectable()
@@ -79,7 +80,11 @@ export class JwtKeysService {
         algorithms: [ALG],
         requiredClaims: ['sub', 'sid', 'mv', 'exp'],
       });
-      if (typeof payload.sid !== 'string' || typeof payload.mv !== 'number') {
+      if (
+        !UUID.test(payload.sub ?? '') ||
+        typeof payload.sid !== 'string' ||
+        typeof payload.mv !== 'number'
+      ) {
         throw new AppException('UNAUTHENTICATED');
       }
       return {
