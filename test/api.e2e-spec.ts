@@ -45,6 +45,42 @@ describe('api (e2e)', () => {
     ]);
   });
 
+  it('S1-BE-03: route mặc định cần access token; JWKS công khai', async () => {
+    const jwks = await app.inject({
+      method: 'GET',
+      url: '/.well-known/jwks.json',
+    });
+    expect(jwks.statusCode).toBe(200);
+    expect(jwks.json().keys[0]).toMatchObject({
+      kty: 'EC',
+      crv: 'P-256',
+      alg: 'ES256',
+    });
+    expect(jwks.json().keys[0]).not.toHaveProperty('d');
+
+    const none = await app.inject({ method: 'GET', url: '/v1/auth/me' });
+    expect(none.statusCode).toBe(401);
+    expect(none.json().code).toBe('UNAUTHENTICATED');
+    const bad = await app.inject({
+      method: 'GET',
+      url: '/v1/auth/me',
+      headers: { authorization: 'Bearer abc.def.ghi' },
+    });
+    expect(bad.json().code).toBe('UNAUTHENTICATED');
+
+    const { JwtKeysService } = await import('@teachhub/modules/auth');
+    const token = await app
+      .get(JwtKeysService)
+      .sign({ userId: 'u-1', sessionId: 's-1', membershipsVersion: 0 });
+    // Qua guard → tới handler (còn 501 tới S1-BE-05).
+    const ok = await app.inject({
+      method: 'GET',
+      url: '/v1/auth/me',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(ok.statusCode).toBe(501);
+  });
+
   it('GET /health/ready kiểm tra PostgreSQL, Redis và kho S3', async () => {
     const res = await app.inject({ method: 'GET', url: '/health/ready' });
     expect(res.statusCode).toBe(200);

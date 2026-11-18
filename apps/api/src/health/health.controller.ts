@@ -2,12 +2,13 @@ import { Controller, Get, Inject } from '@nestjs/common';
 import { ApiExcludeController } from '@nestjs/swagger';
 import { sql } from 'drizzle-orm';
 import type { Redis } from 'ioredis';
-import { AppException } from '@teachhub/core';
+import { AppException, Public } from '@teachhub/core';
 import { DB, type Database } from '@teachhub/db';
 import { ObjectStorage, REDIS } from '@teachhub/infra';
 
 /** Health cho Load Balancer và uptime (Mục 2.10). Nằm ngoài tiền tố /v1 và ngoài hợp đồng OpenAPI. */
 @ApiExcludeController()
+@Public()
 @Controller('health')
 export class HealthController {
   constructor(

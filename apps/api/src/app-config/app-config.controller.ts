@@ -1,3 +1,4 @@
+import { Public } from '@teachhub/core';
 import { Controller, Get } from '@nestjs/common';
 import { ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { z } from 'zod';
@@ -20,6 +21,7 @@ const APP_CONFIG: AppConfigResponse = {
 };
 
 @ApiTags('app-config')
+@Public()
 @Controller('app-config')
 export class AppConfigController {
   @Get()
