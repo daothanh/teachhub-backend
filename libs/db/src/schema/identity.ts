@@ -1,6 +1,7 @@
 import {
   type AnyPgColumn,
   check,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -11,6 +12,7 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
+import { branches, tenants } from './tenancy.js';
 
 // Danh tính (Technical Spec §4.4). RLS, audit, hàm app_private viết tay ở migration identity_rls.
 // id là UUID v7 sinh ở ứng dụng (ADR-TH-BE-001 §3).
@@ -93,9 +95,10 @@ export const memberships = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     role: text().notNull(),
-    // FK tới tenants/branches/students thêm khi các bảng đó có (S1-BE-02, Sprint 2).
-    tenantId: uuid(),
+    tenantId: uuid().references(() => tenants.id),
+    /** null = toàn tenant. */
     branchId: uuid(),
+    // FK tới students thêm khi có bảng (Sprint 2).
     studentId: uuid(),
     status: text().notNull().default('active'),
     createdAt: createdAt(),
@@ -110,6 +113,16 @@ export const memberships = pgTable(
     ),
     index('memberships_user_id_status_idx').on(t.userId, t.status),
     index('memberships_tenant_id_idx').on(t.tenantId),
+    // FK kép dạng MATCH SIMPLE bỏ qua khi tenant_id null → chặn riêng branch_id không có tenant.
+    check(
+      'memberships_branch_requires_tenant',
+      sql`${t.branchId} is null or ${t.tenantId} is not null`,
+    ),
+    foreignKey({
+      name: 'memberships_tenant_branch_fk',
+      columns: [t.tenantId, t.branchId],
+      foreignColumns: [branches.tenantId, branches.id],
+    }),
     check(
       'memberships_role_check',
       sql`${t.role} in ('tenant_owner', 'teacher', 'accountant', 'branch_manager', 'parent', 'student')`,

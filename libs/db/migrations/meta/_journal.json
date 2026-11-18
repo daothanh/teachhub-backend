@@ -36,6 +36,20 @@
       "when": 1795007925498,
       "tag": "0004_identity_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1795008951617,
+      "tag": "0005_tenancy_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795008951941,
+      "tag": "0006_tenancy_rls",
+      "breakpoints": true
     }
   ]
 }
