@@ -27,16 +27,39 @@ describe('danh tính: users, auth_identities, refresh_tokens, memberships', () =
     ownerB: randomUUID(),
   };
 
-  /** Người dùng tự tạo dữ liệu của mình — đúng đường ghi của API (RLS `with check`). */
-  const seed = (userId: string, tenantId: string, ownerId: string) =>
-    tx.run({ userId }, async (t) => {
-      await t.execute(
+  /** Chạy bằng teachhub_worker với app.user_id = `userId` — thay cho hàm security definer cấp vai trò (S1-BE-08). */
+  const asPrivileged = async (
+    userId: string,
+    query: string,
+    params: unknown[],
+  ) => {
+    const c = await worker.connect();
+    try {
+      await c.query('begin');
+      await c.query(`select set_config('app.user_id', $1, true)`, [userId]);
+      await c.query(query, params);
+      await c.query('commit');
+    } catch (e) {
+      await c.query('rollback');
+      throw e;
+    } finally {
+      c.release();
+    }
+  };
+
+  /** User tự tạo hồ sơ của mình (RLS `with check`); vai trò chủ tenant cấp qua đường đặc quyền. */
+  const seed = async (userId: string, tenantId: string, ownerId: string) => {
+    await tx.run({ userId }, (t) =>
+      t.execute(
         sql`insert into users (id, email) values (${userId}, ${`${userId}@test.vn`})`,
-      );
-      await t.execute(
-        sql`insert into memberships (id, user_id, role, tenant_id) values (${ownerId}, ${userId}, 'tenant_owner', ${tenantId})`,
-      );
-    });
+      ),
+    );
+    await asPrivileged(
+      userId,
+      `insert into memberships (id, user_id, role, tenant_id) values ($1, $2, 'tenant_owner', $3)`,
+      [ownerId, userId, tenantId],
+    );
+  };
 
   beforeAll(async () => {
     db = await startTestDb();
@@ -57,10 +80,12 @@ describe('danh tính: users, auth_identities, refresh_tokens, memberships', () =
       await t.execute(
         sql`insert into memberships (id, user_id, role) values (${ids.parentA}, ${A.userId}, 'parent')`,
       );
-      await t.execute(
-        sql`insert into memberships (id, user_id, role, tenant_id, status) values (${ids.revokedA}, ${A.userId}, 'teacher', ${B.tenantId}, 'revoked')`,
-      );
     });
+    await asPrivileged(
+      A.userId,
+      `insert into memberships (id, user_id, role, tenant_id, status) values ($1, $2, 'teacher', $3, 'revoked')`,
+      [ids.revokedA, A.userId, B.tenantId],
+    );
   }, 120_000);
 
   afterAll(async () => {
@@ -82,7 +107,43 @@ describe('danh tính: users, auth_identities, refresh_tokens, memberships', () =
     });
   });
 
-  it('A không tự cấp vai trò hay tạo dữ liệu đứng tên B', async () => {
+  it('A không tự cấp vai trò nhân sự, kể cả ở tenant của mình', async () => {
+    for (const [role, tenantId] of [
+      ['tenant_owner', B.tenantId],
+      ['teacher', B.tenantId],
+      ['teacher', A.tenantId],
+    ] as const) {
+      await expectInsertRejected(
+        tx,
+        A.userId,
+        sql`insert into memberships (id, user_id, role, tenant_id) values (${randomUUID()}, ${A.userId}, ${role}, ${tenantId})`,
+      );
+    }
+    // Học sinh gắn hồ sơ học viên chỉ qua lời mời.
+    await expectInsertRejected(
+      tx,
+      A.userId,
+      sql`insert into memberships (id, user_id, role, student_id) values (${randomUUID()}, ${A.userId}, 'student', ${randomUUID()})`,
+    );
+  });
+
+  it('A không kích hoạt lại hay đổi vai trò của chính mình', async () => {
+    const changed = await tx.run({ userId: A.userId }, async (t) => {
+      const a = await t.execute(
+        sql`update memberships set status = 'active' where id = ${ids.revokedA}`,
+      );
+      const b = await t.execute(
+        sql`update memberships set role = 'tenant_owner', tenant_id = ${B.tenantId} where id = ${ids.parentA}`,
+      );
+      const c = await t.execute(
+        sql`delete from memberships where id = ${ids.ownerA}`,
+      );
+      return (a.rowCount ?? 0) + (b.rowCount ?? 0) + (c.rowCount ?? 0);
+    });
+    expect(changed).toBe(0);
+  });
+
+  it('A không tạo dữ liệu đứng tên B', async () => {
     await expectInsertRejected(
       tx,
       A.userId,
@@ -118,24 +179,30 @@ describe('danh tính: users, auth_identities, refresh_tokens, memberships', () =
 
   it('CHECK phạm vi vai trò: nhân sự phải có tenant, phụ huynh thì không', async () => {
     const insert = (role: string, tenantId: string | null) =>
-      tx
-        .run({ userId: A.userId }, (t) =>
-          t.execute(
-            sql`insert into memberships (id, user_id, role, tenant_id) values (${randomUUID()}, ${A.userId}, ${role}, ${tenantId})`,
-          ),
-        )
-        .then(
-          () => '',
-          (e: Error) => (e.cause as Error).message,
-        );
+      asPrivileged(
+        A.userId,
+        `insert into memberships (id, user_id, role, tenant_id) values ($1, $2, $3, $4)`,
+        [randomUUID(), A.userId, role, tenantId],
+      ).then(
+        () => '',
+        (e: Error) => e.message,
+      );
     expect(await insert('teacher', null)).toMatch(/memberships_scope_check/);
     expect(await insert('parent', A.tenantId)).toMatch(
       /memberships_scope_check/,
     );
-    // Một vai trò cho mỗi phạm vi.
-    expect(await insert('parent', null)).toMatch(
-      /memberships_user_role_scope_uq/,
-    );
+    // Một vai trò cho mỗi phạm vi — kể cả đường app tự thêm vai trò phụ huynh.
+    const again = await tx
+      .run({ userId: A.userId }, (t) =>
+        t.execute(
+          sql`insert into memberships (id, user_id, role) values (${randomUUID()}, ${A.userId}, 'parent')`,
+        ),
+      )
+      .then(
+        () => '',
+        (e: Error) => (e.cause as Error).message,
+      );
+    expect(again).toMatch(/memberships_user_role_scope_uq/);
   });
 
   it('cấp vai trò ghi audit_logs với actor; updated_at tự cập nhật', async () => {
@@ -144,10 +211,10 @@ describe('danh tính: users, auth_identities, refresh_tokens, memberships', () =
         ids.ownerA,
       ])
     ).rows[0]?.updated_at as Date;
-    await tx.run({ userId: A.userId }, (t) =>
-      t.execute(
-        sql`update memberships set status = 'revoked' where id = ${ids.ownerA}`,
-      ),
+    await asPrivileged(
+      A.userId,
+      `update memberships set status = 'revoked' where id = $1`,
+      [ids.ownerA],
     );
     const { rows } = await worker.query(
       `select tenant_id, actor_user_id, action from audit_logs

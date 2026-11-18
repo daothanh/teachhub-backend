@@ -33,9 +33,20 @@ alter table memberships enable row level security;
 --> statement-breakpoint
 alter table memberships force row level security;
 --> statement-breakpoint
-create policy memberships_self on memberships for all to teachhub_app
-  using (user_id = nullif(current_setting('app.user_id', true), '')::uuid)
-  with check (user_id = nullif(current_setting('app.user_id', true), '')::uuid);
+-- Vai trò là quyền truy cập: app chỉ đọc vai trò của mình và tự thêm vai trò phụ huynh/học sinh chưa
+-- gắn tenant/học viên (POST /me/roles). Vai trò nhân sự, gắn học viên, đổi trạng thái (thu hồi, kích hoạt
+-- lại) đi qua hàm security definer có kiểm quyền (POST /workspaces S1-BE-08, lời mời Sprint 2) — một lỗi
+-- ở API không tự cấp được vai trò ở tenant khác.
+create policy memberships_self_read on memberships for select to teachhub_app
+  using (user_id = nullif(current_setting('app.user_id', true), '')::uuid);
+--> statement-breakpoint
+create policy memberships_self_family_insert on memberships for insert to teachhub_app
+  with check (
+    user_id = nullif(current_setting('app.user_id', true), '')::uuid
+    and role in ('parent', 'student')
+    and tenant_id is null
+    and student_id is null
+  );
 --> statement-breakpoint
 -- Hàm helper security definer chạy bằng teachhub_owner, cũng bị FORCE RLS: cho owner đọc để
 -- staff_tenant_ids() không đệ quy qua chính policy của memberships.
