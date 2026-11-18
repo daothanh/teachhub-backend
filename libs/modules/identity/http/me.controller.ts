@@ -187,7 +187,7 @@ export class MeController {
       return { status: 200, body: { membershipId: existing.id } };
     });
     // Vai trò mới phải có hiệu lực ngay với token đang dùng (S1-BE-07b).
-    await this.cache.invalidate(ctx);
+    await this.cache.invalidate(ctx.userId!);
     return result;
   }
 }

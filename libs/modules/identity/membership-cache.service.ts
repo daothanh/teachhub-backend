@@ -14,9 +14,11 @@ export interface ActiveMembership {
 const TTL_SEC = 300;
 
 /**
- * Vai trò đang hoạt động của user cho MembershipGuard (§4.5), cache Redis theo `mv` của access token:
- * token mới (sau đổi vai trò + làm mới) mang `mv` mới → khóa mới → tự vô hiệu. Request đổi vai trò xóa khóa
- * của token đang dùng để thấy ngay. Thiết bị khác còn token cũ: cũ tối đa TTL 5 phút.
+ * Vai trò đang hoạt động của user cho MembershipGuard (§4.5), cache Redis khóa `mbr:{user}:{gen}:{mv}`:
+ * - `mv` của access token: token mới sau đổi vai trò → khóa mới;
+ * - `gen` đếm theo user: mọi thay đổi vai trò qua code gọi `invalidate()` → mọi thiết bị, mọi token cũ
+ *   cùng mất cache ngay (thu hồi vai trò có hiệu lực tức thì).
+ * Sửa tay trong CSDL (không qua code) chỉ hết hiệu lực sau TTL 5 phút; RLS vẫn đọc vai trò thật.
  */
 @Injectable()
 export class MembershipCache {
@@ -27,13 +29,15 @@ export class MembershipCache {
     @Inject(REDIS) private readonly redis: Redis,
   ) {}
 
-  private key(ctx: RequestContext) {
-    return `mbr:${ctx.userId}:${ctx.membershipsVersion ?? 0}`;
+  private async key(ctx: RequestContext): Promise<string | null> {
+    const gen = await this.redis.get(`mbr:gen:${ctx.userId}`);
+    return `mbr:${ctx.userId}:${gen ?? 0}:${ctx.membershipsVersion ?? 0}`;
   }
 
   async active(ctx: RequestContext): Promise<ActiveMembership[]> {
-    const key = this.key(ctx);
-    const hit = await this.redis.get(key).catch(() => null);
+    // Redis lỗi → không cache, đọc CSDL (an toàn khi thu hồi).
+    const key = await this.key(ctx).catch(() => null);
+    const hit = key ? await this.redis.get(key).catch(() => null) : null;
     if (hit) return JSON.parse(hit) as ActiveMembership[];
 
     const userId = ctx.userId!;
@@ -50,7 +54,7 @@ export class MembershipCache {
         )
         .orderBy(asc(memberships.createdAt)),
     );
-    // Redis lỗi không chặn request: lần sau đọc CSDL lại.
+    if (!key) return rows;
     await this.redis
       .set(key, JSON.stringify(rows), 'EX', TTL_SEC)
       .catch((e: unknown) =>
@@ -59,7 +63,8 @@ export class MembershipCache {
     return rows;
   }
 
-  async invalidate(ctx: RequestContext): Promise<void> {
-    await this.redis.del(this.key(ctx)).catch(() => undefined);
+  /** Gọi sau mọi thay đổi vai trò của user (cấp, thu hồi, kích hoạt lại). */
+  async invalidate(userId: string): Promise<void> {
+    await this.redis.incr(`mbr:gen:${userId}`);
   }
 }

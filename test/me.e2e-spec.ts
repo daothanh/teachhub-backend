@@ -305,7 +305,7 @@ describe('vai trò của user: /v1/me/*, @RequiresRole', () => {
     expect((await call(probe, s, 'GET', '/probe/family')).statusCode).toBe(200);
   });
 
-  it('S1-BE-07b: cache theo mv — token mới sau đổi vai trò đọc dữ liệu mới', async () => {
+  it('S1-BE-07b: cache theo mv — token mới đọc dữ liệu mới; invalidate chặn token cũ ngay', async () => {
     const { SessionService } =
       await import('../libs/modules/auth/session/session.service.js');
     const s = await login();
@@ -314,7 +314,7 @@ describe('vai trò của user: /v1/me/*, @RequiresRole', () => {
       200,
     );
     const cache = new Redis(redis.getConnectionUrl());
-    expect(await cache.exists(`mbr:${s.userId}:0`)).toBe(1);
+    expect(await cache.exists(`mbr:${s.userId}:0:0`)).toBe(1);
 
     // Thu hồi ngoài API (vd. quản trị): tăng mv như mọi thay đổi vai trò.
     await worker.query(
@@ -334,7 +334,14 @@ describe('vai trò của user: /v1/me/*, @RequiresRole', () => {
     expect((await call(probe, s2, 'GET', '/probe/teacher')).statusCode).toBe(
       403,
     );
-    expect(await cache.ttl(`mbr:${s.userId}:1`)).toBeGreaterThan(290);
+    expect(await cache.ttl(`mbr:${s.userId}:0:1`)).toBeGreaterThan(290);
+
+    // Thu hồi qua code (gọi invalidate) → token cũ trên mọi thiết bị bị chặn ngay.
+    const { MembershipCache } = await import('@teachhub/modules/identity');
+    await app.get(MembershipCache).invalidate(s.userId);
+    expect((await call(probe, s, 'GET', '/probe/teacher')).statusCode).toBe(
+      403,
+    );
     cache.disconnect();
   });
 

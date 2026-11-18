@@ -80,7 +80,7 @@ export class WorkspacesController {
       };
     });
     // Vai trò Giáo viên có hiệu lực ngay với token đang dùng (S1-BE-07b).
-    await this.cache.invalidate(ctx);
+    await this.cache.invalidate(ctx.userId!);
     return result;
   }
 }
