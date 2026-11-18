@@ -23,14 +23,21 @@ Import giữa lib dùng alias `@teachhub/core`, `@teachhub/db`, `@teachhub/infra
 
 ## Chạy local
 
+Cần Node ≥ 22.12, pnpm (`corepack enable`), Docker (Docker Desktop hoặc colima).
+
 ```bash
 cp .env.example .env
-docker compose up -d          # PostgreSQL :5433, Redis :6380, MinIO :9000/:9001, Mailpit :8025
+docker compose up -d          # PostgreSQL :5433, Redis :6380, MinIO :9100 (console :9101), Mailpit :8025
 pnpm install
 pnpm db:migrate               # chạy bằng vai trò teachhub_owner
-pnpm start:api                # http://localhost:3000/health/ready
+pnpm start:api                # http://localhost:3000/health/ready → {"status":"ok","checks":{"db":true,"redis":true,"s3":true}}
 pnpm start:worker
 ```
+
+- `minio-init` chạy một lần rồi thoát (`exited (0)` là đúng): tạo bucket `teachhub-local-private`/`-public`, quyền đọc, lifecycle (`docker/minio/init.sh`). Chạy lại: `docker compose run --rm minio-init`.
+- Cổng bị chiếm (vd. php-fpm giữ :9000): đổi `PG_PORT`, `REDIS_PORT`, `MINIO_PORT` trong `.env` và sửa URL tương ứng (`DATABASE_URL`, `S3_ENDPOINT`…).
+- Đo 15/11/2026 trên bản clone sạch: 18 giây từ `cp .env.example` tới `/health/ready` = 200 khi đã có sẵn image và cache pnpm; máy mới thêm thời gian tải image (~0,5 GB) và gói npm.
+- Image MinIO ghim theo digest (`minio/minio` đã rời Docker Hub; dùng bản build của Chainguard). Nâng cấp: `docker buildx imagetools inspect chainguard/minio:latest` rồi thay digest ở `docker-compose.yml` và `test/containers.ts`.
 
 Vai trò CSDL (Mục 2.5): `teachhub_owner` (migration), `teachhub_app` (api, không BYPASSRLS), `teachhub_worker` (worker, BYPASSRLS), `teachhub_readonly`. Local tạo bằng `docker/postgres-init/01-roles.sql`; staging/production tạo bằng Ansible **trước** khi chạy migration.
 
