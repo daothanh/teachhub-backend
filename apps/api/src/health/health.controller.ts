@@ -1,3 +1,4 @@
+import { SkipThrottle } from '@nestjs/throttler';
 import { Controller, Get, Inject } from '@nestjs/common';
 import { ApiExcludeController } from '@nestjs/swagger';
 import { sql } from 'drizzle-orm';
@@ -9,6 +10,8 @@ import { ObjectStorage, REDIS } from '@teachhub/infra';
 /** Health cho Load Balancer và uptime (Mục 2.10). Nằm ngoài tiền tố /v1 và ngoài hợp đồng OpenAPI. */
 @ApiExcludeController()
 @Public()
+// Kiểm tra sống/sẵn sàng của hạ tầng gọi dày, không tính vào giới hạn theo IP.
+@SkipThrottle()
 @Controller('health')
 export class HealthController {
   constructor(

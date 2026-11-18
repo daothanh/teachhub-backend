@@ -11,6 +11,7 @@ import {
   MailerModule,
   ObjectStorageModule,
   RedisModule,
+  ThrottleModule,
 } from '@teachhub/infra';
 import { AuthModule } from '@teachhub/modules/auth';
 import { IdentityModule } from '@teachhub/modules/identity';
@@ -26,6 +27,7 @@ import { HealthController } from './health/health.controller.js';
     ObjectStorageModule,
     MailerModule,
     IdempotencyModule,
+    ThrottleModule,
     AuthModule,
     IdentityModule,
     TenancyModule,
