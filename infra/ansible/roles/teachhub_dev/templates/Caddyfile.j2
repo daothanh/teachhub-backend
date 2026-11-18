@@ -1,0 +1,23 @@
+{
+	# Chứng chỉ Origin CA nạp tay, không cần ACME; cổng 80 bị Hetzner Firewall chặn.
+	auto_https off
+	servers {
+		# Tin X-Forwarded-For do Cloudflare ghi để api thấy IP thật của client (TRUST_PROXY_HOPS=2).
+		trusted_proxies static {{ cloudflare_cidrs | join(' ') }}
+	}
+}
+
+(origin_tls) {
+	tls /etc/caddy/origin.pem /etc/caddy/origin.key
+}
+
+https://{{ hosts.api }} {
+	import origin_tls
+	reverse_proxy api:3000
+}
+
+# Web phụ huynh và admin triển khai ở S0-WEB-03.
+https://{{ hosts.app }}, https://{{ hosts.admin }} {
+	import origin_tls
+	respond "Chưa triển khai" 503
+}

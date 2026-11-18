@@ -16,7 +16,11 @@ export async function createApp(): Promise<NestFastifyApplication> {
     ApiModule,
     new FastifyAdapter({
       bodyLimit: 1024 * 1024,
-      trustProxy: true,
+      // Chỉ tin đúng số proxy phía trước (Cloudflare = 1; thêm Caddy trên VM = 2): IP client là mục do proxy
+      // gần nhất ghi vào X-Forwarded-For; mục client tự chèn ở đầu header bị bỏ qua (giới hạn theo IP).
+      // Dạng hàm (kiểu của FastifyAdapter không nhận số): tin hop thứ i khi i < số proxy.
+      trustProxy: (_addr: string, i: number) =>
+        i < Number(process.env.TRUST_PROXY_HOPS ?? 1),
       genReqId: genRequestId,
     }),
     { bufferLogs: true },

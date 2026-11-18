@@ -1,4 +1,5 @@
 import { Body, Controller, Get, HttpCode, Post } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import {
   ApiBearerAuth,
   ApiNoContentResponse,
@@ -17,6 +18,7 @@ import {
 } from '@teachhub/core';
 import { TxService } from '@teachhub/db';
 import { Mailer } from '@teachhub/infra';
+import { GoogleIdTokenService } from '../google/google-id-token.service.js';
 import { OTP, OtpService } from '../otp/otp.service.js';
 import { SessionService } from '../session/session.service.js';
 import {
@@ -45,9 +47,11 @@ export class AuthController {
     private readonly mailer: Mailer,
     private readonly tx: TxService,
     private readonly session: SessionService,
+    private readonly google: GoogleIdTokenService,
   ) {}
 
   @Public()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('otp/send')
   @HttpCode(204)
   @ApiOperation({
@@ -72,6 +76,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @Post('login')
   @HttpCode(200)
   @ApiOperation({
@@ -87,17 +92,11 @@ export class AuthController {
   ): Promise<LoginResponse> {
     const email = body.email.toLowerCase();
     await this.otp.verify(email, body.code);
-    // Email chưa có tài khoản = đăng ký: user chưa có vai trò nào, không tạo tenant (AC1).
-    const userId = await this.tx.run({ userId: null }, async (t) => {
-      const { rows } = await t.execute<{ id: string }>(
-        sql`select app_private.sign_in_identity('email', ${email}, ${email}, ${uuidv7()}, ${uuidv7()}) as id`,
-      );
-      return rows[0]!.id;
-    });
-    return this.session.open(userId);
+    return this.signIn('email', email, email, null, true);
   }
 
   @Public()
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @Post('sso/google')
   @HttpCode(200)
   @ApiOperation({
@@ -107,13 +106,21 @@ export class AuthController {
   })
   @ApiOkResponse({ standardSchema: loginResponseSchema })
   @ApiErrors('VALIDATION_FAILED', 'UNAUTHENTICATED')
-  ssoGoogle(
-    @Body({ schema: googleSsoRequestSchema }) _body: GoogleSsoRequest,
-  ): LoginResponse {
-    throw new AppException('NOT_IMPLEMENTED');
+  async ssoGoogle(
+    @Body({ schema: googleSsoRequestSchema }) body: GoogleSsoRequest,
+  ): Promise<LoginResponse> {
+    const g = await this.google.verify(body.id_token);
+    return this.signIn(
+      'google',
+      g.subject,
+      g.email,
+      g.name,
+      g.emailAuthoritative,
+    );
   }
 
   @Public()
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
   @Post('refresh')
   @HttpCode(200)
   @ApiOperation({
@@ -146,5 +153,39 @@ export class AuthController {
   @ApiErrors('UNAUTHENTICATED', 'TOKEN_EXPIRED')
   me(@Ctx() ctx: RequestContext): Promise<User> {
     return this.session.user(ctx.userId!);
+  }
+
+  /**
+   * Sau khi danh tính đã xác minh: identity có sẵn → user cũ; email trùng user có sẵn → gắn vào user đó;
+   * chưa có → đăng ký (user chưa vai trò, không tenant — US-0.1 AC1). Rồi mở phiên.
+   */
+  private async signIn(
+    provider: 'email' | 'google',
+    subject: string,
+    email: string,
+    name: string | null,
+    /** Nhà cung cấp có thẩm quyền với email → được gộp/tạo user theo email; không thì chỉ identity đã có. */
+    linkByEmail: boolean,
+  ): Promise<LoginResponse> {
+    const userId = await this.tx.run({ userId: null }, async (t) => {
+      const { rows } = await t.execute<{ id: string | null }>(
+        sql`select app_private.sign_in_identity(${provider}, ${subject}, ${email}, ${uuidv7()}, ${uuidv7()}, ${linkByEmail}) as id`,
+      );
+      return rows[0]?.id;
+    });
+    // Nhà cung cấp không có thẩm quyền với email (Google với email ngoài Gmail/Workspace): dùng OTP.
+    if (!userId) {
+      throw new AppException('UNAUTHENTICATED', {
+        reason: 'EMAIL_REQUIRES_OTP',
+      });
+    }
+    if (name) {
+      await this.tx.run({ userId }, (t) =>
+        t.execute(
+          sql`update users set display_name = ${name} where id = ${userId} and display_name is null`,
+        ),
+      );
+    }
+    return this.session.open(userId);
   }
 }

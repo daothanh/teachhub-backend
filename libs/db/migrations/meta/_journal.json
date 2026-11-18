@@ -64,6 +64,20 @@
       "when": 1795010254388,
       "tag": "0008_refresh_rotation",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1795012843301,
+      "tag": "0009_sign_in_trusted_email",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1795013785041,
+      "tag": "0010_create_workspace_fn",
+      "breakpoints": true
     }
   ]
 }

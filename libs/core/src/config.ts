@@ -35,6 +35,24 @@ export const envSchema = z
     /** SMTP gửi email (OTP…): Mailpit ở local/dev (smtp://127.0.0.1:1025), SES SMTP ở staging/production. */
     SMTP_URL: z.url().default('smtp://127.0.0.1:1025'),
     EMAIL_FROM: z.string().min(1).default('DayHoc <no-reply@dayhoc.app>'),
+    /** Client ID OAuth Google (iOS, Android, web), ngăn cách bởi dấu phẩy — `aud` hợp lệ của id_token. Trống = từ chối mọi id_token. */
+    GOOGLE_CLIENT_IDS: z
+      .string()
+      .default('')
+      .transform((v) =>
+        v
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean),
+      ),
+    /** Khóa công khai của Google; test trỏ về JWKS giả. */
+    GOOGLE_JWKS_URL: z
+      .url()
+      .default('https://www.googleapis.com/oauth2/v3/certs'),
+    /** Số proxy tin cậy phía trước api (đọc lúc dựng Fastify trong app.ts). */
+    TRUST_PROXY_HOPS: z.coerce.number().int().min(0).default(1),
+    /** Nhân mọi giới hạn tần suất theo IP (test e2e đặt lớn để không vướng). */
+    RATE_LIMIT_SCALE: z.coerce.number().positive().default(1),
     /** Khóa ký access token ES256, PEM PKCS#8 (`\n` được chấp nhận). Bỏ trống chỉ ở local/test: sinh khóa tạm. */
     JWT_PRIVATE_KEY: z.string().optional(),
     JWT_KID: z.string().min(1).default('local'),

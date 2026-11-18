@@ -74,13 +74,13 @@ describe('api (e2e)', () => {
       sessionId: 's-1',
       membershipsVersion: 0,
     });
-    // Qua guard → tới handler (còn 501 tới S1-BE-07).
+    // Qua guard → tới handler.
     const ok = await app.inject({
       method: 'GET',
       url: '/v1/me/memberships',
       headers: { authorization: `Bearer ${token}` },
     });
-    expect(ok.statusCode).toBe(501);
+    expect(ok.statusCode).toBe(200);
   });
 
   it('GET /health/ready kiểm tra PostgreSQL, Redis và kho S3', async () => {
@@ -118,7 +118,7 @@ describe('api (e2e)', () => {
     });
   });
 
-  it('endpoint Sprint 1 đã có hợp đồng: validate theo schema, thân hàm trả 501 tới khi làm', async () => {
+  it('body sai hợp đồng → 422 kèm lỗi theo trường', async () => {
     const bad = await app.inject({
       method: 'POST',
       url: '/v1/auth/login',
@@ -126,14 +126,6 @@ describe('api (e2e)', () => {
     });
     expect(bad.statusCode).toBe(422);
     expect(Object.keys(bad.json().errors).sort()).toEqual(['code', 'email']);
-
-    const ok = await app.inject({
-      method: 'POST',
-      url: '/v1/auth/sso/google',
-      payload: { id_token: 'x' },
-    });
-    expect(ok.statusCode).toBe(501);
-    expect(ok.json().code).toBe('NOT_IMPLEMENTED');
   });
 
   it('health nằm ngoài tiền tố /v1', async () => {

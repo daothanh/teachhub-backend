@@ -1,0 +1,12 @@
+# S0-OPS-01: cấu hình VM development (Docker + stack api/worker/PostgreSQL/Redis/MinIO sau Caddy).
+# Chạy trong infra/ansible (xem infra/README.md):
+#   ansible-playbook -i "$IP," -u root dev.yml -e @dev-vars.json -e ghcr_user=<user> -e ghcr_token=<PAT read:packages>
+- name: VM development
+  hosts: all
+  become: true
+  vars:
+    app_dir: /opt/teachhub
+    backend_image: ghcr.io/daothanh/teachhub-backend:main
+  roles:
+    - docker
+    - teachhub_dev
