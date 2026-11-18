@@ -1,0 +1,75 @@
+- name: Thư mục ứng dụng
+  ansible.builtin.file:
+    path: "{{ app_dir }}/{{ item }}"
+    state: directory
+    mode: "0755"
+  loop: ["", caddy, postgres-init, minio]
+
+- name: Chứng chỉ Origin CA
+  ansible.builtin.copy:
+    content: "{{ item.content }}"
+    dest: "{{ app_dir }}/caddy/{{ item.name }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { name: origin.pem, content: "{{ origin_cert_pem }}", mode: "0644" }
+    - { name: origin.key, content: "{{ origin_key_pem }}", mode: "0600" }
+  loop_control:
+    label: "{{ item.name }}"
+  no_log: true
+  notify: Restart caddy
+
+- name: Caddyfile
+  ansible.builtin.template:
+    src: Caddyfile.j2
+    dest: "{{ app_dir }}/caddy/Caddyfile"
+    mode: "0644"
+  notify: Restart caddy
+
+# Dùng lại script của local để bucket dev giống local/R2 (Mục 2.8).
+- name: Script khởi tạo MinIO
+  ansible.builtin.copy:
+    src: "{{ role_path }}/../../../../docker/minio/init.sh"
+    dest: "{{ app_dir }}/minio/init.sh"
+    mode: "0755"
+
+- name: Script tạo vai trò PostgreSQL
+  ansible.builtin.copy:
+    src: 01-roles.sh
+    dest: "{{ app_dir }}/postgres-init/01-roles.sh"
+    mode: "0755"
+
+# Chứa mật khẩu và khóa JWT → 0600.
+- name: Compose + biến môi trường backend
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "{{ app_dir }}/{{ item }}"
+    mode: "0600"
+  loop: [compose.yml, backend.env]
+  no_log: true
+
+- name: Đăng nhập GHCR (image private)
+  ansible.builtin.command:
+    cmd: docker login ghcr.io -u {{ ghcr_user }} --password-stdin
+    stdin: "{{ ghcr_token }}"
+  when: ghcr_token is defined
+  no_log: true
+  changed_when: false
+
+- name: Kéo image và chạy stack
+  ansible.builtin.command:
+    cmd: docker compose up -d --pull always --remove-orphans
+    chdir: "{{ app_dir }}"
+  register: up
+  changed_when: "'Started' in up.stderr or 'Recreated' in up.stderr"
+
+- name: Chờ /health/ready (db + redis + s3)
+  ansible.builtin.command:
+    cmd: >-
+      docker compose exec -T api node -e
+      "fetch('http://127.0.0.1:3000/health/ready').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
+    chdir: "{{ app_dir }}"
+  register: ready
+  retries: 12
+  delay: 5
+  until: ready.rc == 0
+  changed_when: false
