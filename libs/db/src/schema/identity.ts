@@ -11,6 +11,7 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
+import { branches, tenants } from './tenancy.js';
 
 // Danh tính (Technical Spec §4.4). RLS, audit, hàm app_private viết tay ở migration identity_rls.
 // id là UUID v7 sinh ở ứng dụng (ADR-TH-BE-001 §3).
@@ -93,9 +94,10 @@ export const memberships = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     role: text().notNull(),
-    // FK tới tenants/branches/students thêm khi các bảng đó có (S1-BE-02, Sprint 2).
-    tenantId: uuid(),
-    branchId: uuid(),
+    tenantId: uuid().references(() => tenants.id),
+    /** null = toàn tenant. */
+    branchId: uuid().references(() => branches.id),
+    // FK tới students thêm khi có bảng (Sprint 2).
     studentId: uuid(),
     status: text().notNull().default('active'),
     createdAt: createdAt(),

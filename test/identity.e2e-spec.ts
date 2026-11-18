@@ -5,6 +5,7 @@ import pg from 'pg';
 import { TxService } from '@teachhub/db';
 import { startTestDb, type TestDb } from './containers.js';
 import {
+  asPrivileged,
   expectInsertRejected,
   expectRowIsolated,
   makeActors,
@@ -27,25 +28,8 @@ describe('danh tính: users, auth_identities, refresh_tokens, memberships', () =
     ownerB: randomUUID(),
   };
 
-  /** Chạy bằng teachhub_worker với app.user_id = `userId` — thay cho hàm security definer cấp vai trò (S1-BE-08). */
-  const asPrivileged = async (
-    userId: string,
-    query: string,
-    params: unknown[],
-  ) => {
-    const c = await worker.connect();
-    try {
-      await c.query('begin');
-      await c.query(`select set_config('app.user_id', $1, true)`, [userId]);
-      await c.query(query, params);
-      await c.query('commit');
-    } catch (e) {
-      await c.query('rollback');
-      throw e;
-    } finally {
-      c.release();
-    }
-  };
+  const privileged = (userId: string, query: string, params: unknown[]) =>
+    asPrivileged(worker, userId, query, params);
 
   /** User tự tạo hồ sơ của mình (RLS `with check`); vai trò chủ tenant cấp qua đường đặc quyền. */
   const seed = async (userId: string, tenantId: string, ownerId: string) => {
@@ -54,7 +38,12 @@ describe('danh tính: users, auth_identities, refresh_tokens, memberships', () =
         sql`insert into users (id, email) values (${userId}, ${`${userId}@test.vn`})`,
       ),
     );
-    await asPrivileged(
+    await privileged(
+      userId,
+      `insert into tenants (id, type, name) values ($1, 'teacher', 'T')`,
+      [tenantId],
+    );
+    await privileged(
       userId,
       `insert into memberships (id, user_id, role, tenant_id) values ($1, $2, 'tenant_owner', $3)`,
       [ownerId, userId, tenantId],
@@ -81,7 +70,7 @@ describe('danh tính: users, auth_identities, refresh_tokens, memberships', () =
         sql`insert into memberships (id, user_id, role) values (${ids.parentA}, ${A.userId}, 'parent')`,
       );
     });
-    await asPrivileged(
+    await privileged(
       A.userId,
       `insert into memberships (id, user_id, role, tenant_id, status) values ($1, $2, 'teacher', $3, 'revoked')`,
       [ids.revokedA, A.userId, B.tenantId],
@@ -179,7 +168,7 @@ describe('danh tính: users, auth_identities, refresh_tokens, memberships', () =
 
   it('CHECK phạm vi vai trò: nhân sự phải có tenant, phụ huynh thì không', async () => {
     const insert = (role: string, tenantId: string | null) =>
-      asPrivileged(
+      privileged(
         A.userId,
         `insert into memberships (id, user_id, role, tenant_id) values ($1, $2, $3, $4)`,
         [randomUUID(), A.userId, role, tenantId],
@@ -211,7 +200,7 @@ describe('danh tính: users, auth_identities, refresh_tokens, memberships', () =
         ids.ownerA,
       ])
     ).rows[0]?.updated_at as Date;
-    await asPrivileged(
+    await privileged(
       A.userId,
       `update memberships set status = 'revoked' where id = $1`,
       [ids.ownerA],
