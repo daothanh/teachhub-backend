@@ -120,7 +120,9 @@ describe('phiên: /v1/auth/refresh, /v1/auth/logout, /v1/auth/me', () => {
       refresh(s.refresh_token),
       refresh(s.refresh_token),
     ]);
-    expect(res.map((r) => r.statusCode).sort()).toEqual([200, 401]);
+    expect(res.map((r) => r.statusCode).sort((a, b) => a - b)).toEqual([
+      200, 401,
+    ]);
   });
 
   it('tối đa 90 ngày kể từ lần đăng nhập, kể cả khi vẫn làm mới đều', async () => {
