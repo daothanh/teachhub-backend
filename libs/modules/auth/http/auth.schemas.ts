@@ -51,15 +51,18 @@ export const userSchema = z
 export type User = z.infer<typeof userSchema>;
 
 const tokens = {
-  access_token: z
-    .string()
-    .meta({
-      description: 'JWT ES256, sống 15 phút',
-      example: 'eyJhbGciOiJFUzI1NiIs…',
-    }),
+  access_token: z.string().meta({
+    description: 'JWT ES256, sống 15 phút',
+    // Ví dụ chỉ ASCII: header Authorization không nhận ký tự ngoài ASCII (mock Prism trả nguyên văn).
+    example:
+      'eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6Im1vY2sifQ.eyJzdWIiOiIwMTlhOGYzZS03YzFiLTdkMmEtOWIzZS01ZjZhN2I4YzlkMGUiLCJzaWQiOiJtb2NrLXNlc3Npb24iLCJpYXQiOjE3OTQ5NjAwMDAsImV4cCI6NDEwMjQ0NDgwMH0.bW9jay1zaWduYXR1cmU',
+  }),
   refresh_token: z
     .string()
-    .meta({ description: 'Xoay vòng mỗi lần làm mới', example: 'rt_9Qm2…' }),
+    .meta({
+      description: 'Xoay vòng mỗi lần làm mới',
+      example: 'rt_mock_9Qm2xYzT4w',
+    }),
   expires_in: z
     .int()
     .meta({ description: 'Số giây access_token còn hiệu lực', example: 900 }),
