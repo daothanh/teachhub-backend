@@ -6,7 +6,12 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
-import { ApiErrors, AppException, Public } from '@teachhub/core';
+import { sql } from 'drizzle-orm';
+import { ApiErrors, AppException, Public, uuidv7 } from '@teachhub/core';
+import { TxService } from '@teachhub/db';
+import { Mailer } from '@teachhub/infra';
+import { OTP, OtpService } from '../otp/otp.service.js';
+import { SessionService } from '../session/session.service.js';
 import {
   type GoogleSsoRequest,
   googleSsoRequestSchema,
@@ -28,6 +33,13 @@ import {
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
+  constructor(
+    private readonly otp: OtpService,
+    private readonly mailer: Mailer,
+    private readonly tx: TxService,
+    private readonly session: SessionService,
+  ) {}
+
   @Public()
   @Post('otp/send')
   @HttpCode(204)
@@ -40,8 +52,16 @@ export class AuthController {
     description: 'Đã gửi (kể cả email chưa có tài khoản)',
   })
   @ApiErrors('VALIDATION_FAILED', 'RATE_LIMITED')
-  sendOtp(@Body({ schema: otpSendRequestSchema }) _body: OtpSendRequest): void {
-    throw new AppException('NOT_IMPLEMENTED');
+  async sendOtp(
+    @Body({ schema: otpSendRequestSchema }) body: OtpSendRequest,
+  ): Promise<void> {
+    const email = body.email.toLowerCase();
+    const code = await this.otp.issue(email);
+    await this.mailer.send({
+      to: email,
+      subject: `${code} là mã đăng nhập TeachHub của bạn`,
+      text: `Mã đăng nhập TeachHub: ${code}\n\nMã hết hạn sau ${OTP.ttlSec / 60} phút. Không chia sẻ mã này cho ai. Nếu bạn không yêu cầu, hãy bỏ qua email này.`,
+    });
   }
 
   @Public()
@@ -55,10 +75,19 @@ export class AuthController {
   })
   @ApiOkResponse({ standardSchema: loginResponseSchema })
   @ApiErrors('VALIDATION_FAILED', 'OTP_INVALID', 'OTP_LOCKED', 'RATE_LIMITED')
-  login(
-    @Body({ schema: loginRequestSchema }) _body: LoginRequest,
-  ): LoginResponse {
-    throw new AppException('NOT_IMPLEMENTED');
+  async login(
+    @Body({ schema: loginRequestSchema }) body: LoginRequest,
+  ): Promise<LoginResponse> {
+    const email = body.email.toLowerCase();
+    await this.otp.verify(email, body.code);
+    // Email chưa có tài khoản = đăng ký: user chưa có vai trò nào, không tạo tenant (AC1).
+    const userId = await this.tx.run({ userId: null }, async (t) => {
+      const { rows } = await t.execute<{ id: string }>(
+        sql`select app_private.sign_in_identity('email', ${email}, ${email}, ${uuidv7()}, ${uuidv7()}) as id`,
+      );
+      return rows[0]!.id;
+    });
+    return this.session.open(userId);
   }
 
   @Public()

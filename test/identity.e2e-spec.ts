@@ -60,9 +60,6 @@ describe('danh tính: users, auth_identities, refresh_tokens, memberships', () =
     await seed(B.userId, B.tenantId, ids.ownerB);
     await tx.run({ userId: A.userId }, async (t) => {
       await t.execute(
-        sql`insert into auth_identities (id, user_id, provider, subject) values (${ids.identityA}, ${A.userId}, 'google', 'g-sub-a')`,
-      );
-      await t.execute(
         sql`insert into refresh_tokens (id, user_id, session_id, family_id, token_hash, expires_at)
             values (${ids.tokenA}, ${A.userId}, ${randomUUID()}, ${randomUUID()}, 'hash-a', now() + interval '30 days')`,
       );
@@ -70,6 +67,12 @@ describe('danh tính: users, auth_identities, refresh_tokens, memberships', () =
         sql`insert into memberships (id, user_id, role) values (${ids.parentA}, ${A.userId}, 'parent')`,
       );
     });
+    // Identity chỉ tạo qua app_private.sign_in_identity (migration 0007).
+    await privileged(
+      A.userId,
+      `insert into auth_identities (id, user_id, provider, subject) values ($1, $2, 'google', 'g-sub-a')`,
+      [ids.identityA, A.userId],
+    );
     await privileged(
       A.userId,
       `insert into memberships (id, user_id, role, tenant_id, status) values ($1, $2, 'teacher', $3, 'revoked')`,
@@ -130,6 +133,34 @@ describe('danh tính: users, auth_identities, refresh_tokens, memberships', () =
       return (a.rowCount ?? 0) + (b.rowCount ?? 0) + (c.rowCount ?? 0);
     });
     expect(changed).toBe(0);
+  });
+
+  it('app không tự gắn identity (kể cả cho chính mình): chỉ qua sign_in_identity', async () => {
+    await expectInsertRejected(
+      tx,
+      A.userId,
+      sql`insert into auth_identities (id, user_id, provider, subject) values (${randomUUID()}, ${A.userId}, 'google', 'g-sub-victim')`,
+    );
+  });
+
+  it('sign_in_identity: identity có sẵn → user cũ; email đã có → gắn vào user đó; mới → tạo user', async () => {
+    const call = (provider: string, subject: string, email: string) =>
+      tx.run(
+        { userId: null },
+        async (t) =>
+          (
+            await t.execute<{ id: string }>(
+              sql`select app_private.sign_in_identity(${provider}, ${subject}, ${email}, ${randomUUID()}, ${randomUUID()}) as id`,
+            )
+          ).rows[0]!.id,
+      );
+    expect(await call('google', 'g-sub-a', 'khac@test.vn')).toBe(A.userId);
+    expect(
+      await call('email', `${A.userId}@test.vn`, `${A.userId}@test.vn`),
+    ).toBe(A.userId);
+    const fresh = await call('email', 'moi@test.vn', 'moi@test.vn');
+    expect([A.userId, B.userId]).not.toContain(fresh);
+    expect(await call('email', 'moi@test.vn', 'moi@test.vn')).toBe(fresh);
   });
 
   it('A không tạo dữ liệu đứng tên B', async () => {

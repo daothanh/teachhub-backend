@@ -41,6 +41,11 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     const { status, body } = toErrorBody(exception);
     body.requestId = req.id;
     if (status >= 500) this.logger.error(exception);
+    // 429 (RATE_LIMITED, OTP_LOCKED): client đọc được cả header chuẩn lẫn details (§5.6).
+    const retryAfter = body.details?.retryAfterSec;
+    if (typeof retryAfter === 'number') {
+      void reply.header('Retry-After', String(retryAfter));
+    }
     void reply.status(status).send(body);
   }
 }
