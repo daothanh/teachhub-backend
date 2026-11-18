@@ -56,6 +56,15 @@ services:
     image: axllent/mailpit:v1.33.1
     ports: ['1025:1025', '8025:8025']
 
+  # Mock API cho client (S0-FL-10): trả ví dụ trong hợp đồng, validate request theo schema.
+  # Chỉ chạy khi gọi profile: pnpm mock (docker compose --profile mock up mock).
+  mock:
+    profiles: ['mock']
+    image: stoplight/prism:5.15.10
+    command: ['mock', '-h', '0.0.0.0', '--multiprocess=false', '/contracts/openapi.json']
+    ports: ['${MOCK_PORT:-4010}:4010']
+    volumes: ['./contracts:/contracts:ro']
+
 volumes:
   pg-data:
   redis-data:
