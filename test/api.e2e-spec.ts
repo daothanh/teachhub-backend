@@ -74,13 +74,13 @@ describe('api (e2e)', () => {
       sessionId: 's-1',
       membershipsVersion: 0,
     });
-    // Qua guard → tới handler (còn 501 tới S1-BE-07).
+    // Qua guard → tới handler.
     const ok = await app.inject({
       method: 'GET',
       url: '/v1/me/memberships',
       headers: { authorization: `Bearer ${token}` },
     });
-    expect(ok.statusCode).toBe(501);
+    expect(ok.statusCode).toBe(200);
   });
 
   it('GET /health/ready kiểm tra PostgreSQL, Redis và kho S3', async () => {

@@ -9,6 +9,8 @@ export interface RequestContext {
   requestId: string;
   userId: string | null;
   sessionId: string | null;
+  /** Tenant của vai trò đã qua `@RequiresRole` (MembershipGuard); null/không có với route không gắn tenant. */
+  tenantId?: string | null;
 }
 
 declare module 'fastify' {
