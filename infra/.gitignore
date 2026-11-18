@@ -1,0 +1,8 @@
+# Terraform: state chứa bí mật (mật khẩu DB, khóa origin, khóa JWT) — không commit.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+# Biến sinh từ `tofu output -json ansible_vars` — chứa bí mật.
+ansible/dev-vars.json

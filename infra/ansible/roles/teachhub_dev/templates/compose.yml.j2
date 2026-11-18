@@ -1,0 +1,106 @@
+# VM development (S0-OPS-01) — sinh bởi Ansible, đừng sửa tay. Chỉ Caddy mở cổng ra ngoài.
+name: teachhub
+
+x-backend: &backend
+  image: {{ backend_image }}
+  env_file: backend.env
+  restart: unless-stopped
+
+services:
+  caddy:
+    image: caddy:2.10-alpine
+    ports: ['443:443']
+    volumes:
+      - ./caddy:/etc/caddy:ro
+      - caddy-data:/data
+    depends_on: [api]
+    restart: unless-stopped
+
+  migrate:
+    <<: *backend
+    command: ['node', 'scripts/migrate.mjs']
+    restart: 'no'
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  api:
+    <<: *backend
+    depends_on: &backend-deps
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+      minio-init: { condition: service_completed_successfully }
+
+  worker:
+    <<: *backend
+    command: ['node', 'dist/apps/worker/main.js']
+    # Chưa có processor (thêm từ Sprint 3) nên worker thoát mã 0 — chỉ khởi động lại khi lỗi.
+    restart: on-failure
+    depends_on: *backend-deps
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_PASSWORD: '{{ db_passwords.postgres }}'
+      PG_OWNER_PASSWORD: '{{ db_passwords.owner }}'
+      PG_APP_PASSWORD: '{{ db_passwords.app }}'
+      PG_WORKER_PASSWORD: '{{ db_passwords.worker }}'
+      PG_READONLY_PASSWORD: '{{ db_passwords.readonly }}'
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d teachhub']
+      interval: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # Chỉ trong mạng compose, không mở cổng.
+  redis:
+    image: redis:7-alpine
+    command: ['redis-server', '--appendonly', 'yes', '--maxmemory-policy', 'noeviction']
+    volumes: [redis-data:/data]
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # Cùng digest với docker-compose.yml ở gốc repo (R28).
+  minio:
+    image: chainguard/minio@sha256:0f9fda72fbc6bd3560ea903aec2ceefa20f6ba82628d67656f37fb370c39ae9c
+    command: ['server', '/data', '--console-address', ':9001']
+    environment:
+      MINIO_ROOT_USER: teachhub
+      MINIO_ROOT_PASSWORD: '{{ minio_password }}'
+      MC_HOST_local: 'http://teachhub:{{ minio_password }}@localhost:9000'
+      MINIO_API_CORS_ALLOW_ORIGIN: 'https://{{ hosts.app }},https://{{ hosts.admin }}'
+    volumes: [minio-data:/data]
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 5s
+      retries: 10
+    restart: unless-stopped
+
+  minio-init:
+    image: chainguard/minio@sha256:0f9fda72fbc6bd3560ea903aec2ceefa20f6ba82628d67656f37fb370c39ae9c
+    depends_on:
+      minio: { condition: service_healthy }
+    entrypoint: ['/bin/sh', '/init.sh']
+    environment:
+      MC_HOST_local: 'http://teachhub:{{ minio_password }}@minio:9000'
+      S3_BUCKET_PRIVATE: teachhub-dev-private
+      S3_BUCKET_PUBLIC: teachhub-dev-public
+    volumes: ['./minio/init.sh:/init.sh:ro']
+    restart: 'no'
+
+  # Bắt email OTP; xem qua SSH tunnel: ssh -L 8025:127.0.0.1:8025 root@<IP>
+  mailpit:
+    image: axllent/mailpit:v1.33.1
+    ports: ['127.0.0.1:8025:8025']
+    restart: unless-stopped
+
+volumes:
+  caddy-data:
+  pg-data:
+  redis-data:
+  minio-data:
