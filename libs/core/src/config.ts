@@ -49,6 +49,10 @@ export const envSchema = z
     GOOGLE_JWKS_URL: z
       .url()
       .default('https://www.googleapis.com/oauth2/v3/certs'),
+    /** Bundle ID iOS của app — `aud` hợp lệ của identityToken Apple. Trống = từ chối mọi token Apple. */
+    APPLE_BUNDLE_ID: z.string().default(''),
+    /** Khóa công khai của Apple; test trỏ về JWKS giả. */
+    APPLE_JWKS_URL: z.url().default('https://appleid.apple.com/auth/keys'),
     /** Số proxy tin cậy phía trước api (đọc lúc dựng Fastify trong app.ts). */
     TRUST_PROXY_HOPS: z.coerce.number().int().min(0).default(1),
     /** Nhân mọi giới hạn tần suất theo IP (test e2e đặt lớn để không vướng). */

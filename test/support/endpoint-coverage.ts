@@ -62,8 +62,8 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
       'hợp đồng S1-CT-02, thân hàm trả 501 tới S2-BE-11; test chéo tenant làm cùng task đó',
   },
   'POST /v1/auth/sso/apple': {
-    notApplicable:
-      'hợp đồng S1-CT-02, thân hàm trả 501 tới S2-BE-01; test chéo tenant làm cùng task đó',
+    file: 'auth-apple.e2e-spec.ts',
+    test: 'email chưa xác minh trùng user có sẵn → không gộp, không tạo, yêu cầu OTP',
   },
   'GET /v1/classes': {
     notApplicable:

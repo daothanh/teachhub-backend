@@ -18,6 +18,7 @@ import {
 } from '@teachhub/core';
 import { TxService } from '@teachhub/db';
 import { Mailer } from '@teachhub/infra';
+import { AppleIdTokenService } from '../apple/apple-id-token.service.js';
 import { GoogleIdTokenService } from '../google/google-id-token.service.js';
 import { OTP, OtpService } from '../otp/otp.service.js';
 import { SessionService } from '../session/session.service.js';
@@ -50,6 +51,7 @@ export class AuthController {
     private readonly tx: TxService,
     private readonly session: SessionService,
     private readonly google: GoogleIdTokenService,
+    private readonly apple: AppleIdTokenService,
   ) {}
 
   @Public()
@@ -121,7 +123,6 @@ export class AuthController {
     );
   }
 
-  // Hợp đồng Sprint 2 (S1-CT-02); thân hàm ở S2-BE-01.
   @Public()
   @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @Post('sso/apple')
@@ -133,10 +134,24 @@ export class AuthController {
   })
   @ApiOkResponse({ standardSchema: loginResponseSchema })
   @ApiErrors('VALIDATION_FAILED', 'UNAUTHENTICATED', 'RATE_LIMITED')
-  ssoApple(
-    @Body({ schema: appleSsoRequestSchema }) _body: AppleSsoRequest,
-  ): LoginResponse {
-    throw new AppException('NOT_IMPLEMENTED');
+  async ssoApple(
+    @Body({ schema: appleSsoRequestSchema }) body: AppleSsoRequest,
+  ): Promise<LoginResponse> {
+    const a = await this.apple.verify(body.id_token, body.nonce);
+    // Không có email (đăng nhập lại): chỉ identity đã có. Email chưa xác minh: không gộp, không tạo (như Google).
+    // Relay: tạo user với địa chỉ relay (duy nhất theo người dùng + app, không ai khác giữ được) rồi không bao giờ gộp theo email thật.
+    // shortcut: user có sẵn mang đúng địa chỉ relay này vẫn được gắn lại (chỉ chính chủ có địa chỉ đó); upgrade khi có cột cờ.
+    const email = a.email ?? '';
+    const linkByEmail =
+      a.email !== null && (a.emailMergeable || a.isPrivateRelay);
+    return this.signIn(
+      'apple',
+      a.subject,
+      email,
+      body.fullName || null,
+      linkByEmail,
+      true,
+    );
   }
 
   @Public()
@@ -180,12 +195,14 @@ export class AuthController {
    * chưa có → đăng ký (user chưa vai trò, không tenant — US-0.1 AC1). Rồi mở phiên.
    */
   private async signIn(
-    provider: 'email' | 'google',
+    provider: 'email' | 'google' | 'apple',
     subject: string,
     email: string,
     name: string | null,
     /** Nhà cung cấp có thẩm quyền với email → được gộp/tạo user theo email; không thì chỉ identity đã có. */
     linkByEmail: boolean,
+    /** Apple: tên client gửi không có chữ ký → chỉ ghi cho user vừa tạo. shortcut: "vừa tạo" = created_at trong 1 phút (hàm SQL không trả cờ created, không được thêm migration). */
+    nameOnlyForNewUser = false,
   ): Promise<LoginResponse> {
     const userId = await this.tx.run({ userId: null }, async (t) => {
       const { rows } = await t.execute<{ id: string | null }>(
@@ -202,7 +219,8 @@ export class AuthController {
     if (name) {
       await this.tx.run({ userId }, (t) =>
         t.execute(
-          sql`update users set display_name = ${name} where id = ${userId} and display_name is null`,
+          sql`update users set display_name = ${name} where id = ${userId} and display_name is null
+            and (${!nameOnlyForNewUser}::boolean or created_at > now() - interval '1 minute')`,
         ),
       );
     }
