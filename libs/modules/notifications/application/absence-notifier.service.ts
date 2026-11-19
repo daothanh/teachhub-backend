@@ -131,7 +131,9 @@ export class AbsenceNotifier {
         sessionStartsAt: formatInZone(new Date(ctx.starts_at), ctx.tz),
       };
 
-      // Người nhận: đính chính chỉ tới người đã nhận báo vắng của buổi này trong 10 phút trước đó.
+      // Người nhận: đính chính chỉ tới người ĐÃ NHẬN (delivery 'sent') báo vắng của buổi này trong 10 phút trước đó;
+      // báo vắng chưa tới ai thì không có gì để đính chính.
+      // shortcut: dòng trước migration 0022 có event_at NULL thì lấy created_at làm dự phòng; bỏ coalesce khi không còn dòng cũ.
       const recipients =
         type === TYPE_ABSENT
           ? (
@@ -151,11 +153,12 @@ export class AbsenceNotifier {
                 user_id: string;
                 membership_id: string | null;
               }>(sql`
-                select recipient_user_id as user_id, membership_id from notifications
-                where tenant_id = ${tenantId} and type = ${TYPE_ABSENT}
-                  and payload->>'sessionId' = ${payload.sessionId}
-                  and payload->>'studentId' = ${c.studentId}
-                  and event_at >= ${new Date(recordedAt.getTime() - CORRECTION_WINDOW_MS)}`)
+                select n.recipient_user_id as user_id, n.membership_id from notifications n
+                join notification_deliveries d on d.notification_id = n.id and d.channel = 'push' and d.status = 'sent'
+                where n.tenant_id = ${tenantId} and n.type = ${TYPE_ABSENT}
+                  and n.payload->>'sessionId' = ${payload.sessionId}
+                  and n.payload->>'studentId' = ${c.studentId}
+                  and coalesce(n.event_at, n.created_at) >= ${new Date(recordedAt.getTime() - CORRECTION_WINDOW_MS)}`)
             ).rows;
 
       for (const r of recipients) {
