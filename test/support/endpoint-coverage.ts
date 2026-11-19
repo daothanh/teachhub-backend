@@ -50,12 +50,12 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
     test: 'app không tự gọi được hàm tạo không gian cho user khác (lấy user từ app.user_id)',
   },
   'GET /v1/onboarding': {
-    notApplicable:
-      'hợp đồng S1-CT-02, thân hàm trả 501 tới S2-BE-10; test chéo tenant làm cùng task đó',
+    file: 'onboarding.e2e-spec.ts',
+    test: 'chéo tenant: trạng thái của A không lộ sang B và PATCH của B không đổi A',
   },
   'PATCH /v1/onboarding/steps/{step}': {
-    notApplicable:
-      'hợp đồng S1-CT-02, thân hàm trả 501 tới S2-BE-10; test chéo tenant làm cùng task đó',
+    file: 'onboarding.e2e-spec.ts',
+    test: 'chéo tenant: trạng thái của A không lộ sang B và PATCH của B không đổi A',
   },
   'POST /v1/center-waitlist': {
     notApplicable:
