@@ -50,23 +50,36 @@ export class InviteAcceptanceService {
   }
 
   async preview(token: string, ip: string): Promise<InvitePreview> {
-    await this.limiter.assertNotLocked('preview', null, ip);
-    const rows = await this.tx.run(
-      { userId: null },
-      async (t) =>
-        (
-          await t.execute<{
-            teacher_name: string;
-            student_given_name: string;
-            expires_at: Date | string;
-          }>(sql`select * from app_private.preview_invite(${hashToken(token)})`)
-        ).rows,
-    );
-    const r = rows[0];
-    if (!r) {
-      await this.limiter.recordFailure('preview', null, ip);
-      throw new AppException('INVITE_INVALID');
+    const slot = await this.limiter.reserve('preview', null, ip);
+    let r:
+      | {
+          teacher_name: string;
+          student_given_name: string;
+          expires_at: Date | string;
+        }
+      | undefined;
+    try {
+      r = (
+        await this.tx.run(
+          { userId: null },
+          async (t) =>
+            (
+              await t.execute<{
+                teacher_name: string;
+                student_given_name: string;
+                expires_at: Date | string;
+              }>(
+                sql`select * from app_private.preview_invite(${hashToken(token)})`,
+              )
+            ).rows,
+        )
+      )[0];
+    } catch (e) {
+      await this.limiter.release(slot);
+      throw e;
     }
+    if (!r) throw new AppException('INVITE_INVALID'); // giữ lượt đã giữ = một lần sai
+    await this.limiter.release(slot);
     return {
       teacherName: r.teacher_name,
       studentGivenName: r.student_given_name,
@@ -83,50 +96,61 @@ export class InviteAcceptanceService {
     run: (exec: (t: Tx) => Promise<InviteAccepted>) => Promise<InviteAccepted>,
   ): Promise<InviteAccepted> {
     const userId = input.ctx.userId!;
-    await this.limiter.assertNotLocked('accept', userId, input.ip);
-    await this.consents.assertAccepted(userId, 'parent');
-
-    const marker = createHash('sha256')
-      .update(
-        `${userId}|${input.kind}|${input.idempotencyKey ?? ''}|${input.secret}`,
-      )
-      .digest('hex');
-    // Phát lại cùng Idempotency-Key một yêu cầu đã trả 410: trả lại 410, không đếm thêm lần sai.
-    if (input.idempotencyKey && (await this.limiter.seenFailure(marker))) {
-      throw new AppException('INVITE_INVALID');
-    }
-    const hash =
-      input.kind === 'token'
-        ? hashToken(input.secret)
-        : this.codeHash(input.secret);
+    // Giữ chỗ nguyên tử trước (bộ đếm toàn cục chỉ cho mã ngắn), rồi mới tới đồng ý điều khoản và tra mã.
+    const slot = await this.limiter.reserve(
+      'accept',
+      userId,
+      input.ip,
+      input.kind === 'code',
+    );
+    let counted = false;
     try {
-      const result = await run(async (t) => {
-        const rows = (
-          await t.execute<{
-            membership_id: string;
-            student_id: string;
-            student_name: string;
-          }>(
-            sql`select * from app_private.redeem_invite(${input.kind === 'code'}, ${hash}, ${uuidv7()})`,
-          )
-        ).rows;
-        const r = rows[0];
-        if (!r) throw new AppException('INVITE_INVALID');
-        return {
-          membershipId: r.membership_id,
-          studentId: r.student_id,
-          studentName: r.student_name,
-        };
-      });
-      // Vai trò Phụ huynh mới phải có hiệu lực ngay với token đang dùng (như POST /me/roles).
-      await this.cache.invalidate(userId);
-      return result;
-    } catch (e) {
-      if (e instanceof AppException && e.code === 'INVITE_INVALID') {
-        await this.limiter.recordFailure('accept', userId, input.ip);
-        if (input.idempotencyKey) await this.limiter.markFailure(marker);
+      await this.consents.assertAccepted(userId, 'parent');
+      const marker = createHash('sha256')
+        .update(
+          `${userId}|${input.kind}|${input.idempotencyKey ?? ''}|${input.secret}`,
+        )
+        .digest('hex');
+      // Phát lại cùng Idempotency-Key một yêu cầu đã trả 410: trả lại 410, không đếm thêm lần sai.
+      if (input.idempotencyKey && (await this.limiter.seenFailure(marker))) {
+        throw new AppException('INVITE_INVALID');
       }
-      throw e;
+      const hash =
+        input.kind === 'token'
+          ? hashToken(input.secret)
+          : this.codeHash(input.secret);
+      try {
+        const result = await run(async (t) => {
+          const rows = (
+            await t.execute<{
+              membership_id: string;
+              student_id: string;
+              student_name: string;
+            }>(
+              sql`select * from app_private.redeem_invite(${input.kind === 'code'}, ${hash}, ${uuidv7()})`,
+            )
+          ).rows;
+          const r = rows[0];
+          if (!r) throw new AppException('INVITE_INVALID');
+          return {
+            membershipId: r.membership_id,
+            studentId: r.student_id,
+            studentName: r.student_name,
+          };
+        });
+        // Vai trò Phụ huynh mới phải có hiệu lực ngay với token đang dùng (như POST /me/roles).
+        await this.cache.invalidate(userId);
+        return result;
+      } catch (e) {
+        if (e instanceof AppException && e.code === 'INVITE_INVALID') {
+          counted = true;
+          if (input.idempotencyKey) await this.limiter.markFailure(marker);
+        }
+        throw e;
+      }
+    } finally {
+      // Thành công, phát lại (đã có marker), 403 chưa đồng ý hay lỗi hệ thống: không phải lần sai mới → hoàn lượt.
+      if (!counted) await this.limiter.release(slot);
     }
   }
 }

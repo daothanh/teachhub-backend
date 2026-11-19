@@ -152,7 +152,12 @@ export class Idempotency {
           .status(done.statusCode)
           .header('Idempotent-Replayed', 'true')
           .header('Cache-Control', 'no-store');
-        return this.open<T>(done.responseBody as { enc: string }, aad);
+        try {
+          return this.open<T>(done.responseBody as { enc: string }, aad);
+        } catch {
+          // Giải mã lỗi (đã đổi IDEMPOTENCY_ENC_KEY, dữ liệu hỏng): bắt client dùng khóa mới, không 500.
+          throw new AppException('CONFLICT_STALE');
+        }
       }
       void reply.status(done.statusCode).header('Idempotent-Replayed', 'true');
       return done.responseBody as T;
