@@ -218,19 +218,19 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
       'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-04; test chéo tenant/học viên làm cùng task đó',
   },
   'POST /v1/sessions/{id}/reschedule': {
-    notApplicable:
-      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-07; test chéo tenant/học viên làm cùng task đó',
+    file: 'session-changes.e2e-spec.ts',
+    test: 'chéo tenant và vai trò: B không đụng buổi của A (404), nhân sự không phải chủ → 403',
   },
   'POST /v1/sessions/{id}/cancel': {
-    notApplicable:
-      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-07; test chéo tenant/học viên làm cùng task đó',
+    file: 'session-changes.e2e-spec.ts',
+    test: 'chéo tenant và vai trò: B không đụng buổi của A (404), nhân sự không phải chủ → 403',
   },
   'POST /v1/sessions/{id}/makeup': {
-    notApplicable:
-      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-07; test chéo tenant/học viên làm cùng task đó',
+    file: 'session-changes.e2e-spec.ts',
+    test: 'chéo tenant và vai trò: B không đụng buổi của A (404), nhân sự không phải chủ → 403',
   },
   'DELETE /v1/me': {
-    notApplicable:
-      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-09; test chéo tenant/học viên làm cùng task đó',
+    file: 'delete-account.e2e-spec.ts',
+    test: 'phụ huynh xóa tài khoản: gỡ liên kết, thiết bị, thông báo; học viên và không gian của giáo viên không đổi',
   },
 };
