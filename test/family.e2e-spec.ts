@@ -219,26 +219,38 @@ describe('family: phụ huynh xem con', () => {
       expect(next.json().summary.present).toBe(1);
     });
 
-    it('buổi tương lai chưa điểm danh là upcoming, buổi vừa qua giờ kết thúc mới là notRecorded', async () => {
+    it('buổi tương lai chưa điểm danh là upcoming, buổi đã qua giờ kết thúc là notRecorded (đếm chính xác)', async () => {
       const p = await mkParent();
       const c = await child(A, p);
-      const today = new Date(Date.now() + 7 * 3_600_000)
-        .toISOString()
-        .slice(0, 10); // ngày hiện tại ở UTC+7
-      const tomorrow = new Date(Date.now() + 31 * 3_600_000)
-        .toISOString()
-        .slice(0, 10);
-      await session(c, today, { from: '00:00', to: '00:01' }); // đã kết thúc trong ngày (trừ phi chạy đúng 00:00)
-      await session(c, tomorrow); // chưa tới
-      const res = await call(
-        p.token,
-        'GET',
-        `/family/students/${c.studentId}/attendance`,
-      );
-      expect(res.statusCode, res.body).toBe(200);
-      const sum = res.json().summary;
-      expect(sum.upcoming).toBeGreaterThanOrEqual(1);
-      expect(sum.notRecorded + sum.upcoming).toBeGreaterThanOrEqual(2);
+      const ymd = (offsetMs: number) =>
+        new Date(Date.now() + 7 * 3_600_000 + offsetMs)
+          .toISOString()
+          .slice(0, 10); // ngày ở UTC+7
+      const today = ymd(0);
+      const tomorrow = ymd(86_400_000);
+      // Buổi hôm nay kết thúc 00:01 (đã qua), buổi ngày mai bắt đầu 00:00 (chưa tới): không phụ thuộc giờ chạy.
+      await session(c, today, { from: '00:00', to: '00:01' });
+      await session(c, tomorrow, { from: '00:00', to: '00:01' });
+      // Nếu hôm nay là Chủ Nhật thì ngày mai rơi sang tuần sau: mỗi tuần được kiểm riêng.
+      const weekOf = async (d: string) =>
+        (
+          await call(
+            p.token,
+            'GET',
+            `/family/students/${c.studentId}/attendance?week=${d}`,
+          )
+        ).json();
+      const wToday = await weekOf(today);
+      const wTomorrow = await weekOf(tomorrow);
+      const same = wToday.weekStart === wTomorrow.weekStart;
+      expect(wToday.summary).toMatchObject({
+        notRecorded: 1,
+        upcoming: same ? 1 : 0,
+      });
+      expect(wTomorrow.summary).toMatchObject({
+        upcoming: 1,
+        notRecorded: same ? 1 : 0,
+      });
     });
 
     it('week sai định dạng → 422', async () => {

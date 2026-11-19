@@ -438,8 +438,10 @@ describe('lời mời phụ huynh và đồng ý điều khoản', () => {
           call(null, 'POST', '/invites/preview', { token }),
         ),
       );
+      // Ngưỡng 5 lần sai/user: chia các lần nhận sai cho hai tài khoản.
+      const p2 = await mkParent();
       const accepts = await Promise.all(
-        tokens.map((token) => accept(p, token)),
+        tokens.map((token, i) => accept(i < 3 ? p : p2, token)),
       );
       for (const r of [...previews, ...accepts]) {
         expect(shape(r).status).toBe(410);
@@ -645,6 +647,65 @@ describe('lời mời phụ huynh và đồng ý điều khoản', () => {
         410,
       );
       expect(await failures(counter)).toBe(2);
+    });
+
+    it('request song song không vượt ngưỡng: 12 lần sai cùng lúc → đúng 5 lần 410, 7 lần 429', async () => {
+      const p = await mkParent();
+      const res = await Promise.all(
+        Array.from({ length: 12 }, (_, i) =>
+          redeem(p, `ZZZZZZY${i % 10}`, undefined, `198.51.100.${30 + i}`),
+        ),
+      );
+      const by = (n: number) => res.filter((r) => r.statusCode === n).length;
+      expect([by(410), by(429)]).toEqual([5, 7]);
+      expect(
+        await failures(`inv:f:accept:u:${p.userId}`),
+      ).toBeGreaterThanOrEqual(5);
+    });
+
+    it('bộ đếm toàn cục chỉ áp cho đổi mã ngắn: token sai không chạm bộ đếm toàn cục, mã sai thì có', async () => {
+      const p = await mkParent();
+      const before = await failures('inv:f:accept:g');
+      await accept(p, 'x'.repeat(43), undefined, '198.51.100.60');
+      expect(await failures('inv:f:accept:g')).toBe(before);
+      await redeem(p, 'ZZZZZZZX', undefined, '198.51.100.61');
+      expect(await failures('inv:f:accept:g')).toBe(before + 1);
+    });
+
+    it('membership Phụ huynh đã revoked: nhận lời mời trả 410 đồng nhất, lời mời không bị đốt, không khôi phục', async () => {
+      const s = await student(A, 1);
+      const inv = await invite(A, s.id, s.guardians[0]!.id);
+      const p = await mkParent();
+      const role = await call(p.token, 'POST', '/me/roles', { role: 'parent' });
+      expect(role.statusCode).toBe(201);
+      await t.worker.query(
+        `update memberships set status = 'revoked' where id = $1`,
+        [role.json().membershipId],
+      );
+      const r = await accept(p, inv.token, undefined, '198.51.100.70');
+      expect(r.statusCode).toBe(410);
+      expect((await row(inv.id)).status).toBe('pending');
+      const m = await t.worker.query(
+        `select status from memberships where id = $1`,
+        [role.json().membershipId],
+      );
+      expect(m.rows[0].status).toBe('revoked');
+    });
+
+    it('cùng user nhận hai lời mời song song: không 500, cả hai thành công với một membership', async () => {
+      const s = await student(A, 2);
+      const [i1, i2] = [
+        await invite(A, s.id, s.guardians[0]!.id),
+        await invite(A, s.id, s.guardians[1]!.id),
+      ];
+      const p = await mkParent();
+      const res = await Promise.all([accept(p, i1.token), accept(p, i2.token)]);
+      expect(res.map((r) => r.statusCode)).toEqual([200, 200]);
+      const m = await t.worker.query(
+        `select count(*)::int n from memberships where user_id = $1 and role = 'parent'`,
+        [p.userId],
+      );
+      expect(m.rows[0].n).toBe(1);
     });
 
     it('IP gộp theo /64: nhiều địa chỉ cùng dải IPv6 chung một bộ đếm', async () => {

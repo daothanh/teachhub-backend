@@ -3,6 +3,7 @@ import { and, asc, count, eq, inArray, isNull, sql } from 'drizzle-orm';
 import {
   AppException,
   guardianInviteStatus,
+  toLatestInvite,
   type PageQuery,
   type Paginated,
   paginated,
@@ -330,12 +331,7 @@ export class StudentsService {
           phone: g.phone,
           email: g.email,
           inviteStatus: guardianInviteStatus(g, latest.get(g.id), now),
-          latestInvite: latest.has(g.id)
-            ? {
-                id: latest.get(g.id)!.id,
-                expiresAt: latest.get(g.id)!.expiresAt.toISOString(),
-              }
-            : null,
+          latestInvite: toLatestInvite(latest.get(g.id)),
         })),
     }));
   }

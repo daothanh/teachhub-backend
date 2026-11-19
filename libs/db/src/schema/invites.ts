@@ -67,6 +67,10 @@ export const invites = pgTable(
       .where(sql`${t.status} = 'pending'`),
     index('invites_tenant_student_idx').on(t.tenantId, t.studentId),
     index('invites_guardian_created_idx').on(t.guardianId, t.createdAt.desc()),
+    // Tra lời mời đã dùng theo user (xóa tài khoản, tra cứu về sau): chỉ các dòng có used_by.
+    index('invites_used_by_idx')
+      .on(t.usedBy)
+      .where(sql`${t.usedBy} is not null`),
     check('invites_kind_check', sql`${t.kind} in ('parent', 'student')`),
     check(
       'invites_status_check',

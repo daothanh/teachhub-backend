@@ -43,6 +43,7 @@ CREATE UNIQUE INDEX "invites_short_code_pending_uq" ON "invites" USING btree ("s
 CREATE UNIQUE INDEX "invites_guardian_pending_uq" ON "invites" USING btree ("guardian_id") WHERE "invites"."status" = 'pending';--> statement-breakpoint
 CREATE INDEX "invites_tenant_student_idx" ON "invites" USING btree ("tenant_id","student_id");--> statement-breakpoint
 CREATE INDEX "invites_guardian_created_idx" ON "invites" USING btree ("guardian_id","created_at" DESC NULLS LAST);--> statement-breakpoint
+CREATE INDEX "invites_used_by_idx" ON "invites" USING btree ("used_by") WHERE "invites"."used_by" is not null;--> statement-breakpoint
 
 --> statement-breakpoint
 -- ===== RLS =====
@@ -144,17 +145,39 @@ declare
   uid uuid := nullif(current_setting('app.user_id', true), '')::uuid;
   inv record;
   m_id uuid;
+  m_status text;
+  g_id uuid;
 begin
   if uid is null then
     raise exception 'redeem_invite: thiếu app.user_id' using errcode = '42501';
   end if;
+  -- Tuần tự hóa các lần nhận song song của cùng user: tránh hai lần cùng tạo membership Phụ huynh (unique → 500).
+  perform pg_advisory_xact_lock(hashtextextended('redeem_invite:' || uid::text, 0));
+
+  -- shortcut: membership Phụ huynh đã `revoked` thì không khôi phục (bảng chưa phân biệt bị gỡ hay tự gỡ); trả 0 dòng
+  -- → 410 đồng nhất. Chờ Owner chốt có cho tự gỡ rồi nhận lại không. Kiểm TRƯỚC khi dùng lời mời để không đốt nó.
+  select m.id, m.status into m_id, m_status from public.memberships m
+   where m.user_id = uid and m.role = 'parent' and m.tenant_id is null and m.student_id is null;
+  if m_id is not null and m_status <> 'active' then
+    return;
+  end if;
+
+  -- Thứ tự khóa giống InvitesService.issue: phụ huynh (FOR NO KEY UPDATE) trước, lời mời sau, tránh deadlock.
+  select i.guardian_id into g_id from public.invites i
+   where case when p_by_code then i.short_code_hash = p_hash else i.token_hash = p_hash end
+     and i.kind = 'parent' and i.status = 'pending';
+  if g_id is null then
+    return;
+  end if;
+  perform 1 from public.guardians g where g.id = g_id for no key update;
+
   update public.invites i
      set status = 'used', used_at = now(), used_by = uid,
          accepted_by_name = (select coalesce(u.display_name, split_part(u.email, '@', 1), 'Phụ huynh')
                                from public.users u where u.id = uid)
    where case when p_by_code then i.short_code_hash = p_hash and i.short_code_expires_at > now()
               else i.token_hash = p_hash end
-     and i.status = 'pending' and i.expires_at > now()
+     and i.kind = 'parent' and i.status = 'pending' and i.expires_at > now()
      and exists (select 1 from public.guardians g
                   where g.id = i.guardian_id and g.deleted_at is null and g.user_id is null)
   returning i.id, i.tenant_id, i.student_id, i.guardian_id into inv;
@@ -164,12 +187,8 @@ begin
 
   update public.guardians set user_id = uid where id = inv.guardian_id;
 
-  select m.id into m_id from public.memberships m
-   where m.user_id = uid and m.role = 'parent' and m.tenant_id is null and m.student_id is null;
   if m_id is null then
     insert into public.memberships (id, user_id, role) values (p_membership_id, uid, 'parent') returning id into m_id;
-  else
-    update public.memberships set status = 'active' where id = m_id and status <> 'active';
   end if;
   update public.users set memberships_version = memberships_version + 1 where id = uid;
 

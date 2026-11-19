@@ -55,3 +55,12 @@ export function mergeInviteStatus(
 ): GuardianInviteStatus {
   return RANK.find((s) => statuses.includes(s)) ?? 'not_invited';
 }
+
+/** Dạng trả về của `latestInvite` trong Student/roster; null nếu chưa mời. Dùng chung để không lặp khối map. */
+export function toLatestInvite(
+  latest: Pick<LatestInviteRow, 'id' | 'expiresAt'> | undefined,
+): { id: string; expiresAt: string } | null {
+  return latest
+    ? { id: latest.id, expiresAt: latest.expiresAt.toISOString() }
+    : null;
+}
