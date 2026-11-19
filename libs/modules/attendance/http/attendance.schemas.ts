@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { cursorPageSchema, cursorQuerySchema } from '@teachhub/core';
+import { MUTATION_ERROR_CODES } from './mutation-error-codes.js';
 import { sessionStatusSchema } from '@teachhub/modules/schedule';
 
 /** Bốn trạng thái điểm danh (Spec §4 bảng `attendance`). Chưa điểm danh = không có dòng (`null` khi đọc). */
@@ -192,13 +193,6 @@ export const attendanceSyncRequestSchema = z
     },
   });
 export type AttendanceSyncRequest = z.infer<typeof attendanceSyncRequestSchema>;
-
-/** Mã lỗi có thể có ở phần tử `rejected`; test đối chiếu là tập con của contracts/error_codes.json. */
-export const MUTATION_ERROR_CODES = [
-  'ATTENDANCE_EDIT_WINDOW_CLOSED',
-  'READONLY_PLAN_LIMIT',
-  'NOT_FOUND',
-] as const;
 
 export const attendanceMutationResultSchema = z
   .object({
