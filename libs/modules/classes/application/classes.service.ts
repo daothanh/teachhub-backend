@@ -15,6 +15,7 @@ import {
   students,
   type Tx,
 } from '@teachhub/db';
+import { ScheduleRulesReader } from '@teachhub/modules/schedule';
 import { classDraftErrors } from '../domain/class-rules.js';
 import type {
   Class,
@@ -31,6 +32,8 @@ type ClassRow = typeof classes.$inferSelect;
  */
 @Injectable()
 export class ClassesService {
+  constructor(private readonly rules: ScheduleRulesReader) {}
+
   async list(
     tx: Tx,
     tenantId: string,
@@ -50,7 +53,11 @@ export class ClassesService {
         .offset(toLimitOffset(query).offset),
       tx.select({ n: count() }).from(classes).where(where),
     ]);
-    return paginated(await this.hydrate(tx, rows), total?.n ?? 0, query);
+    return paginated(
+      await this.hydrate(tx, tenantId, rows),
+      total?.n ?? 0,
+      query,
+    );
   }
 
   async get(tx: Tx, tenantId: string, id: string): Promise<Class> {
@@ -59,7 +66,7 @@ export class ClassesService {
       .from(classes)
       .where(and(eq(classes.tenantId, tenantId), eq(classes.id, id)));
     if (!row) throw new AppException('NOT_FOUND');
-    return (await this.hydrate(tx, [row]))[0]!;
+    return (await this.hydrate(tx, tenantId, [row]))[0]!;
   }
 
   async create(
@@ -96,7 +103,7 @@ export class ClassesService {
       .returning();
     // `id` do client gửi đã có (kể cả ở tenant khác): không tiết lộ, coi như dữ liệu cũ.
     if (!row) throw new AppException('CONFLICT_STALE');
-    const [created] = await this.hydrate(tx, [row]);
+    const [created] = await this.hydrate(tx, ctx.tenantId, [row]);
     return { ...created!, warnings: [] };
   }
 
@@ -131,7 +138,7 @@ export class ClassesService {
       .set(patch)
       .where(eq(classes.id, id))
       .returning();
-    return (await this.hydrate(tx, [row!]))[0]!;
+    return (await this.hydrate(tx, tenantId, [row!]))[0]!;
   }
 
   /** Gọi lại trên lớp đã lưu trữ vẫn trả lớp hiện tại (không đổi `archivedAt`). */
@@ -147,12 +154,16 @@ export class ClassesService {
         ),
       )
       .returning();
-    if (row) return (await this.hydrate(tx, [row]))[0]!;
+    if (row) return (await this.hydrate(tx, tenantId, [row]))[0]!;
     return this.get(tx, tenantId, id);
   }
 
-  /** Ghép `enrolledCount` (ghi danh mở, học viên chưa nghỉ) và `scheduleRules` (bảng có ở S2-BE-07, nối ở S2-BE-08). */
-  private async hydrate(tx: Tx, rows: ClassRow[]): Promise<Class[]> {
+  /** Ghép `enrolledCount` (ghi danh mở, học viên chưa nghỉ) và `scheduleRules` (qua cổng của module schedule). */
+  private async hydrate(
+    tx: Tx,
+    tenantId: string,
+    rows: ClassRow[],
+  ): Promise<Class[]> {
     const counts = rows.length
       ? await tx
           .select({ classId: enrollments.classId, n: count() })
@@ -171,6 +182,11 @@ export class ClassesService {
           .groupBy(enrollments.classId)
       : [];
     const enrolled = new Map(counts.map((c) => [c.classId, c.n]));
+    const rules = await this.rules.byClass(
+      tx,
+      tenantId,
+      rows.map((r) => r.id),
+    );
     return rows.map((r) => ({
       id: r.id,
       name: r.name,
@@ -183,7 +199,7 @@ export class ClassesService {
       endDate: r.endDate,
       status: r.status as Class['status'],
       enrolledCount: enrolled.get(r.id) ?? 0,
-      scheduleRules: [],
+      scheduleRules: rules.get(r.id) ?? [],
       createdAt: r.createdAt.toISOString(),
     }));
   }

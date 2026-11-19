@@ -106,12 +106,12 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
     test: 'tenant B không sửa học viên của A (404) và không thấy trong danh sách/tìm kiếm',
   },
   'PUT /v1/classes/{id}/schedule-rules': {
-    notApplicable:
-      'hợp đồng S1-CT-02, thân hàm trả 501 tới S2-BE-08; test chéo tenant làm cùng task đó',
+    file: 'schedule.e2e-spec.ts',
+    test: 'tenant B không đặt lịch cho lớp của A (404), không thấy buổi của A, lọc theo classId của A cho danh sách rỗng',
   },
   'GET /v1/sessions': {
-    notApplicable:
-      'hợp đồng S1-CT-02, thân hàm trả 501 tới S2-BE-08; test chéo tenant làm cùng task đó',
+    file: 'schedule.e2e-spec.ts',
+    test: 'tenant B không đặt lịch cho lớp của A (404), không thấy buổi của A, lọc theo classId của A cho danh sách rỗng',
   },
   'GET /v1/admin/bank-transfer-orders': {
     notApplicable:
