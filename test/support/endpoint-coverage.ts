@@ -166,40 +166,40 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
     test: 'POST /notifications/read: chéo user bị bỏ qua',
   },
   'POST /v1/students/{id}/invites': {
-    notApplicable:
-      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-03; test chéo tenant/học viên làm cùng task đó',
+    file: 'invites.e2e-spec.ts',
+    test: 'guardianId không thuộc học viên',
   },
   'GET /v1/students/{id}/invites': {
-    notApplicable:
-      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-03; test chéo tenant/học viên làm cùng task đó',
+    file: 'invites.e2e-spec.ts',
+    test: 'chỉ lưu băm',
   },
   'POST /v1/invites/{id}/revoke': {
-    notApplicable:
-      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-03; test chéo tenant/học viên làm cùng task đó',
+    file: 'invites.e2e-spec.ts',
+    test: 'thu hồi: idempotent',
   },
   'POST /v1/invites/{id}/resend': {
-    notApplicable:
-      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-03; test chéo tenant/học viên làm cùng task đó',
+    file: 'invites.e2e-spec.ts',
+    test: 'thu hồi: idempotent',
   },
   'POST /v1/invites/redeem-code': {
-    notApplicable:
-      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-04; test chéo tenant/học viên làm cùng task đó',
+    file: 'invites.e2e-spec.ts',
+    test: 'mã ngắn: không phân biệt hoa/thường',
   },
   'POST /v1/consents': {
-    notApplicable:
-      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-05; test chéo tenant/học viên làm cùng task đó',
+    file: 'invites.e2e-spec.ts',
+    test: 'ghi thêm dòng; trùng',
   },
   'GET /v1/consents/status': {
-    notApplicable:
-      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-05; test chéo tenant/học viên làm cùng task đó',
+    file: 'invites.e2e-spec.ts',
+    test: 'phiên bản khác hiện hành',
   },
   'GET /v1/family/students': {
-    notApplicable:
-      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-06; test chéo tenant/học viên làm cùng task đó',
+    file: 'family.e2e-spec.ts',
+    test: 'danh sách con gộp mọi giáo viên',
   },
   'GET /v1/family/students/{id}/attendance': {
-    notApplicable:
-      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-06; test chéo tenant/học viên làm cùng task đó',
+    file: 'family.e2e-spec.ts',
+    test: 'cross-parent / cross-tenant',
   },
   'POST /v1/web-push/subscriptions': {
     notApplicable:
@@ -210,12 +210,12 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
       'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-08b; test chéo tenant/học viên làm cùng task đó',
   },
   'POST /v1/invites/preview': {
-    notApplicable:
-      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-04; test chéo tenant/học viên làm cùng task đó',
+    file: 'invites.e2e-spec.ts',
+    test: 'preview công khai chỉ trả',
   },
   'POST /v1/invites/accept': {
-    notApplicable:
-      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-04; test chéo tenant/học viên làm cùng task đó',
+    file: 'invites.e2e-spec.ts',
+    test: 'nhận thành công',
   },
   'POST /v1/sessions/{id}/reschedule': {
     notApplicable:
