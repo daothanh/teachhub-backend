@@ -7,3 +7,4 @@ export function linkParents(
   pool: pg.Pool,
   opts: { studentId: string; parentX: string; parentY: string },
 ): Promise<{ x: string; y: string }>;
+export function assertLocalDatabase(url: string, force?: boolean): void;

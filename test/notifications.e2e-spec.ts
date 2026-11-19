@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { Queue, Worker } from 'bullmq';
 import { drizzle } from 'drizzle-orm/node-postgres';
+import { Redis as IORedis } from 'ioredis';
 import { TxService } from '@teachhub/db';
 import type { PushMessage, PushResult } from '@teachhub/infra';
 import * as schema from '../libs/db/src/schema/index.js';
@@ -71,16 +73,27 @@ describe('thông báo báo vắng', () => {
     tenantId: A.tenantId,
     payload: { sessionId, recordedAt: recordedAt.toISOString(), changes },
   });
-  const change = (
+  /** Đặt dòng điểm danh hiện tại của học viên rồi trả phần tử thay đổi của sự kiện outbox. */
+  const change = async (
     studentId: string,
     status: string,
     previousStatus: string | null,
-  ): Change => ({
-    studentId,
-    attendanceId: randomUUID(),
-    status,
-    previousStatus,
-  });
+  ): Promise<Change> => {
+    const attendanceId = randomUUID();
+    await t.worker.query(
+      `insert into attendance (id, tenant_id, session_id, student_id, status, client_updated_at)
+       values ($1, $2, $3, $4, $5, now())
+       on conflict (session_id, student_id) do update set status = excluded.status returning id`,
+      [attendanceId, A.tenantId, sessionId, studentId, status],
+    );
+    const id = (
+      await t.worker.query(
+        `select id from attendance where session_id = $1 and student_id = $2`,
+        [sessionId, studentId],
+      )
+    ).rows[0].id as string;
+    return { studentId, attendanceId: id, status, previousStatus };
+  };
   const get = (who: { token: string }, qs = '') =>
     t.app.inject({
       method: 'GET',
@@ -144,7 +157,7 @@ describe('thông báo báo vắng', () => {
   it('báo vắng: tạo thông báo + gửi data-only đúng 1 lần dù worker chạy 2 lần', async () => {
     use();
     const s = await student('Trần Bảo Châu');
-    const ev = event([change(s, 'unexcused', null)]);
+    const ev = event([await change(s, 'unexcused', null)]);
     await notifier.handle(ev);
     await notifier.handle(ev);
     const n = await rows(
@@ -172,9 +185,9 @@ describe('thông báo báo vắng', () => {
     const s = await student('Lê Minh');
     await notifier.handle(
       event([
-        change(s, 'excused', null),
-        change(s, 'present', null),
-        change(s, 'late', 'present'),
+        await change(s, 'excused', null),
+        await change(s, 'present', null),
+        await change(s, 'late', 'present'),
       ]),
     );
     expect(
@@ -191,13 +204,16 @@ describe('thông báo báo vắng', () => {
     const s1 = await student('Em Một');
     const s2 = await student('Em Hai');
     await notifier.handle(
-      event([change(s1, 'unexcused', null), change(s2, 'unexcused', null)]),
+      event([
+        await change(s1, 'unexcused', null),
+        await change(s2, 'unexcused', null),
+      ]),
     );
     sent = [];
-    await notifier.handle(event([change(s1, 'present', 'unexcused')]));
+    await notifier.handle(event([await change(s1, 'present', 'unexcused')]));
     await notifier.handle(
       event(
-        [change(s2, 'late', 'unexcused')],
+        [await change(s2, 'late', 'unexcused')],
         new Date(Date.now() + 11 * 60_000),
       ),
     );
@@ -211,7 +227,7 @@ describe('thông báo báo vắng', () => {
   it('lỗi FCM tạm → ném để thử lại, lần sau gửi được và không gửi trùng', async () => {
     use();
     const s = await student('Em Ba');
-    const ev = event([change(s, 'unexcused', null)]);
+    const ev = event([await change(s, 'unexcused', null)]);
     behaviour = (m) =>
       m.map(() => ({
         ok: false,
@@ -253,7 +269,7 @@ describe('thông báo báo vắng', () => {
             }
           : { ok: true, messageId: 'm' },
       );
-    await notifier.handle(event([change(s, 'unexcused', null)]));
+    await notifier.handle(event([await change(s, 'unexcused', null)]));
     expect(
       await rows(`select 1 from devices where token = $1`, [bad]),
     ).toHaveLength(0);
@@ -266,7 +282,7 @@ describe('thông báo báo vắng', () => {
   it('thiếu cấu hình FCM: thông báo vẫn vào hộp thư, không gửi, không ném lỗi', async () => {
     use(false);
     const s = await student('Em Năm');
-    await notifier.handle(event([change(s, 'unexcused', null)]));
+    await notifier.handle(event([await change(s, 'unexcused', null)]));
     expect(sent).toHaveLength(0);
     expect(
       await rows(
@@ -320,5 +336,175 @@ describe('thông báo báo vắng', () => {
     expect(mine.json().updated).toBe(1);
     expect(mine.json().unreadCount).toBe(list.unreadCount - 1);
     expect((await read(parent, [id])).json().updated).toBe(0);
+  });
+
+  const deliveryStatus = async (studentId: string) =>
+    (
+      await rows(
+        `select d.status from notification_deliveries d join notifications n on n.id = d.notification_id where n.payload->>'studentId' = $1`,
+        [studentId],
+      )
+    ).map((r) => r.status);
+
+  it('M2: FCM ném lỗi → delivery failed, job ném lại; thử lại nhận được; claim dở chưa quá hạn không bị coi là xong', async () => {
+    use();
+    const s = await student('Em Sáu');
+    const ev = event([await change(s, 'unexcused', null)]);
+    notifier.push = {
+      enabled: true,
+      send: () => Promise.reject(new Error('mạng đứt')),
+    };
+    await expect(notifier.handle(ev)).rejects.toThrow();
+    expect(await deliveryStatus(s)).toEqual(['failed']);
+    use();
+    await notifier.handle(ev);
+    expect(await deliveryStatus(s)).toEqual(['sent']);
+    expect(sent).toHaveLength(1);
+
+    const s2 = await student('Em Bảy');
+    const ev2 = event([await change(s2, 'unexcused', null)]);
+    use(false);
+    await notifier.handle(ev2); // tạo thông báo + delivery failed(push_disabled)
+    await t.worker.query(
+      `update notification_deliveries set status = 'queued', created_at = now() where notification_id in
+         (select id from notifications where payload->>'studentId' = $1)`,
+      [s2],
+    );
+    use();
+    await expect(notifier.handle(ev2)).rejects.toThrow();
+    expect(sent).toHaveLength(0);
+  });
+
+  it('M3: đính chính xử lý trước, báo vắng tới sau → không gửi báo vắng', async () => {
+    use();
+    const s = await student('Em Tám');
+    const absent = event([await change(s, 'unexcused', null)]);
+    const fix = event([await change(s, 'present', 'unexcused')]); // dòng hiện tại đã là present
+    await notifier.handle(fix);
+    await notifier.handle(absent);
+    expect(
+      await rows(
+        `select 1 from notifications where payload->>'studentId' = $1`,
+        [s],
+      ),
+    ).toHaveLength(0);
+    expect(sent).toHaveLength(0);
+  });
+
+  it('S8: cửa sổ đính chính tính từ giờ ghi của sự kiện vắng, không từ created_at', async () => {
+    use();
+    const [old, recent] = [await student('Em Chín'), await student('Em Mười')];
+    const at = (min: number) => new Date(Date.now() - min * 60_000);
+    await notifier.handle(
+      event([await change(old, 'unexcused', null)], at(15)),
+    );
+    await notifier.handle(
+      event([await change(recent, 'unexcused', null)], at(5)),
+    );
+    await notifier.handle(event([await change(old, 'present', 'unexcused')]));
+    await notifier.handle(
+      event([await change(recent, 'present', 'unexcused')]),
+    );
+    const c = await rows(
+      `select payload->>'studentId' as s from notifications where type = 'student_absent_correction' and payload->>'studentId' = any($1)`,
+      [[old, recent]],
+    );
+    expect(c).toEqual([{ s: recent }]);
+  });
+
+  it('M5: có index tra báo vắng theo (tenant, buổi, học viên)', async () => {
+    expect(
+      await rows(
+        `select 1 from pg_indexes where indexname = 'notifications_absence_lookup_idx'`,
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('M1: job urgent cấu hình attempts + backoff lũy thừa, và BullMQ thật chạy lại sau lỗi tạm: delivery sent đúng 1 lần', async () => {
+    const { OUTBOX_JOB_OPTIONS } =
+      await import('../apps/worker/src/outbox/outbox-policy.js');
+    const { UrgentProcessor } =
+      await import('../apps/worker/src/notify/urgent.processor.js');
+    expect(OUTBOX_JOB_OPTIONS.attempts).toBeGreaterThan(1);
+    expect(OUTBOX_JOB_OPTIONS.backoff.type).toBe('exponential');
+
+    use();
+    const s = await student('Em Mười Một');
+    const ev = event([await change(s, 'unexcused', null)]);
+    let calls = 0;
+    notifier.push = {
+      enabled: true,
+      send: (m: PushMessage[]) => {
+        calls++;
+        sent.push(...m);
+        return Promise.resolve(
+          calls === 1
+            ? m.map(() => ({
+                ok: false as const,
+                error: 'messaging/unavailable',
+                invalidToken: false,
+              }))
+            : ok(m),
+        );
+      },
+    };
+    const connection = new IORedis(t.redis.getConnectionUrl(), {
+      maxRetriesPerRequest: null,
+    });
+    const name = `urgent-${randomUUID()}`;
+    // Giữ attempts của cấu hình thật, chỉ rút backoff để test chạy nhanh.
+    const queue = new Queue(name, {
+      connection,
+      defaultJobOptions: {
+        attempts: OUTBOX_JOB_OPTIONS.attempts,
+        backoff: { type: 'fixed', delay: 100 },
+      },
+    });
+    const proc = new UrgentProcessor(notifier);
+    const worker = new Worker(name, (job) => proc.process(job), { connection });
+    try {
+      await queue.add('attendance_recorded', ev, { jobId: ev.eventId });
+      const deadline = Date.now() + 20_000;
+      while (Date.now() < deadline && (await deliveryStatus(s))[0] !== 'sent')
+        await new Promise((r) => setTimeout(r, 100));
+      expect(await deliveryStatus(s)).toEqual(['sent']);
+      expect(calls).toBe(2);
+      expect(
+        await rows(
+          `select 1 from notifications where payload->>'studentId' = $1`,
+          [s],
+        ),
+      ).toHaveLength(1);
+    } finally {
+      await worker.close();
+      await queue.close();
+      connection.disconnect();
+    }
+  });
+
+  it('S3: con trỏ phải đúng dạng chặt, không chỉ "có |"', async () => {
+    const enc = (v: string) => Buffer.from(v).toString('base64url');
+    const id = randomUUID();
+    for (const bad of [
+      `2026-1-1|${id}`,
+      `2026-12-15T11:00:00Z|${id}`,
+      `2026-12-15T11:00:00.000000Z|${id.toUpperCase()}`,
+      `2026-12-15T11:00:00.000000Z|${id}|x`,
+      '',
+    ])
+      expect((await get(parent, `?cursor=${enc(bad)}`)).statusCode).toBe(422);
+    // base64url không chuẩn hoá (thêm dấu '=') cũng bị từ chối
+    expect(
+      (
+        await get(
+          parent,
+          `?cursor=${enc(`2026-12-15T11:00:00.000000Z|${id}`)}=`,
+        )
+      ).statusCode,
+    ).toBe(422);
+    expect(
+      (await get(parent, `?cursor=${enc(`2026-12-15T11:00:00.000000Z|${id}`)}`))
+        .statusCode,
+    ).toBe(200);
   });
 });

@@ -1,6 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
-import { assertDevEnvironment, linkParents } from '../scripts/seed-dev.mjs';
+import {
+  assertDevEnvironment,
+  assertLocalDatabase,
+  linkParents,
+} from '../scripts/seed-dev.mjs';
 import { startTestDb, type TestDb } from './containers.js';
 import { seedTenant } from './support/seed.js';
 
@@ -25,6 +29,18 @@ describe('seed:dev', () => {
       );
     for (const env of ['local', 'development', 'test'])
       expect(() => assertDevEnvironment({ NODE_ENV: env })).not.toThrow();
+  });
+
+  it('S11: chỉ nhận host local hoặc tên service docker; host khác cần --i-know', () => {
+    for (const ok of [
+      'postgres://u:p@localhost:5433/db',
+      'postgres://u:p@127.0.0.1/db',
+      'postgres://u:p@postgres:5432/db',
+    ])
+      expect(() => assertLocalDatabase(ok)).not.toThrow();
+    const rds = 'postgres://u:p@db.abc.ap-southeast-1.rds.amazonaws.com/db';
+    expect(() => assertLocalDatabase(rds)).toThrow(/từ chối host/);
+    expect(() => assertLocalDatabase(rds, true)).not.toThrow();
   });
 
   it('ghi guardians.user_id + vai trò parent cho X (cha) và Y (mẹ); chạy lại không tạo trùng', async () => {

@@ -216,6 +216,7 @@ export class OutboxRelayService
       await Promise.race([
         this.queues[queueFor(ev.type)].add(ev.type, data, {
           jobId: ev.id,
+          // shortcut: job xong giữ 1 giờ; sau đó BullMQ không còn nhớ jobId nên sự kiện được lấy lại muộn hơn 1 giờ sẽ chạy lại. Consumer đã idempotent theo eventId.
           removeOnComplete: { age: 3600 },
         }),
         timeout,

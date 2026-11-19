@@ -17,6 +17,11 @@ describe('cửa sổ sửa 7 ngày theo ngày buổi học', () => {
     expect(isWithinEditWindow('2026-12-15', '2026-12-22')).toBe(true);
     expect(isWithinEditWindow('2026-12-15', '2026-12-23')).toBe(false);
   });
+
+  it('buổi tương lai chưa sửa được; đúng ngày buổi học thì mở', () => {
+    expect(isWithinEditWindow('2026-12-15', '2026-12-14')).toBe(false);
+    expect(isWithinEditWindow('2026-12-15', '2026-12-15')).toBe(true);
+  });
 });
 
 describe('hiệu chỉnh lệch đồng hồ', () => {
@@ -53,6 +58,25 @@ describe('hiệu chỉnh lệch đồng hồ', () => {
         server,
       ).toISOString(),
     ).toBe('2026-12-15T12:00:00.000Z');
+  });
+});
+
+describe('mốc LWW cắt về giây', () => {
+  const server = at('2026-12-15T12:00:00.900Z');
+
+  it('hai sửa cùng giây (khác mili giây) có mốc bằng nhau nên bản sau ra stale', () => {
+    const device = at('2026-12-15T11:59:50.100Z');
+    const a = adjustedUpdatedAt(at('2026-12-15T11:59:40.100Z'), device, server);
+    const b = adjustedUpdatedAt(at('2026-12-15T11:59:40.150Z'), device, server);
+    expect(a.getTime() % 1000).toBe(0);
+    expect(winsLww(b, a)).toBe(false);
+  });
+
+  it('thiết bị nhanh (lệch âm): mốc lùi đúng độ lệch và không vượt giờ nhận', () => {
+    const device = at('2026-12-15T12:10:00Z'); // nhanh 10 phút
+    expect(clockSkewMs(server, device)).toBe(-599_100);
+    const m = adjustedUpdatedAt(at('2026-12-15T12:09:00Z'), device, server);
+    expect(m.toISOString()).toBe('2026-12-15T11:59:00.000Z');
   });
 });
 

@@ -68,6 +68,8 @@ export const notifications = pgTable(
     dedupeKey: text().notNull(),
     /** Giờ yên lặng: tin không khẩn dời tới đây; tin khẩn = lúc tạo. */
     sendAfter: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    /** Giờ server ghi sự kiện gốc (`recordedAt` của outbox); đính chính tính cửa sổ 10 phút từ mốc này. */
+    eventAt: timestamp({ withTimezone: true }),
     readAt: timestamp({ withTimezone: true }),
     createdAt: createdAt(),
   },
@@ -84,6 +86,14 @@ export const notifications = pgTable(
     index('notifications_recipient_unread_idx')
       .on(t.recipientUserId, t.membershipId)
       .where(sql`${t.readAt} is null`),
+    // Tra báo vắng của (buổi, học viên) khi đính chính, không quét cả bảng.
+    index('notifications_absence_lookup_idx')
+      .on(
+        t.tenantId,
+        sql`(${t.payload} ->> 'sessionId')`,
+        sql`(${t.payload} ->> 'studentId')`,
+      )
+      .where(sql`${t.type} = 'student_absent'`),
     check(
       'notifications_urgency_check',
       sql`${t.urgency} in ('urgent', 'normal')`,
@@ -145,5 +155,6 @@ export const devices = pgTable(
       'devices_platform_check',
       sql`${t.platform} in ('android', 'ios', 'web')`,
     ),
+    check('devices_token_length_check', sql`char_length(${t.token}) <= 4096`),
   ],
 );

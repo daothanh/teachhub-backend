@@ -75,6 +75,36 @@ describe('thiết bị push và RLS thông báo', () => {
     expect(await devicesOf(token)).toEqual([{ user_id: B.userId }]);
   });
 
+  it('S2: mỗi user giữ tối đa 10 thiết bị, thiết bị cũ nhất bị xóa', async () => {
+    const first = tok();
+    await call(A, 'register', { deviceToken: first });
+    await t.worker.query(
+      `update devices set last_seen_at = now() - interval '1 day' where token = $1`,
+      [first],
+    );
+    for (let i = 0; i < 10; i++)
+      await call(A, 'register', { deviceToken: tok() });
+    const n = (
+      await t.worker.query(
+        `select count(*)::int as n from devices where user_id = $1`,
+        [A.userId],
+      )
+    ).rows[0].n;
+    expect(n).toBe(10);
+    expect(await devicesOf(first)).toEqual([]);
+  });
+
+  it('S2: token quá dài bị từ chối ở API (422) và ở CSDL (CHECK)', async () => {
+    const res = await call(A, 'register', { deviceToken: 'x'.repeat(513) });
+    expect(res.statusCode).toBe(422);
+    await expect(
+      t.worker.query(
+        `insert into devices (id, user_id, token, platform) values ($1, $2, $3, 'ios')`,
+        [randomUUID(), A.userId, 'x'.repeat(4097)],
+      ),
+    ).rejects.toThrow(/devices_token_length_check/);
+  });
+
   it('unregister xóa bản của mình, luôn 204, không xóa token của người khác', async () => {
     const token = tok();
     await call(B, 'register', { deviceToken: token });

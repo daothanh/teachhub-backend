@@ -18,6 +18,20 @@ export function assertDevEnvironment(env = process.env) {
   }
 }
 
+/**
+ * Chặn thêm: host DB phải là máy local (localhost, 127.0.0.1, ::1) hoặc tên service docker (không có dấu chấm).
+ * Host khác (vd RDS) chỉ chạy khi có cờ `--i-know`.
+ */
+export function assertLocalDatabase(url, force = false) {
+  const host = new URL(url).hostname.replace(/^\[|\]$/g, '');
+  const local =
+    ['localhost', '127.0.0.1', '::1'].includes(host) || !host.includes('.');
+  if (!local && !force)
+    throw new Error(
+      `seed:dev từ chối host DB "${host}" (không phải local). Thêm --i-know nếu thật sự muốn.`,
+    );
+}
+
 /** Tạo (nếu thiếu) user + vai trò `parent` + đặt vai trò đang mở, rồi trả userId. */
 async function ensureParent(db, email) {
   const found = await db.query(`select id from users where email = $1`, [
@@ -112,6 +126,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     );
     process.exit(1);
   }
+  assertLocalDatabase(url, values['i-know']);
   const pool = new pg.Pool({ connectionString: url, max: 1 });
   try {
     const r = await linkParents(pool, {

@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
 import { uuidv7 } from '@teachhub/core';
 import { TxService, type Tx } from '@teachhub/db';
-import { PushSender, maskToken, type PushMessage } from '@teachhub/infra';
+import { PushSender, maskToken } from '@teachhub/infra';
 import {
   isAbsenceRetracted,
   isNewAbsence,
@@ -33,6 +33,9 @@ interface Pending {
 export class PushDeliveryError extends Error {}
 
 /**
+ * shortcut: đọc chéo module (attendance, guardians, memberships, sessions) bằng SQL thô trong worker để khỏi kéo cả service của module khác; đổi sang port/reader khi có consumer thứ hai.
+ * shortcut: nhiều thiết bị của một người nhận tính `sent` khi MỘT thiết bị nhận được; thiết bị còn lại lỗi tạm không được thử lại riêng.
+ *
  * Xử lý sự kiện `attendance_recorded` (S3-BE-06) trong worker: tạo thông báo cho phụ huynh rồi gửi FCM data-only.
  * Idempotent theo `eventId`: khóa `(recipient, dedupe_key)` cho thông báo và `(notification, channel)` cho lần gửi.
  */
@@ -45,13 +48,26 @@ export class AbsenceNotifier {
     private readonly push: PushSender,
   ) {}
 
+  /**
+   * Gửi theo từng người nhận, lỗi của người này không chặn người khác; gom lại và ném MỘT lần để BullMQ thử lại cả job
+   * (người đã `sent` bị bỏ qua nhờ khóa delivery).
+   * shortcut: at-least-once. Worker chết giữa lúc FCM đã nhận và lúc ghi `sent` thì sau 2 phút dòng `queued` được nhận
+   * lại và có thể gửi trùng một tin; đủ cho báo vắng, đổi sang exactly-once cần khóa phía FCM.
+   */
   async handle(job: OutboxJobData): Promise<void> {
     const pending = await this.tx.run({ userId: null }, (tx) =>
       this.createNotifications(tx, job),
     );
     let failed = 0;
     for (const p of pending) {
-      if (!(await this.deliver(p))) failed++;
+      try {
+        if (!(await this.deliver(p))) failed++;
+      } catch (e) {
+        failed++;
+        this.log.error(
+          `gửi thông báo ${p.notificationId} lỗi: ${e instanceof Error ? e.name : 'lỗi'}`,
+        );
+      }
     }
     if (failed) throw new PushDeliveryError(`${failed} lần gửi push lỗi tạm`);
   }
@@ -91,6 +107,15 @@ export class AbsenceNotifier {
       const type = isNewAbsence(c.previousStatus, c.status)
         ? TYPE_ABSENT
         : TYPE_ABSENT_CORRECTION;
+      if (type === TYPE_ABSENT) {
+        // Sự kiện có thể tới sau bản đính chính (retry, đảo thứ tự): chỉ báo khi dòng điểm danh còn vắng không phép.
+        const cur = (
+          await tx.execute<{ status: string }>(
+            sql`select status from attendance where tenant_id = ${tenantId} and id = ${c.attendanceId}`,
+          )
+        ).rows[0];
+        if (cur?.status !== 'unexcused') continue;
+      }
       const student = (
         await tx.execute<{ full_name: string }>(
           sql`select full_name from students where tenant_id = ${tenantId} and id = ${c.studentId}`,
@@ -117,6 +142,7 @@ export class AbsenceNotifier {
                 select distinct g.user_id, m.id as membership_id
                 from guardians g
                 left join memberships m on m.user_id = g.user_id and m.role = 'parent' and m.status = 'active'
+                  and (m.student_id is null or m.student_id = g.student_id)
                 where g.tenant_id = ${tenantId} and g.student_id = ${c.studentId}
                   and g.deleted_at is null and g.user_id is not null`)
             ).rows
@@ -129,7 +155,7 @@ export class AbsenceNotifier {
                 where tenant_id = ${tenantId} and type = ${TYPE_ABSENT}
                   and payload->>'sessionId' = ${payload.sessionId}
                   and payload->>'studentId' = ${c.studentId}
-                  and created_at >= ${new Date(recordedAt.getTime() - CORRECTION_WINDOW_MS)}`)
+                  and event_at >= ${new Date(recordedAt.getTime() - CORRECTION_WINDOW_MS)}`)
             ).rows;
 
       for (const r of recipients) {
@@ -141,9 +167,9 @@ export class AbsenceNotifier {
         }
         const row = (
           await tx.execute<{ id: string }>(sql`
-            insert into notifications (id, tenant_id, recipient_user_id, membership_id, type, urgency, payload, dedupe_key)
+            insert into notifications (id, tenant_id, recipient_user_id, membership_id, type, urgency, payload, dedupe_key, event_at)
             values (${uuidv7()}, ${tenantId}, ${r.user_id}, ${r.membership_id}, ${type}, 'urgent',
-                    ${JSON.stringify(body)}::jsonb, ${`${type}:${eventId}:${c.studentId}`})
+                    ${JSON.stringify(body)}::jsonb, ${`${type}:${eventId}:${c.studentId}`}, ${recordedAt})
             on conflict (recipient_user_id, dedupe_key) do update set dedupe_key = excluded.dedupe_key
             returning id`)
         ).rows[0];
@@ -153,54 +179,75 @@ export class AbsenceNotifier {
     return out;
   }
 
-  /** `true` = xong (đã gửi, đã có người khác gửi, hoặc không gửi được vĩnh viễn); `false` = lỗi tạm, cần thử lại. */
+  /** `true` = xong (đã gửi hoặc không gửi được vĩnh viễn); `false` = lỗi tạm hoặc đang có người khác gửi, cần thử lại. */
   private async deliver(p: Pending): Promise<boolean> {
-    const claimed = await this.tx.run({ userId: null }, async (tx) => {
+    const claim = await this.tx.run({ userId: null }, async (tx) => {
       const ins = await tx.execute(sql`
         insert into notification_deliveries (id, notification_id, channel)
         values (${uuidv7()}, ${p.notificationId}, 'push') on conflict do nothing returning id`);
-      if (ins.rows.length) return true;
+      if (ins.rows.length) return 'claimed';
       const re = await tx.execute(sql`
         update notification_deliveries set status = 'queued', error = null, created_at = now()
         where notification_id = ${p.notificationId} and channel = 'push'
           and (status = 'failed' or (status = 'queued' and created_at < now() - ${STALE_CLAIM_MS} * interval '1 millisecond'))
         returning id`);
-      return re.rows.length > 0;
-    });
-    if (!claimed) return true;
-
-    const devices = await this.tx.run({ userId: null }, async (tx) =>
-      (
-        await tx.execute<{ token: string }>(
-          sql`select token from devices where user_id = ${p.userId}`,
+      if (re.rows.length) return 'claimed';
+      const cur = (
+        await tx.execute<{ status: string }>(
+          sql`select status from notification_deliveries where notification_id = ${p.notificationId} and channel = 'push'`,
         )
-      ).rows.map((r) => r.token),
-    );
-    const messages: PushMessage[] = devices.map((token) => ({
-      token,
-      urgent: true,
-      data: { notificationId: p.notificationId, type: p.type },
-    }));
-    const results = this.push.enabled ? await this.push.send(messages) : [];
+      ).rows[0];
+      return cur?.status === 'sent' ? 'done' : 'busy';
+    });
+    if (claim === 'done') return true;
+    // 'busy': lần trước còn dở (dòng queued chưa quá hạn); ném để BullMQ thử lại thay vì coi như xong.
+    if (claim === 'busy') return false;
 
-    const sent = results.find((r) => r.ok);
-    const invalid = results.flatMap((r, i) =>
-      !r.ok && r.invalidToken ? [devices[i]!] : [],
-    );
     let status = 'sent';
     let error: string | null = null;
     let transient = false;
-    if (!this.push.enabled) {
+    let messageId: string | null = null;
+    let invalid: string[] = [];
+    try {
+      const devices = await this.tx.run({ userId: null }, async (tx) =>
+        (
+          await tx.execute<{ token: string }>(
+            sql`select token from devices where user_id = ${p.userId}`,
+          )
+        ).rows.map((r) => r.token),
+      );
+      const results = this.push.enabled
+        ? await this.push.send(
+            devices.map((token) => ({
+              token,
+              urgent: true,
+              data: { notificationId: p.notificationId, type: p.type },
+            })),
+          )
+        : [];
+      const sent = results.find((r) => r.ok);
+      messageId = sent?.ok ? sent.messageId : null;
+      invalid = results.flatMap((r, i) => {
+        const token = devices[i];
+        return !r.ok && r.invalidToken && token ? [token] : [];
+      });
+      if (!this.push.enabled) {
+        status = 'failed';
+        error = 'push_disabled';
+      } else if (!devices.length) {
+        status = 'failed';
+        error = 'no_device';
+      } else if (!sent) {
+        status = 'failed';
+        const errs = results.flatMap((r) => (r.ok ? [] : [r]));
+        error = errs[0]?.error ?? 'unknown';
+        transient = errs.some((r) => !r.invalidToken);
+      }
+    } catch (e) {
+      // Lỗi hạ tầng khi gửi: trả dòng về `failed` để lần thử lại nhận được ngay, rồi báo lỗi tạm.
       status = 'failed';
-      error = 'push_disabled';
-    } else if (!devices.length) {
-      status = 'failed';
-      error = 'no_device';
-    } else if (!sent) {
-      status = 'failed';
-      const errs = results.flatMap((r) => (r.ok ? [] : [r]));
-      error = errs[0]?.error ?? 'unknown';
-      transient = errs.some((r) => !r.invalidToken);
+      error = e instanceof Error ? e.name : 'send_threw';
+      transient = true;
     }
     if (invalid.length) {
       this.log.debug(
@@ -210,11 +257,13 @@ export class AbsenceNotifier {
     await this.tx.run({ userId: null }, async (tx) => {
       await tx.execute(sql`
         update notification_deliveries set status = ${status}, error = ${error},
-          provider_message_id = ${sent?.ok ? sent.messageId : null},
+          provider_message_id = ${messageId},
           sent_at = ${status === 'sent' ? sql`now()` : null}
-        where notification_id = ${p.notificationId} and channel = 'push'`);
+        where notification_id = ${p.notificationId} and channel = 'push' and status = 'queued'`);
       for (const token of invalid) {
-        await tx.execute(sql`delete from devices where token = ${token}`);
+        await tx.execute(
+          sql`delete from devices where token = ${token} and user_id = ${p.userId}`,
+        );
       }
     });
     return !transient;

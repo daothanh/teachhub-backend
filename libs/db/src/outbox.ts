@@ -11,6 +11,8 @@ export interface OutboxEventInput {
 }
 
 /**
+ * shortcut: policy insert của outbox_events cho mọi nhân sự của tenant, chưa tách theo vai trò; đủ vì chỉ code server ghi.
+ *
  * Ghi sự kiện outbox trong CÙNG giao dịch với lệnh nghiệp vụ: `tx` lấy từ `TxService.run`,
  * giao dịch rollback thì sự kiện cũng mất. Trả về id sự kiện.
  */

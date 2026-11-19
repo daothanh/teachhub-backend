@@ -195,6 +195,7 @@ export class ScheduleService {
       eq(sessions.isMakeup, false),
       isNotNull(sessions.ruleId),
       gt(sessions.startsAt, now),
+      // shortcut: kiểm tra này và lệnh xóa không cùng khóa, nên điểm danh vừa lưu đúng lúc reconcile xóa buổi vẫn có thể đua; FK sẽ chặn xóa (lỗi, không mất dữ liệu). Cần khóa buổi khi tải tăng.
       // Buổi đã có điểm danh (lưu mà chưa chuyển "đã dạy") không bị xóa theo lịch.
       sql`not exists (select 1 from attendance a where a.session_id = ${sessions.id})`,
       extra,

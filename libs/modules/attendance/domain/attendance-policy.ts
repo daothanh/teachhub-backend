@@ -18,12 +18,31 @@ export function addDays(date: string, n: number): string {
     .slice(0, 10);
 }
 
-/** `today` là ngày hiện tại theo múi giờ tenant. Ngày thứ 7 vẫn còn sửa được. */
+/**
+ * `today` là ngày hiện tại theo múi giờ tenant. Chỉ sửa được từ ngày buổi học (buổi tương lai chưa điểm danh được)
+ * tới hết ngày thứ 7.
+ */
 export function isWithinEditWindow(
   sessionDate: string,
   today: string,
 ): boolean {
-  return today <= addDays(sessionDate, EDIT_WINDOW_DAYS);
+  return (
+    sessionDate <= today && today <= addDays(sessionDate, EDIT_WINDOW_DAYS)
+  );
+}
+
+const STATUSES: readonly AttendanceStatus[] = [
+  'present',
+  'late',
+  'excused',
+  'unexcused',
+];
+
+/** Thu hẹp chuỗi đọc từ CSDL về `AttendanceStatus`; giá trị lạ (CHECK đã chặn) là lỗi dữ liệu nên ném. */
+export function asStatus(value: string): AttendanceStatus {
+  const s = STATUSES.find((x) => x === value);
+  if (!s) throw new Error(`Trạng thái điểm danh lạ: ${value}`);
+  return s;
 }
 
 /**
@@ -38,6 +57,10 @@ export function clockSkewMs(serverNow: Date, deviceTime: Date): number {
 /**
  * Mốc LWW theo giờ máy chủ của một mutation: `clientUpdatedAt` + lệch đồng hồ. Mutation không thể xảy ra sau lúc
  * gửi (kẹp về `deviceTime`) hay sau lúc nhận (kẹp về `serverNow`).
+ *
+ * shortcut: lô gửi lại muộn với `Idempotency-Key` MỚI mà vẫn mang `deviceTime` cũ bị cộng thêm độ trễ vào mốc (tối đa
+ * tới `serverNow`). Cùng key thì replay trả phản hồi đã lưu nên không dính. Client phải đóng dấu lại `deviceTime` khi
+ * gửi lại; thu hẹp trần lệch (24 giờ) sẽ làm hỏng hiệu chỉnh cho máy sai giờ nhiều nên chưa làm.
  */
 export function adjustedUpdatedAt(
   clientUpdatedAt: Date,
@@ -46,7 +69,10 @@ export function adjustedUpdatedAt(
 ): Date {
   const at = Math.min(clientUpdatedAt.getTime(), deviceTime.getTime());
   const adjusted = at + clockSkewMs(serverNow, deviceTime);
-  return new Date(Math.min(adjusted, serverNow.getTime()));
+  // Cắt về giây (app chỉ chính xác tới giây) để hai sửa cùng giây qua hai lô ra `stale` thay vì thắng nhờ mili giây.
+  return new Date(
+    Math.floor(Math.min(adjusted, serverNow.getTime()) / 1000) * 1000,
+  );
 }
 
 /**

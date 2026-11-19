@@ -621,4 +621,82 @@ describe('điểm danh API', () => {
       unexcused: 0,
     });
   });
+
+  it('S9: buổi ở tương lai chưa điểm danh được: mutation → rejected ATTENDANCE_EDIT_WINDOW_CLOSED, không chuyển đã dạy, canEdit=false', async () => {
+    const w = await world(A, { date: dateOf(new Date(Date.now() + 2 * DAY)) });
+    const res = await call(
+      A,
+      'POST',
+      '/attendance/sync',
+      batch(w.sessionId, [mut(w.studentIds[0]!, 'present')], {
+        markSessionTaught: true,
+      }),
+    );
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json().results[0]).toMatchObject({
+      result: 'rejected',
+      errorCode: 'ATTENDANCE_EDIT_WINDOW_CLOSED',
+    });
+    expect(res.json().sessionStatus).toBe('planned');
+    const view = await call(A, 'GET', `/sessions/${w.sessionId}/attendance`);
+    expect(view.json().canEdit).toBe(false);
+    const { rows } = await t.worker.query(
+      `select 1 from attendance where session_id = $1`,
+      [w.sessionId],
+    );
+    expect(rows).toHaveLength(0);
+  });
+
+  it('S7: gửi lại đúng trạng thái và ghi chú (id mutation mới) → applied nhưng không ghi, không audit, không outbox thừa', async () => {
+    const w = await world(A);
+    const s = w.studentIds[0]!;
+    const send = (m: object) =>
+      call(A, 'POST', '/attendance/sync', batch(w.sessionId, [m]));
+    const t0 = Date.now();
+    await send(
+      mut(s, 'late', { clientUpdatedAt: new Date(t0 - 60_000).toISOString() }),
+    );
+    const res = await send(
+      mut(s, 'late', { clientUpdatedAt: new Date(t0 - 1_000).toISOString() }),
+    );
+    expect(res.json().results[0].result).toBe('applied');
+    const audit = await t.worker.query(
+      `select count(*)::int as n from audit_logs where tenant_id = $1 and entity = 'attendance' and after_data->>'session_id' = $2`,
+      [A.tenantId, w.sessionId],
+    );
+    expect(audit.rows[0].n).toBe(1);
+    const events = (await outbox(A)).filter(
+      (e) => (e.payload as { sessionId?: string }).sessionId === w.sessionId,
+    );
+    expect(events).toHaveLength(1);
+  });
+
+  it('S5: hai lô khác buổi cùng clientMutationId chạy đồng thời → không có 500, chỉ một bên applied', async () => {
+    const w1 = await world(A);
+    const w2 = await world(A);
+    const id = randomUUID();
+    const [r1, r2] = await Promise.all([
+      call(
+        A,
+        'POST',
+        '/attendance/sync',
+        batch(w1.sessionId, [
+          mut(w1.studentIds[0]!, 'late', { clientMutationId: id }),
+        ]),
+      ),
+      call(
+        A,
+        'POST',
+        '/attendance/sync',
+        batch(w2.sessionId, [
+          mut(w2.studentIds[0]!, 'late', { clientMutationId: id }),
+        ]),
+      ),
+    ]);
+    expect([r1.statusCode, r2.statusCode]).toEqual([200, 200]);
+    const results = [r1, r2]
+      .map((r) => r.json().results[0].result as string)
+      .sort();
+    expect(results).toEqual(['applied', 'rejected']);
+  });
 });

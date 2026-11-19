@@ -2,7 +2,11 @@ import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Env } from '@teachhub/core';
-import { OUTBOX_QUEUE_DEFAULT, OUTBOX_QUEUE_URGENT } from './outbox-policy.js';
+import {
+  OUTBOX_JOB_OPTIONS,
+  OUTBOX_QUEUE_DEFAULT,
+  OUTBOX_QUEUE_URGENT,
+} from './outbox-policy.js';
 import { OutboxCleanupService } from './outbox-cleanup.service.js';
 import { OutboxRelayService } from './outbox-relay.service.js';
 
@@ -17,6 +21,7 @@ const producerQueue = (name: string) => ({
       maxRetriesPerRequest: null,
       enableOfflineQueue: false,
     },
+    defaultJobOptions: { ...OUTBOX_JOB_OPTIONS },
   }),
 });
 

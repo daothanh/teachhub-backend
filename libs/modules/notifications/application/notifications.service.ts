@@ -25,16 +25,24 @@ type Row = {
 const encode = (createdAt: string, id: string): string =>
   Buffer.from(`${createdAt}|${id}`).toString('base64url');
 
+const CURSOR_AT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/;
+const CURSOR_ID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** Con trỏ chặt: đúng dạng `<ISO µs>|<uuid>` và mã hóa lại phải ra đúng chuỗi gốc; sai → 422. */
 function decode(cursor: string | undefined): [string, string] | null {
-  if (!cursor) return null;
-  const raw = Buffer.from(cursor, 'base64url').toString();
-  const [at, id, extra] = raw.split('|');
+  if (cursor === undefined) return null;
+  const [at, id, extra] = Buffer.from(cursor, 'base64url')
+    .toString()
+    .split('|');
   const ok =
-    at &&
-    id &&
+    at !== undefined &&
+    id !== undefined &&
     extra === undefined &&
+    CURSOR_AT.test(at) &&
     !Number.isNaN(Date.parse(at)) &&
-    /^[0-9a-f-]{36}$/.test(id);
+    CURSOR_ID.test(id) &&
+    encode(at, id) === cursor;
   if (!ok) {
     throw new AppException('VALIDATION_FAILED', undefined, {
       cursor: ['Con trỏ không hợp lệ'],

@@ -53,3 +53,12 @@ export type OutboxQueueName =
 export function queueFor(type: string): OutboxQueueName {
   return URGENT_TYPES.has(type) ? OUTBOX_QUEUE_URGENT : OUTBOX_QUEUE_DEFAULT;
 }
+
+/**
+ * Tuỳ chọn job mặc định của hai hàng đợi: không có `attempts` thì BullMQ chỉ chạy một lần và lỗi tạm của consumer
+ * (vd FCM sập) làm mất tin báo vắng. 10 lần, backoff lũy thừa từ 5 giây (tổng chờ khoảng 43 phút).
+ */
+export const OUTBOX_JOB_OPTIONS = {
+  attempts: 10,
+  backoff: { type: 'exponential', delay: 5_000 },
+} as const;

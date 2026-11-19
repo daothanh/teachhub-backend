@@ -20,6 +20,7 @@ import {
 } from '@teachhub/modules/schedule';
 import {
   addDays,
+  asStatus,
   ATTENDANCE_RECORDED,
   type AttendanceRecordedPayload,
   type AttendanceStatus,
@@ -132,6 +133,22 @@ export class AttendanceService {
     body: AttendanceSyncRequest,
     now = new Date(),
   ): Promise<AttendanceSyncResult> {
+    // Hai lô khác buổi cùng `clientMutationId` đua nhau: lô thua vi phạm unique. Savepoint cho phép chạy lại một lần,
+    // lúc đó dedupe thấy bản đã commit và trả `rejected`, không để lỗi 500.
+    try {
+      return await tx.transaction((t) => this.syncOnce(t, actor, body, now));
+    } catch (e) {
+      if (!isMutationIdConflict(e)) throw e;
+      return tx.transaction((t) => this.syncOnce(t, actor, body, now));
+    }
+  }
+
+  private async syncOnce(
+    tx: Tx,
+    actor: Actor,
+    body: AttendanceSyncRequest,
+    now: Date,
+  ): Promise<AttendanceSyncResult> {
     const { tenantId, userId } = actor;
     const s = await this.loadSession(tx, tenantId, body.sessionId, true);
     if (s.status === 'cancelled') throw new AppException('SESSION_CANCELLED');
@@ -172,8 +189,8 @@ export class AttendanceService {
           isNew: false,
           dirty: false,
           fromMutation: false,
-          original: r.status as AttendanceStatus,
-          status: r.status as AttendanceStatus,
+          original: asStatus(r.status),
+          status: asStatus(r.status),
           note: r.note,
           mutationId: r.clientMutationId,
           clientUpdatedAt: r.clientUpdatedAt,
@@ -237,6 +254,12 @@ export class AttendanceService {
       const line = lines.get(m.studentId);
       if (line && !winsLww(at, line.clientUpdatedAt)) {
         results.push({ r: { ...base, result: 'stale' }, current: line });
+        continue;
+      }
+      // Không đổi gì (cùng trạng thái và ghi chú): không ghi, không sinh audit/outbox thừa.
+      // shortcut: mốc LWW và client_mutation_id của dòng không nhích theo lần sửa trùng giá trị này.
+      if (line && line.status === m.status && line.note === m.note) {
+        results.push({ r: { ...base, result: 'applied' } });
         continue;
       }
       lines.set(m.studentId, {
@@ -363,6 +386,7 @@ export class AttendanceService {
       sql`select * from app_private.attendance_history(${tenantId}::uuid, ${sessionId}::uuid, ${before}::bigint, ${query.limit + 1})`,
     );
     const page = rows.slice(0, query.limit);
+    const last = page[page.length - 1];
     const names = page.length
       ? new Map(
           (
@@ -393,14 +417,12 @@ export class AttendanceService {
           ? { status: r.before_status, note: r.before_note }
           : null,
         after: {
-          status: (r.after_status ?? r.before_status) as AttendanceStatus,
+          status: asStatus(r.after_status ?? r.before_status ?? ''),
           note: r.after_status ? r.after_note : r.before_note,
         },
       })),
       nextCursor:
-        rows.length > query.limit
-          ? encodeCursor(page[page.length - 1]!.id)
-          : null,
+        rows.length > query.limit && last ? encodeCursor(last.id) : null,
     };
   }
 
@@ -513,6 +535,17 @@ export class AttendanceService {
       rows.flatMap((u) => (u.name ? [[u.id, u.name] as const] : [])),
     );
   }
+}
+
+/** Lỗi 23505 trên unique (tenant_id, client_mutation_id) (Drizzle bọc lỗi pg trong `cause`). */
+function isMutationIdConflict(e: unknown): boolean {
+  const c = (e instanceof Error ? e.cause : null) as {
+    code?: string;
+    constraint?: string;
+  } | null;
+  return (
+    c?.code === '23505' && c.constraint === 'attendance_tenant_mutation_uq'
+  );
 }
 
 function toCurrent(l: Line, tz: string, names: Map<string, string>): Current {

@@ -1,4 +1,5 @@
 import { Body, Controller, HttpCode, Post } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import {
   ApiBearerAuth,
   ApiNoContentResponse,
@@ -42,6 +43,7 @@ export class PushController {
 
   @Post('register')
   @HttpCode(204)
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @ApiOperation({
     summary: 'Đăng ký token FCM của thiết bị (FR-6.2)',
     description:

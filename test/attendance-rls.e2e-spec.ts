@@ -8,7 +8,7 @@ import {
   expectInsertRejected,
   expectRowIsolated,
 } from './support/isolation.js';
-import { seedTenant, type SeededTenant } from './support/seed.js';
+import { seedMember, seedTenant, type SeededTenant } from './support/seed.js';
 
 // S3-BE-01: attendance: RLS chéo tenant, ràng buộc duy nhất, khóa ngoại kép và trigger audit.
 describe('attendance: RLS và ràng buộc', () => {
@@ -158,5 +158,31 @@ describe('attendance: RLS và ràng buộc', () => {
         session_id: ids.sessionA,
       },
     ]);
+  });
+
+  it('M4: hàm lịch sử chỉ trả cho tenant_owner của tenant; giáo viên, người tenant khác, thiếu user đều rỗng', async () => {
+    const teacher = await seedMember(worker, A.tenantId, 'teacher');
+    const call = (userId: string | null) =>
+      tx.run(
+        { userId },
+        async (t) =>
+          (
+            await t.execute(
+              sql`select id from app_private.attendance_history(${A.tenantId}::uuid, ${ids.sessionA}::uuid, null, 10)`,
+            )
+          ).rows.length,
+      );
+    expect(await call(A.userId)).toBeGreaterThan(0);
+    expect(await call(teacher)).toBe(0);
+    expect(await call(B.userId)).toBe(0);
+    expect(await call(null)).toBe(0);
+  });
+
+  it('M4: policy owner của audit_logs không còn mở cho entity khác', async () => {
+    const { rows } = await worker.query(
+      `select qual from pg_policies where tablename = 'audit_logs' and policyname = 'audit_logs_owner_select'`,
+    );
+    expect(rows[0].qual).toContain("entity = 'attendance'");
+    expect(rows[0].qual).toContain('staff_tenant_ids');
   });
 });
