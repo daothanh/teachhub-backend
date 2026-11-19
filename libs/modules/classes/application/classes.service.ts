@@ -128,7 +128,7 @@ export class ClassesService {
     if (cur.status === 'archived') throw new AppException('CONFLICT_STALE');
     const { feeType, feeAmount, feeRules, ...rest } = body;
     // Hợp đồng Sprint 5 đã nhận học phí; lưu thật ở S5-BE-01/02 (cột chưa có).
-    if ([feeType, feeAmount, feeRules].some((v) => v !== undefined)) {
+    if ([feeType, feeAmount, feeRules].some((v) => v != null)) {
       throw new AppException('NOT_IMPLEMENTED');
     }
     const patch = Object.fromEntries(

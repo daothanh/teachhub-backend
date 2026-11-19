@@ -59,7 +59,7 @@ export class NotificationsController {
     description:
       'Phân trang con trỏ (Spec §5.5), mới nhất trước. Chỉ trả thông báo gửi cho chính user và đúng vai trò `active-membership`; không bao giờ lộ thông báo của người khác. ' +
       'Từ Sprint 4 có thêm loại `schedule_changed` (US-2.2) mà schema chưa liệt kê vì oasdiff coi thêm `oneOf` là breaking; client bỏ qua `type` lạ. Hình dạng: `payload = { classId, className, sessionId, change (rescheduled|cancelled|makeup), sessionStartsAt, previousStartsAt|null, reason|null }`, `deepLink = teachhub://sessions/{sessionId}`. ' +
-      'Từ Sprint 5 có thêm hai loại cũng chưa liệt kê vì lý do trên: `billing_ready` (cho giáo viên, `payload = { periodId, periodMonth, draftCount, draftTotalAmount }`, `deepLink = teachhub://billing/periods/{periodId}`) và `invoice_issued` (cho phụ huynh, `payload = { invoiceId, studentId, studentName, periodMonth, totalAmount, dueDate }`, `deepLink = teachhub://invoices/{invoiceId}`).',
+      'Từ Sprint 5 có thêm hai loại cũng chưa liệt kê vì lý do trên: `billing_ready` (cho giáo viên, `payload = { periodId, periodMonth, draftCount, draftTotalAmount }`, `deepLink = teachhub://billing/periods/{periodId}`) và `invoice_issued` (cho phụ huynh, `payload = { invoiceId, studentId, studentName, periodMonth, totalAmount, dueDate }`, `deepLink = teachhub://invoices/{invoiceId}`). Push của hai loại này chỉ data-only (`notificationId`, `type`): text khay cố định, không tên con, không số tiền; email `invoice_issued` có tiêu đề cố định, không chứa tên con.',
   })
   @ApiOkResponse({ standardSchema: notificationsResponseSchema })
   @ApiErrors('VALIDATION_FAILED')

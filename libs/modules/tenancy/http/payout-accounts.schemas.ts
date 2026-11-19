@@ -27,6 +27,15 @@ const accountName = z
     example: 'NGUYEN VAN A',
   });
 
+const otpCode = z
+  .string()
+  .regex(/^\d{6}$/)
+  .meta({
+    description:
+      'Mã OTP 6 số gửi tới email của user qua `POST /auth/otp/send` với `purpose = payout_account`. Bắt buộc khi đặt hoặc đổi `bankBin` hoặc `accountNo` (chặn người cầm máy đổi nơi nhận tiền); sai → 401 `OTP_INVALID`, nhập sai quá nhiều → 429 `OTP_LOCKED`. Mã `payout_account` chỉ dùng được cho route này',
+    example: '482913',
+  });
+
 export const createPayoutAccountRequestSchema = z
   .object({
     id: z.uuid().optional().meta({
@@ -35,6 +44,7 @@ export const createPayoutAccountRequestSchema = z
     bankBin,
     accountNo,
     accountName,
+    otpCode,
     isPrimary: z.boolean().optional().meta({
       description:
         'Mặc định `true` với tài khoản đầu tiên, `false` với các tài khoản sau',
@@ -46,6 +56,7 @@ export const createPayoutAccountRequestSchema = z
       bankBin: '970436',
       accountNo: '0123456789',
       accountName: 'NGUYEN VAN A',
+      otpCode: '482913',
     },
   });
 export type CreatePayoutAccountRequest = z.infer<
@@ -57,12 +68,22 @@ export const updatePayoutAccountRequestSchema = z
     bankBin,
     accountNo,
     accountName,
+    otpCode: otpCode.optional(),
     isPrimary: z.literal(true).meta({
       description:
         'Chỉ nhận `true` (đặt làm tài khoản chính, tài khoản chính cũ bị bỏ cờ). Muốn bỏ cờ thì đặt tài khoản khác làm chính',
     }),
   })
   .partial()
+  .superRefine((v, ctx) => {
+    if ((v.bankBin !== undefined || v.accountNo !== undefined) && !v.otpCode) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Đổi ngân hàng hoặc số tài khoản cần mã OTP.',
+        path: ['otpCode'],
+      });
+    }
+  })
   .meta({ example: { accountName: 'NGUYEN VAN B' } });
 export type UpdatePayoutAccountRequest = z.infer<
   typeof updatePayoutAccountRequestSchema
@@ -72,7 +93,11 @@ export const payoutAccountSchema = z
   .object({
     id: z.uuid(),
     bankBin: z.string().regex(/^\d{6}$/),
-    accountNo: z.string(),
+    accountNoMasked: z.string().meta({
+      description:
+        'Che số tài khoản, chỉ giữ 4 số cuối; số đầy đủ không trả lại qua API này, chỉ có trong `payout` của hóa đơn đã phát hành',
+      example: '******6789',
+    }),
     accountName: z.string(),
     isPrimary: z.boolean(),
     createdAt: z.iso.datetime({ offset: true }),
@@ -82,7 +107,7 @@ export const payoutAccountSchema = z
     example: {
       id: '019c0a20-0001-7b30-8c01-000000000001',
       bankBin: '970436',
-      accountNo: '0123456789',
+      accountNoMasked: '******6789',
       accountName: 'NGUYEN VAN A',
       isPrimary: true,
       createdAt: '2027-01-20T09:30:00+07:00',

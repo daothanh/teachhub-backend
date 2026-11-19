@@ -87,7 +87,7 @@ export const scheduleChangedPayloadSchema = z
 
 /**
  * Payload loại `billing_ready` (US-7.2 AC1, gửi giáo viên khi `billing.close` tạo bản nháp). CHƯA nằm trong `notificationSchema`
- * vì cùng lý do `oasdiff` như `schedule_changed`. Push chỉ data-only (`notificationId`, `type`).
+ * vì cùng lý do `oasdiff` như `schedule_changed`. Push FCM chỉ data-only (`notificationId`, `type`); text khay do app dựng cố định, không có số tiền hay tên.
  */
 export const billingReadyPayloadSchema = z
   .object({
@@ -98,12 +98,12 @@ export const billingReadyPayloadSchema = z
   })
   .meta({
     description:
-      'Kỳ và số bản nháp; text push "Học phí tháng X đã sẵn sàng" do client dựng từ `periodMonth`. deepLink `teachhub://billing/periods/{periodId}`',
+      'Kỳ và số bản nháp, chỉ có trong hộp thông báo sau khi đăng nhập (`GET /notifications`), không bao giờ trong push. Khay hiện text cố định, không có tên con hay số tiền; text "Học phí tháng X đã sẵn sàng" chỉ dựng khi app đã mở. deepLink `teachhub://billing/periods/{periodId}`',
   });
 
 /**
  * Payload loại `invoice_issued` (US-7.3, gửi phụ huynh qua outbox `invoice_issued`, kèm email). CHƯA nằm trong `notificationSchema`.
- * Không có số tài khoản hay mã QR: phụ huynh mở hóa đơn qua `GET /family/invoices/{invoiceId}`.
+ * Push FCM data-only (`notificationId`, `type`); email có tiêu đề cố định, không chứa tên con. Payload này chỉ có trong hộp thông báo sau khi đăng nhập. Không có số tài khoản hay mã QR: phụ huynh mở hóa đơn qua `GET /family/invoices/{invoiceId}`.
  */
 export const invoiceIssuedPayloadSchema = z
   .object({
@@ -116,7 +116,7 @@ export const invoiceIssuedPayloadSchema = z
   })
   .meta({
     description:
-      'Hóa đơn mới phát hành của một con. deepLink `teachhub://invoices/{invoiceId}`',
+      'Hóa đơn mới phát hành của một con; có tên con và số tiền nên không bao giờ nằm trong push hay tiêu đề email, khay hiện text cố định. deepLink `teachhub://invoices/{invoiceId}`',
   });
 
 const notificationBase = z.object({

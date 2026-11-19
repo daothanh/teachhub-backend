@@ -49,7 +49,7 @@ export class FamilyInvoicesController {
       'Hóa đơn của học viên khác, của tenant khác, bản nháp hay không tồn tại → cùng 404 `NOT_FOUND`. `qrPayload` là chuỗi VietQR đã chứa số tiền và nội dung chuyển khoản; client vẽ QR, cho lưu ảnh và sao chép `transferNote`.',
   })
   @ApiOkResponse({ standardSchema: familyInvoiceSchema })
-  @ApiErrors('NOT_FOUND')
+  @ApiErrors('VALIDATION_FAILED', 'NOT_FOUND')
   get(@Param('id', { schema: idParam }) _id: string): FamilyInvoice {
     throw new AppException('NOT_IMPLEMENTED');
   }

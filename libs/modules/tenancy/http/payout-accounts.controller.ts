@@ -16,6 +16,7 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { z } from 'zod';
 import { ApiErrors, ApiIdempotencyKey, AppException } from '@teachhub/core';
 import { RequiresRole } from '@teachhub/modules/identity';
@@ -43,7 +44,7 @@ export class PayoutAccountsController {
   @ApiOperation({
     summary: 'Danh sách tài khoản nhận tiền (S5-FL-03)',
     description:
-      'Tài khoản chính (`isPrimary`) đứng đầu. Chưa có tài khoản nào thì `items` rỗng: chốt kỳ sẽ bị chặn bằng 422 `PAYOUT_ACCOUNT_MISSING` (US-7.3 AC5).',
+      'Tài khoản chính (`isPrimary`) đứng đầu, số tài khoản đã che (`accountNoMasked`). Chưa có tài khoản nào thì `items` rỗng: chốt kỳ sẽ bị chặn bằng 422 `PAYOUT_ACCOUNT_MISSING` (US-7.3 AC5).',
   })
   @ApiOkResponse({ standardSchema: payoutAccountListSchema })
   list(): PayoutAccountList {
@@ -51,15 +52,16 @@ export class PayoutAccountsController {
   }
 
   @Post()
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @ApiOperation({
     summary: 'Thêm tài khoản nhận tiền',
     description:
-      'Tài khoản đầu tiên tự là tài khoản chính. `isPrimary = true` ở tài khoản sau chuyển cờ chính sang tài khoản này trong cùng giao dịch. Tối đa 5 tài khoản mỗi tenant, vượt → 422 `VALIDATION_FAILED`. ' +
+      'Tài khoản đầu tiên tự là tài khoản chính. `isPrimary = true` ở tài khoản sau chuyển cờ chính sang tài khoản này trong cùng giao dịch. Tối đa 5 tài khoản mỗi tenant, vượt → 422 `VALIDATION_FAILED`. Cần `otpCode` (xem mô tả trường). Ghi tối đa 20 lần/phút/user (429 `RATE_LIMITED`). ' +
       'Hóa đơn dùng tài khoản chính lúc phát hành và chụp lại vào hóa đơn (`payout`), nên sửa hay xóa tài khoản sau đó không đổi hóa đơn đã phát hành.',
   })
   @ApiCreatedResponse({ standardSchema: payoutAccountSchema })
   @ApiIdempotencyKey()
-  @ApiErrors('VALIDATION_FAILED', 'CONFLICT_STALE')
+  @ApiErrors('VALIDATION_FAILED', 'OTP_INVALID', 'OTP_LOCKED', 'RATE_LIMITED')
   create(
     @Body({ schema: createPayoutAccountRequestSchema })
     _body: CreatePayoutAccountRequest,
@@ -68,14 +70,21 @@ export class PayoutAccountsController {
   }
 
   @Patch(':id')
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @ApiOperation({
     summary: 'Sửa tài khoản nhận tiền',
     description:
-      'Chỉ gửi trường đổi. `isPrimary` chỉ nhận `true` (đặt làm chính). Không ảnh hưởng hóa đơn đã phát hành.',
+      'Chỉ gửi trường đổi. `isPrimary` chỉ nhận `true` (đặt làm chính). Đổi `bankBin` hoặc `accountNo` bắt buộc `otpCode`, thiếu → 422 `VALIDATION_FAILED`. Không ảnh hưởng hóa đơn đã phát hành.',
   })
   @ApiOkResponse({ standardSchema: payoutAccountSchema })
   @ApiIdempotencyKey()
-  @ApiErrors('VALIDATION_FAILED', 'NOT_FOUND')
+  @ApiErrors(
+    'VALIDATION_FAILED',
+    'NOT_FOUND',
+    'OTP_INVALID',
+    'OTP_LOCKED',
+    'RATE_LIMITED',
+  )
   update(
     @Param('id', { schema: idParam }) _id: string,
     @Body({ schema: updatePayoutAccountRequestSchema })
@@ -85,6 +94,7 @@ export class PayoutAccountsController {
   }
 
   @Delete(':id')
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @HttpCode(204)
   @ApiOperation({
     summary: 'Xóa tài khoản nhận tiền',
@@ -93,7 +103,7 @@ export class PayoutAccountsController {
   })
   @ApiNoContentResponse()
   @ApiIdempotencyKey()
-  @ApiErrors('NOT_FOUND')
+  @ApiErrors('NOT_FOUND', 'RATE_LIMITED')
   remove(@Param('id', { schema: idParam }) _id: string): void {
     throw new AppException('NOT_IMPLEMENTED');
   }

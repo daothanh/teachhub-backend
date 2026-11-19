@@ -7,8 +7,6 @@ import {
   signedVndSchema,
   vndSchema,
 } from '@teachhub/core';
-import { attendanceStatusSchema } from '@teachhub/modules/attendance';
-import { sessionStatusSchema } from '@teachhub/modules/schedule';
 
 // Hợp đồng Sprint 5 (S4-FL-10, S4-CT-01). Tiền: số nguyên đồng, xem `libs/core/src/money.ts`.
 // Luật làm tròn (nghiệp vụ, US-7.1 AC6): mọi dòng có chia tỷ lệ (trọn khóa, trừ buổi hủy của kiểu theo tháng) làm tròn
@@ -35,9 +33,9 @@ export const feeRulesSchema = z
       description:
         'Kiểu theo tháng: trừ phần tiền buổi giáo viên hủy mà không dạy bù = học phí / số buổi theo lịch × số buổi hủy, làm tròn 1.000 đ. Mặc định tắt',
     }),
-    installments: z.int().min(1).max(12).meta({
+    installments: z.int().min(1).max(36).meta({
       description:
-        'Kiểu trọn khóa: số đợt thu. Mặc định 1; đợt cuối gánh phần chênh để tổng các đợt bằng đúng tổng khóa',
+        'Kiểu trọn khóa: số đợt thu (1 đến 36, khớp `InvoiceCalculator`). Mặc định 1; đợt cuối gánh phần chênh để tổng các đợt bằng đúng tổng khóa',
     }),
   })
   .meta({
@@ -57,7 +55,7 @@ export const feeRulesInputSchema = z
     chargeExcused: z.boolean().optional(),
     chargeUnexcused: z.boolean().optional(),
     deductCancelled: z.boolean().optional(),
-    installments: z.int().min(1).max(12).optional(),
+    installments: z.int().min(1).max(36).optional(),
   })
   .meta({
     id: 'FeeRulesInput',
@@ -186,6 +184,10 @@ const qrPayload = z.string().max(512).meta({
 export const payoutSnapshotSchema = z
   .object({
     bankBin: z.string().regex(/^\d{6}$/),
+    bankName: z.string().nullable().meta({
+      description:
+        'Tên ngân hàng tra từ bảng BIN NAPAS của server lúc phát hành; null nếu BIN không có trong bảng (client hiện BIN)',
+    }),
     accountNo: z.string(),
     accountName: z.string(),
   })
@@ -208,6 +210,14 @@ export const invoiceLineKindSchema = z
       'Sprint 5 sinh `session`, `monthly`, `course_installment`, `discount`, `manual_adjustment`. `carry_over` và `prev_adjustment` cần số dư chuyển kỳ (US-7.6, Sprint 6); `surcharge` cần US-7.8 (P1). Client coi giá trị lạ như dòng thường',
   });
 
+export const sessionNotChargedReasonSchema = z
+  .enum(['excused_not_charged', 'unexcused_not_charged', 'cancelled', 'makeup'])
+  .meta({
+    id: 'SessionNotChargedReason',
+    description:
+      '`excused_not_charged`/`unexcused_not_charged` = lớp hoặc học viên tắt tính vắng có phép/không phép, `cancelled` = giáo viên hủy buổi, `makeup` = buổi bù không tính thêm tiền (US-7.1 AC3). Ứng với `reason` của `InvoiceCalculator` (trừ `taught`, nghĩa là có tính)',
+  });
+
 export const invoiceLineSchema = z
   .object({
     id: z.uuid(),
@@ -216,49 +226,31 @@ export const invoiceLineSchema = z
     amount: signedVndSchema(
       'Có dấu: giảm trừ, miễn giảm và điều chỉnh giảm là số âm; dòng buổi không tính tiền là 0',
     ),
+    charged: z.boolean().meta({
+      description:
+        'Dòng `session`: buổi có tính tiền không. Mọi loại dòng khác luôn `true`',
+    }),
+    notChargedReason: sessionNotChargedReasonSchema.nullable().meta({
+      description: 'Có khi `kind = session` và `charged = false`, còn lại null',
+    }),
     sessionId: z.uuid().nullable(),
+    sessionDate: z.iso.date().nullable().meta({
+      description: 'Ngày buổi học theo múi giờ tenant; có với dòng `session`',
+    }),
     className: z.string().nullable().meta({
       description:
         'Lớp phát sinh dòng này (một hóa đơn gộp mọi lớp của học viên trong kỳ); null với dòng không thuộc lớp nào',
     }),
-    reason: z.string().nullable().meta({
-      description: 'Lý do, bắt buộc và chỉ có với `manual_adjustment`',
-    }),
-  })
-  .meta({ id: 'InvoiceLine' });
-
-export const sessionNotChargedReasonSchema = z
-  .enum(['excused_not_charged', 'unexcused_not_charged', 'cancelled', 'makeup'])
-  .meta({
-    id: 'SessionNotChargedReason',
-    description:
-      '`excused_not_charged`/`unexcused_not_charged` = lớp hoặc học viên tắt tính vắng có phép/không phép, `cancelled` = giáo viên hủy buổi, `makeup` = buổi bù không tính thêm tiền (US-7.1 AC3)',
-  });
-
-/** Một buổi của học viên trong kỳ, kèm kết luận tính hay không tính tiền (US-7.2 AC2). */
-export const invoiceSessionSchema = z
-  .object({
-    sessionId: z.uuid(),
-    classId: z.uuid(),
-    className: z.string(),
-    date: z.iso
-      .date()
-      .meta({ description: 'Ngày buổi học theo múi giờ tenant' }),
-    sessionStatus: sessionStatusSchema,
-    isMakeup: z.boolean(),
-    attendanceStatus: attendanceStatusSchema.nullable().meta({
+    adjustmentReason: z.string().nullable().meta({
       description:
-        'null = chưa điểm danh (kiểu theo buổi coi như có mặt) hoặc buổi đã hủy',
-    }),
-    charged: z.boolean(),
-    amount: vndSchema(
-      'Tiền buổi này; 0 khi `charged = false`. Chỉ khác 0 với kiểu theo buổi',
-    ),
-    notChargedReason: sessionNotChargedReasonSchema.nullable().meta({
-      description: 'Có khi `charged = false`',
+        'Lý do của người sửa, bắt buộc và chỉ có với `manual_adjustment`; không liên quan lý do không tính của buổi',
     }),
   })
-  .meta({ id: 'InvoiceSession' });
+  .meta({
+    id: 'InvoiceLine',
+    description:
+      '`lines` là nguồn duy nhất của hóa đơn và là SNAPSHOT lúc tính: mở hóa đơn không đọc lại điểm danh, và dòng không đổi sau phát hành (chênh lệch do sửa điểm danh về sau vào kỳ sau, `prev_adjustment`). Kiểu theo buổi: mỗi buổi trong kỳ một dòng `session`, kể cả buổi hủy và buổi bù (0 đ). Kiểu theo tháng và trọn khóa: không có dòng buổi, một dòng gốc (`monthly` đã trừ phần buổi hủy nếu bật `deductCancelled`, hoặc `course_installment`), rồi các dòng `discount` và `manual_adjustment`',
+  });
 
 export const invoiceSummarySchema = z
   .object({
@@ -329,11 +321,18 @@ export const invoiceSchema = z
       description:
         'Bản nháp được tạo để thay hóa đơn đã hủy (xem `POST /invoices/{id}/void`)',
     }),
-    lines: z.array(invoiceLineSchema),
-    sessions: z.array(invoiceSessionSchema).meta({
-      description:
-        'Mọi buổi của học viên trong kỳ (cả buổi không tính tiền), sắp theo ngày; rỗng với kiểu theo tháng/trọn khóa nếu không có buổi nào',
+    replacementInvoiceId: z.uuid().nullable().meta({
+      description: 'Có khi hóa đơn này đã hủy kèm bản nháp thay thế',
     }),
+    lines: z.array(invoiceLineSchema),
+    installmentNo: z.int().min(1).max(36).nullable().meta({
+      description:
+        'Kiểu trọn khóa: đợt của hóa đơn này (n trong n/`installmentCount`). Đợt n là kỳ thứ n kể từ kỳ đầu tiên học viên vào lớp; hết đợt thì kỳ sau không sinh hóa đơn trọn khóa cho ghi danh đó. Null với kiểu khác',
+    }),
+    installmentCount: z.int().min(1).max(36).nullable(),
+    clampedAmount: vndSchema(
+      'Phần âm bị cắt khi Σ `lines.amount` < 0 để `totalAmount` không âm; 0 khi không cắt. Phần này chuyển kỳ sau (US-7.6, Sprint 6)',
+    ),
     createdAt: z.iso.datetime({ offset: true }),
   })
   .meta({
@@ -350,45 +349,41 @@ export const invoiceSchema = z
       status: 'draft',
       studentId: '019b2c4f-0001-7b30-8c01-000000000001',
       studentName: 'Nguyễn Minh Anh',
-      totalAmount: 1050000,
+      totalAmount: 150000,
       dueDate: '2027-01-10',
       issuedAt: null,
       payout: null,
       voidedAt: null,
       voidReason: null,
       replacesInvoiceId: null,
+      replacementInvoiceId: null,
+      installmentNo: null,
+      installmentCount: null,
+      clampedAmount: 0,
       lines: [
         {
           id: '019c0a11-0001-7b30-8c01-000000000001',
           kind: 'session',
           description: 'Buổi 2026-12-15',
           amount: 150000,
+          charged: true,
+          notChargedReason: null,
           sessionId: '019b2c41-0001-7a10-8a01-000000000001',
+          sessionDate: '2026-12-15',
           className: 'Toán 9A',
-          reason: null,
+          adjustmentReason: null,
         },
         {
           id: '019c0a11-0001-7b30-8c01-000000000002',
           kind: 'session',
           description: 'Buổi 2026-12-17 (không tính)',
           amount: 0,
-          sessionId: '019b2c41-0001-7a10-8a01-000000000002',
-          className: 'Toán 9A',
-          reason: null,
-        },
-      ],
-      sessions: [
-        {
-          sessionId: '019b2c41-0001-7a10-8a01-000000000002',
-          classId: '019b2c3f-5e01-7c20-9b01-000000000001',
-          className: 'Toán 9A',
-          date: '2026-12-17',
-          sessionStatus: 'taught',
-          isMakeup: false,
-          attendanceStatus: 'excused',
           charged: false,
-          amount: 0,
           notChargedReason: 'excused_not_charged',
+          sessionId: '019b2c41-0001-7a10-8a01-000000000002',
+          sessionDate: '2026-12-17',
+          className: 'Toán 9A',
+          adjustmentReason: null,
         },
       ],
       createdAt: '2026-12-31T02:00:00+07:00',
@@ -416,7 +411,7 @@ export const createAdjustmentRequestSchema = z
       .min(1)
       .max(200)
       .meta({ example: 'Giảm học phí buổi học thử' }),
-    reason: z
+    adjustmentReason: z
       .string()
       .trim()
       .min(1, 'Vui lòng nhập lý do điều chỉnh.')
@@ -431,7 +426,7 @@ export const createAdjustmentRequestSchema = z
     example: {
       amount: -100000,
       description: 'Giảm học phí buổi học thử',
-      reason: 'Buổi 05/12 học thử, đã thỏa thuận với phụ huynh',
+      adjustmentReason: 'Buổi 05/12 học thử, đã thỏa thuận với phụ huynh',
     },
   });
 export type CreateAdjustmentRequest = z.infer<
@@ -579,6 +574,9 @@ export const familyInvoiceSummarySchema = z
   });
 
 export const familyInvoicesQuerySchema = cursorQuerySchema(50).extend({
+  status: invoiceStatusSchema.exclude(['draft']).optional().meta({
+    description: 'Lọc theo trạng thái; bỏ trống = mọi trạng thái trừ `draft`',
+  }),
   studentId: z.uuid().optional().meta({
     description:
       'Chỉ hóa đơn của con này; con không liên kết cho danh sách rỗng',
@@ -598,6 +596,7 @@ export type FamilyInvoiceList = z.infer<typeof familyInvoiceListSchema>;
 export const familyInvoiceLineSchema = z
   .object({
     kind: invoiceLineKindSchema,
+    className: z.string().nullable(),
     description: z.string(),
     amount: signedVndSchema('Có dấu như `InvoiceLine.amount`'),
   })
@@ -611,9 +610,9 @@ export const familyInvoiceSchema = familyInvoiceSummarySchema
       description:
         'Null khi `status = void` (không được chuyển khoản vào hóa đơn đã hủy)',
     }),
-    payout: payoutSnapshotSchema.meta({
+    payout: payoutSnapshotSchema.nullable().meta({
       description:
-        'Tài khoản nhận tiền; client tự tra tên ngân hàng từ `bankBin`',
+        'Tài khoản nhận tiền; null khi `status = void` (không còn nơi để chuyển khoản)',
     }),
     voidedAt: z.iso.datetime({ offset: true }).nullable(),
   })

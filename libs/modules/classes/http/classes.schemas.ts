@@ -89,7 +89,7 @@ export type CreateClassRequest = z.infer<typeof createClassRequestSchema>;
 const feeUpdateFields = {
   feeType: feeTypeSchema.nullable().optional().meta({
     description:
-      'Kiểu tính học phí; `null` cùng với `feeAmount = null` xóa cấu hình học phí của lớp (lớp chưa có học phí không sinh bản nháp hóa đơn)',
+      'Kiểu tính học phí; `null` cùng với `feeAmount = null` xóa cấu hình học phí của lớp (lớp chưa có học phí không sinh bản nháp hóa đơn). `course` chỉ hợp lệ khi lớp xác định được tổng số buổi của khóa: có `endDate` và ít nhất một quy tắc lịch (tổng buổi = số buổi theo lịch từ `startDate` đến `endDate`, trừ ngày lễ bỏ qua); thiếu → 422 `VALIDATION_FAILED` ở `feeType`',
   }),
   feeAmount: feeAmountSchema.nullable().optional(),
   feeRules: feeRulesInputSchema.nullable().optional().meta({
@@ -247,10 +247,18 @@ const rosterGuardianSchema = z
   })
   .meta({ id: 'RosterGuardian' });
 
+const discountDescription = z
+  .string()
+  .trim()
+  .min(1)
+  .max(100)
+  .meta({ description: 'Tên khoản miễn giảm, hiện thành dòng `discount`' });
+
 const discountSchema = z
   .discriminatedUnion('kind', [
     z.object({
       kind: z.literal('percent'),
+      description: discountDescription,
       percent: z.int().min(1).max(100).meta({
         description:
           '100 = miễn giảm hoàn toàn (hóa đơn 0 đ không được gửi, US-1.3 AC3)',
@@ -258,6 +266,7 @@ const discountSchema = z
     }),
     z.object({
       kind: z.literal('amount'),
+      description: discountDescription,
       amount: z
         .int()
         .min(1)
@@ -291,7 +300,13 @@ export const feeOverrideSchema = z
       .boolean()
       .nullable()
       .meta({ description: 'Ghi đè "trừ buổi hủy" của lớp (kiểu theo tháng)' }),
-    discount: discountSchema.nullable(),
+    installments: z.int().min(1).max(36).nullable().meta({
+      description: 'Ghi đè số đợt của lớp trọn khóa (1 đến 36)',
+    }),
+    discounts: z.array(discountSchema).max(5).meta({
+      description:
+        'Tối đa 5 khoản miễn giảm định kỳ (Spec §4.4 `recurring_discounts`), mỗi khoản một dòng `discount`; rỗng = không miễn giảm. Với lớp trọn khóa chia đợt, khoản miễn giảm áp ở mỗi đợt, tính trên phần gốc của đợt đó',
+    }),
   })
   .meta({
     id: 'FeeOverride',
@@ -300,7 +315,8 @@ export const feeOverrideSchema = z
       chargeExcused: false,
       chargeUnexcused: null,
       deductCancelled: null,
-      discount: null,
+      installments: null,
+      discounts: [],
     },
   });
 export type FeeOverride = z.infer<typeof feeOverrideSchema>;
@@ -308,7 +324,7 @@ export type FeeOverride = z.infer<typeof feeOverrideSchema>;
 export const putFeeOverrideRequestSchema = feeOverrideSchema.partial().meta({
   id: 'PutFeeOverrideRequest',
   description:
-    'Thay toàn bộ mức riêng: trường thiếu hoặc `null` = kế thừa lớp. `{}` (mọi trường rỗng) xóa mức riêng và bỏ nhãn "Giá riêng"',
+    'Thay toàn bộ mức riêng: trường thiếu hoặc `null` = kế thừa lớp, `discounts` thiếu hoặc rỗng = không miễn giảm. `{}` xóa mức riêng và bỏ nhãn "Giá riêng"',
   example: { feeAmount: 120000, chargeExcused: false },
 });
 export type PutFeeOverrideRequest = z.infer<typeof putFeeOverrideRequestSchema>;
@@ -333,7 +349,8 @@ export const feeOverrideResultSchema = z
         chargeExcused: false,
         chargeUnexcused: null,
         deductCancelled: null,
-        discount: null,
+        installments: null,
+        discounts: [],
       },
     },
   });
@@ -376,7 +393,8 @@ export const rosterSchema = z
             chargeExcused: null,
             chargeUnexcused: null,
             deductCancelled: null,
-            discount: null,
+            installments: null,
+            discounts: [],
           },
           guardians: [
             {
