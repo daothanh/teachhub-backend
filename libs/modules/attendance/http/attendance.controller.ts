@@ -6,6 +6,8 @@ import {
   Param,
   Post,
   Query,
+  Req,
+  Res,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -13,9 +15,19 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { ApiErrors, ApiIdempotencyKey, AppException } from '@teachhub/core';
+import {
+  ApiErrors,
+  ApiIdempotencyKey,
+  Ctx,
+  type RequestContext,
+} from '@teachhub/core';
+import { TxService } from '@teachhub/db';
+import { Idempotency } from '@teachhub/infra';
 import { RequiresRole } from '@teachhub/modules/identity';
+import { AttendanceService } from '../application/attendance.service.js';
 import {
   type AttendanceHistory,
   type AttendanceHistoryQuery,
@@ -31,13 +43,19 @@ import {
 
 const idParam = z.uuid();
 
-// Hợp đồng Sprint 3 (S2-FL-10); thân hàm ở S3-BE-02 (đọc, sync), S3-BE-03 (nhật ký).
+// Hợp đồng Sprint 3 (S2-FL-10); thân hàm ở S3-BE-02 (đọc, sync) và S3-BE-03 (nhật ký).
 @ApiTags('attendance')
 @ApiBearerAuth('bearer')
 @RequiresRole('tenant_owner')
 @ApiErrors('UNAUTHENTICATED', 'TOKEN_EXPIRED', 'FORBIDDEN')
 @Controller()
 export class AttendanceController {
+  constructor(
+    private readonly tx: TxService,
+    private readonly idem: Idempotency,
+    private readonly attendance: AttendanceService,
+  ) {}
+
   @Get('sessions/:id/attendance')
   @ApiOperation({
     summary: 'Danh sách điểm danh của một buổi (US-3.1, US-3.3)',
@@ -47,8 +65,11 @@ export class AttendanceController {
   })
   @ApiOkResponse({ standardSchema: sessionAttendanceSchema })
   @ApiErrors('NOT_FOUND')
-  get(@Param('id', { schema: idParam }) _id: string): SessionAttendance {
-    throw new AppException('NOT_IMPLEMENTED');
+  get(
+    @Ctx() ctx: RequestContext,
+    @Param('id', { schema: idParam }) id: string,
+  ): Promise<SessionAttendance> {
+    return this.tx.run(ctx, (t) => this.attendance.get(t, ctx.tenantId!, id));
   }
 
   @Post('attendance/sync')
@@ -64,11 +85,25 @@ export class AttendanceController {
   @ApiOkResponse({ standardSchema: attendanceSyncResultSchema })
   @ApiIdempotencyKey()
   @ApiErrors('VALIDATION_FAILED', 'NOT_FOUND', 'SESSION_CANCELLED')
+  // Giới hạn theo IP; body tối đa 1 MB (bodyLimit toàn cục của Fastify) vẫn rộng hơn lô lớn nhất hợp lệ
+  // (500 mutation, ghi chú 500 ký tự ≈ 0,8 MB) nên không cần hạ riêng cho route này.
+  @Throttle({ default: { limit: 120, ttl: 60_000 } })
   sync(
+    @Ctx() ctx: RequestContext,
+    @Req() req: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
     @Body({ schema: attendanceSyncRequestSchema })
-    _body: AttendanceSyncRequest,
-  ): AttendanceSyncResult {
-    throw new AppException('NOT_IMPLEMENTED');
+    body: AttendanceSyncRequest,
+  ): Promise<AttendanceSyncResult> {
+    // Replay cùng Idempotency-Key trả đúng phản hồi đã lưu, nên lệch đồng hồ chỉ tính ở lần nhận đầu.
+    return this.idem.run(req, reply, ctx, async (t) => ({
+      status: 200,
+      body: await this.attendance.sync(
+        t,
+        { tenantId: ctx.tenantId!, userId: ctx.userId! },
+        body,
+      ),
+    }));
   }
 
   @Get('sessions/:id/attendance/history')
@@ -80,10 +115,13 @@ export class AttendanceController {
   @ApiOkResponse({ standardSchema: attendanceHistorySchema })
   @ApiErrors('VALIDATION_FAILED', 'NOT_FOUND')
   history(
-    @Param('id', { schema: idParam }) _id: string,
+    @Ctx() ctx: RequestContext,
+    @Param('id', { schema: idParam }) id: string,
     @Query({ schema: attendanceHistoryQuerySchema })
-    _query: AttendanceHistoryQuery,
-  ): AttendanceHistory {
-    throw new AppException('NOT_IMPLEMENTED');
+    query: AttendanceHistoryQuery,
+  ): Promise<AttendanceHistory> {
+    return this.tx.run(ctx, (t) =>
+      this.attendance.history(t, ctx.tenantId!, id, query),
+    );
   }
 }

@@ -120,6 +120,48 @@
       "when": 1795075666521,
       "tag": "0016_drop_students_trgm_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1795076191545,
+      "tag": "0017_outbox_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1795076195160,
+      "tag": "0018_outbox_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1795076437082,
+      "tag": "0019_attendance",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1795076808061,
+      "tag": "0020_attendance_history_fn",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1795076939565,
+      "tag": "0021_notifications",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1795077955056,
+      "tag": "0022_review_round1",
+      "breakpoints": true
     }
   ]
 }

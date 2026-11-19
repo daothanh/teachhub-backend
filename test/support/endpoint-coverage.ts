@@ -138,32 +138,32 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
       'hợp đồng S1-CT-02, thân hàm trả 501 tới task admin; test chéo tenant làm cùng task đó',
   },
   'GET /v1/sessions/{id}/attendance': {
-    notApplicable:
-      'hợp đồng S2-FL-10, thân hàm trả 501 tới S3-BE-02; test chéo tenant làm cùng task đó',
+    file: 'attendance.e2e-spec.ts',
+    test: 'chéo tenant: B không đọc/ghi buổi của A (404); học viên tenant khác và học viên ngoài lớp cho cùng kết quả',
   },
   'POST /v1/attendance/sync': {
-    notApplicable:
-      'hợp đồng S2-FL-10, thân hàm trả 501 tới S3-BE-02; test chéo tenant làm cùng task đó',
+    file: 'attendance.e2e-spec.ts',
+    test: 'chéo tenant: B không đọc/ghi buổi của A (404); học viên tenant khác và học viên ngoài lớp cho cùng kết quả',
   },
   'GET /v1/sessions/{id}/attendance/history': {
-    notApplicable:
-      'hợp đồng S2-FL-10, thân hàm trả 501 tới S3-BE-03; test chéo tenant làm cùng task đó',
+    file: 'attendance.e2e-spec.ts',
+    test: 'nhật ký chéo tenant: B không xem được buổi của A (404); chỉ tenant_owner xem được (giáo viên thường 403)',
   },
   'POST /v1/push/register': {
-    notApplicable:
-      'hợp đồng S2-FL-10, thân hàm trả 501 tới S3-BE-05; test chéo tenant làm cùng task đó',
+    file: 'push.e2e-spec.ts',
+    test: 'chéo tenant: userId trong body khác token → 403 FORBIDDEN, không ghi gì',
   },
   'POST /v1/push/unregister': {
-    notApplicable:
-      'hợp đồng S2-FL-10, thân hàm trả 501 tới S3-BE-05; test chéo tenant làm cùng task đó',
+    file: 'push.e2e-spec.ts',
+    test: 'chéo tenant: userId trong body khác token → 403 FORBIDDEN, không ghi gì',
   },
   'GET /v1/notifications': {
-    notApplicable:
-      'hợp đồng S2-FL-10, thân hàm trả 501 tới S3-BE-06; test chéo tenant làm cùng task đó',
+    file: 'notifications.e2e-spec.ts',
+    test: 'GET /notifications: chỉ của chính user; chéo user thấy rỗng',
   },
   'POST /v1/notifications/read': {
-    notApplicable:
-      'hợp đồng S2-FL-10, thân hàm trả 501 tới S3-BE-06; test chéo tenant làm cùng task đó',
+    file: 'notifications.e2e-spec.ts',
+    test: 'POST /notifications/read: chéo user bị bỏ qua',
   },
   'POST /v1/students/{id}/invites': {
     notApplicable:

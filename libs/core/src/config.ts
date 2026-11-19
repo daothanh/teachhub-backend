@@ -61,6 +61,8 @@ export const envSchema = z
     /** Khóa cũ khi xoay vòng: PEM SPKI + kid, giữ tới khi access token cũ hết hạn (15 phút). */
     JWT_PREVIOUS_PUBLIC_KEY: z.string().optional(),
     JWT_PREVIOUS_KID: z.string().optional(),
+    /** Service account Firebase (JSON một dòng) để worker gửi FCM. Trống = tắt gửi push, worker vẫn chạy và log cảnh báo. */
+    FCM_SERVICE_ACCOUNT_JSON: z.string().optional(),
   })
   .superRefine((e, ctx) => {
     if (!['staging', 'production'].includes(e.NODE_ENV)) return;

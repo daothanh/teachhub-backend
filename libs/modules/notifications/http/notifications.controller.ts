@@ -1,11 +1,30 @@
-import { Body, Controller, Get, HttpCode, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Post,
+  Query,
+  Req,
+  Res,
+} from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
-import { ApiErrors, ApiIdempotencyKey, AppException } from '@teachhub/core';
+import type { FastifyReply, FastifyRequest } from 'fastify';
+import {
+  ApiErrors,
+  ApiIdempotencyKey,
+  AppException,
+  Ctx,
+  type RequestContext,
+} from '@teachhub/core';
+import { TxService } from '@teachhub/db';
+import { Idempotency } from '@teachhub/infra';
+import { NotificationsService } from '../application/notifications.service.js';
 import {
   type MarkReadRequest,
   markReadRequestSchema,
@@ -23,6 +42,17 @@ import {
 @ApiErrors('UNAUTHENTICATED', 'TOKEN_EXPIRED')
 @Controller('notifications')
 export class NotificationsController {
+  constructor(
+    private readonly tx: TxService,
+    private readonly idem: Idempotency,
+    private readonly service: NotificationsService,
+  ) {}
+
+  private user(ctx: RequestContext): string {
+    if (!ctx.userId) throw new AppException('UNAUTHENTICATED');
+    return ctx.userId;
+  }
+
   @Get()
   @ApiOperation({
     summary: 'Hộp thông báo của vai trò đang mở (US-6.1)',
@@ -33,9 +63,11 @@ export class NotificationsController {
   @ApiOkResponse({ standardSchema: notificationsResponseSchema })
   @ApiErrors('VALIDATION_FAILED')
   list(
-    @Query({ schema: notificationsQuerySchema }) _query: NotificationsQuery,
-  ): NotificationsResponse {
-    throw new AppException('NOT_IMPLEMENTED');
+    @Ctx() ctx: RequestContext,
+    @Query({ schema: notificationsQuerySchema }) query: NotificationsQuery,
+  ): Promise<NotificationsResponse> {
+    const userId = this.user(ctx);
+    return this.tx.run({ userId }, (t) => this.service.list(t, userId, query));
   }
 
   @Post('read')
@@ -49,8 +81,15 @@ export class NotificationsController {
   @ApiIdempotencyKey()
   @ApiErrors('VALIDATION_FAILED')
   read(
-    @Body({ schema: markReadRequestSchema }) _body: MarkReadRequest,
-  ): MarkReadResult {
-    throw new AppException('NOT_IMPLEMENTED');
+    @Ctx() ctx: RequestContext,
+    @Req() req: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @Body({ schema: markReadRequestSchema }) body: MarkReadRequest,
+  ): Promise<MarkReadResult> {
+    const userId = this.user(ctx);
+    return this.idem.run(req, reply, ctx, async (t) => ({
+      status: 200,
+      body: await this.service.markRead(t, userId, body.ids),
+    }));
   }
 }

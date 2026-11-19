@@ -1,11 +1,20 @@
 import { Body, Controller, HttpCode, Post } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import {
   ApiBearerAuth,
   ApiNoContentResponse,
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
-import { ApiErrors, ApiIdempotencyKey, AppException } from '@teachhub/core';
+import {
+  ApiErrors,
+  ApiIdempotencyKey,
+  AppException,
+  Ctx,
+  type RequestContext,
+} from '@teachhub/core';
+import { TxService } from '@teachhub/db';
+import { DevicesService } from '../application/devices.service.js';
 import {
   type PushRegisterRequest,
   pushRegisterRequestSchema,
@@ -19,8 +28,22 @@ import {
 @ApiErrors('UNAUTHENTICATED', 'TOKEN_EXPIRED')
 @Controller('push')
 export class PushController {
+  constructor(
+    private readonly tx: TxService,
+    private readonly devices: DevicesService,
+  ) {}
+
+  /** `userId` ở body chỉ để khớp hợp đồng gói app: không bao giờ là danh tính, lệch token → 403. */
+  private assertSelf(ctx: RequestContext, bodyUserId: string): string {
+    if (!ctx.userId || bodyUserId !== ctx.userId) {
+      throw new AppException('FORBIDDEN');
+    }
+    return ctx.userId;
+  }
+
   @Post('register')
   @HttpCode(204)
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @ApiOperation({
     summary: 'Đăng ký token FCM của thiết bị (FR-6.2)',
     description:
@@ -31,10 +54,14 @@ export class PushController {
   @ApiNoContentResponse()
   @ApiIdempotencyKey(false)
   @ApiErrors('VALIDATION_FAILED', 'FORBIDDEN')
-  register(
-    @Body({ schema: pushRegisterRequestSchema }) _body: PushRegisterRequest,
-  ): void {
-    throw new AppException('NOT_IMPLEMENTED');
+  async register(
+    @Ctx() ctx: RequestContext,
+    @Body({ schema: pushRegisterRequestSchema }) body: PushRegisterRequest,
+  ): Promise<void> {
+    const userId = this.assertSelf(ctx, body.userId);
+    await this.tx.run({ userId }, (t) =>
+      this.devices.register(t, body.deviceToken, body.platform),
+    );
   }
 
   @Post('unregister')
@@ -47,9 +74,13 @@ export class PushController {
   @ApiNoContentResponse()
   @ApiIdempotencyKey(false)
   @ApiErrors('VALIDATION_FAILED', 'FORBIDDEN')
-  unregister(
-    @Body({ schema: pushUnregisterRequestSchema }) _body: PushUnregisterRequest,
-  ): void {
-    throw new AppException('NOT_IMPLEMENTED');
+  async unregister(
+    @Ctx() ctx: RequestContext,
+    @Body({ schema: pushUnregisterRequestSchema }) body: PushUnregisterRequest,
+  ): Promise<void> {
+    const userId = this.assertSelf(ctx, body.userId);
+    await this.tx.run({ userId }, (t) =>
+      this.devices.unregister(t, userId, body.deviceToken),
+    );
   }
 }
