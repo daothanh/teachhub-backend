@@ -77,11 +77,7 @@ describe('attendance: RLS và ràng buộc', () => {
   });
 
   it('B không ghi được dòng gắn tenant A', async () => {
-    await expectInsertRejected(
-      tx,
-      B.userId,
-      row(randomUUID(), ids.studentA2),
-    );
+    await expectInsertRejected(tx, B.userId, row(randomUUID(), ids.studentA2));
   });
 
   it('khóa ngoại kép: dòng của A không trỏ được học viên của tenant B', async () => {
