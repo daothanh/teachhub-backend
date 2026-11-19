@@ -26,6 +26,22 @@ export const googleSsoRequestSchema = z.object({
 });
 export type GoogleSsoRequest = z.infer<typeof googleSsoRequestSchema>;
 
+export const appleSsoRequestSchema = z.object({
+  id_token: z
+    .string()
+    .min(1)
+    .meta({ description: 'identityToken do Sign in with Apple trả về' }),
+  nonce: z.string().min(1).meta({
+    description:
+      'Nonce gốc client đã băm (SHA-256) khi xin token; server băm lại và so với claim `nonce`',
+  }),
+  fullName: z.string().trim().max(120).optional().meta({
+    description:
+      'Apple chỉ gửi tên cho client ở lần đăng nhập đầu; client chuyển tiếp để lưu tên hiển thị',
+  }),
+});
+export type AppleSsoRequest = z.infer<typeof appleSsoRequestSchema>;
+
 export const refreshRequestSchema = z.object({
   refresh_token: z.string().min(1),
 });
@@ -57,12 +73,10 @@ const tokens = {
     example:
       'eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6Im1vY2sifQ.eyJzdWIiOiIwMTlhOGYzZS03YzFiLTdkMmEtOWIzZS01ZjZhN2I4YzlkMGUiLCJzaWQiOiJtb2NrLXNlc3Npb24iLCJpYXQiOjE3OTQ5NjAwMDAsImV4cCI6NDEwMjQ0NDgwMH0.bW9jay1zaWduYXR1cmU',
   }),
-  refresh_token: z
-    .string()
-    .meta({
-      description: 'Xoay vòng mỗi lần làm mới',
-      example: 'rt_mock_9Qm2xYzT4w',
-    }),
+  refresh_token: z.string().meta({
+    description: 'Xoay vòng mỗi lần làm mới',
+    example: 'rt_mock_9Qm2xYzT4w',
+  }),
   expires_in: z
     .int()
     .meta({ description: 'Số giây access_token còn hiệu lực', example: 900 }),

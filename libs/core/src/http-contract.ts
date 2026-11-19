@@ -49,3 +49,12 @@ export function ApiIdempotencyKey() {
     ApiErrors('IDEMPOTENCY_KEY_REUSED', 'IDEMPOTENCY_IN_PROGRESS'),
   );
 }
+
+/** Thân danh sách phân trang offset (Mục 5.5): `{ items, total, page, pageSize }`. */
+export const paginatedSchema = <T extends z.ZodType>(item: T) =>
+  z.object({
+    items: z.array(item),
+    total: z.int().min(0),
+    page: z.int().min(1),
+    pageSize: z.int().min(1),
+  });

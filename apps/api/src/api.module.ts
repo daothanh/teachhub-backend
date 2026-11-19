@@ -13,8 +13,12 @@ import {
   RedisModule,
   ThrottleModule,
 } from '@teachhub/infra';
+import { AdminModule } from '@teachhub/modules/admin';
 import { AuthModule } from '@teachhub/modules/auth';
+import { ClassesModule } from '@teachhub/modules/classes';
 import { IdentityModule } from '@teachhub/modules/identity';
+import { ScheduleModule } from '@teachhub/modules/schedule';
+import { StudentsModule } from '@teachhub/modules/students';
 import { TenancyModule } from '@teachhub/modules/tenancy';
 import { AppConfigController } from './app-config/app-config.controller.js';
 import { HealthController } from './health/health.controller.js';
@@ -31,6 +35,10 @@ import { HealthController } from './health/health.controller.js';
     AuthModule,
     IdentityModule,
     TenancyModule,
+    ClassesModule,
+    StudentsModule,
+    ScheduleModule,
+    AdminModule,
   ],
   controllers: [AppConfigController, HealthController],
   providers: [

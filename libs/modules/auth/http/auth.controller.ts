@@ -22,6 +22,8 @@ import { GoogleIdTokenService } from '../google/google-id-token.service.js';
 import { OTP, OtpService } from '../otp/otp.service.js';
 import { SessionService } from '../session/session.service.js';
 import {
+  type AppleSsoRequest,
+  appleSsoRequestSchema,
   type GoogleSsoRequest,
   googleSsoRequestSchema,
   type LoginRequest,
@@ -117,6 +119,24 @@ export class AuthController {
       g.name,
       g.emailAuthoritative,
     );
+  }
+
+  // Hợp đồng Sprint 2 (S1-CT-02); thân hàm ở S2-BE-01.
+  @Public()
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @Post('sso/apple')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'Đổi identityToken Apple lấy token TeachHub (US-0.1)',
+    description:
+      'Kiểm chữ ký theo JWKS Apple, `aud`, `iss`, hạn và `nonce`. Email đã xác minh trùng user có sẵn → gắn vào user đó.',
+  })
+  @ApiOkResponse({ standardSchema: loginResponseSchema })
+  @ApiErrors('VALIDATION_FAILED', 'UNAUTHENTICATED', 'RATE_LIMITED')
+  ssoApple(
+    @Body({ schema: appleSsoRequestSchema }) _body: AppleSsoRequest,
+  ): LoginResponse {
+    throw new AppException('NOT_IMPLEMENTED');
   }
 
   @Public()

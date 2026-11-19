@@ -319,6 +319,119 @@
         ]
       }
     },
+    "/v1/auth/sso/apple": {
+      "post": {
+        "description": "Kiểm chữ ký theo JWKS Apple, `aud`, `iss`, hạn và `nonce`. Email đã xác minh trùng user có sẵn → gắn vào user đó.",
+        "operationId": "auth_ssoApple",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id_token": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "identityToken do Sign in with Apple trả về"
+                  },
+                  "nonce": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Nonce gốc client đã băm (SHA-256) khi xin token; server băm lại và so với claim `nonce`"
+                  },
+                  "fullName": {
+                    "description": "Apple chỉ gửi tên cho client ở lần đăng nhập đầu; client chuyển tiếp để lưu tên hiển thị",
+                    "type": "string",
+                    "maxLength": 120
+                  }
+                },
+                "required": [
+                  "id_token",
+                  "nonce"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "access_token": {
+                      "type": "string",
+                      "description": "JWT ES256, sống 15 phút",
+                      "example": "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6Im1vY2sifQ.eyJzdWIiOiIwMTlhOGYzZS03YzFiLTdkMmEtOWIzZS01ZjZhN2I4YzlkMGUiLCJzaWQiOiJtb2NrLXNlc3Npb24iLCJpYXQiOjE3OTQ5NjAwMDAsImV4cCI6NDEwMjQ0NDgwMH0.bW9jay1zaWduYXR1cmU"
+                    },
+                    "refresh_token": {
+                      "type": "string",
+                      "description": "Xoay vòng mỗi lần làm mới",
+                      "example": "rt_mock_9Qm2xYzT4w"
+                    },
+                    "expires_in": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991,
+                      "description": "Số giây access_token còn hiệu lực",
+                      "example": 900
+                    },
+                    "user": {
+                      "$ref": "#/components/schemas/User"
+                    }
+                  },
+                  "required": [
+                    "access_token",
+                    "refresh_token",
+                    "expires_in",
+                    "user"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Đổi identityToken Apple lấy token TeachHub (US-0.1)",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/v1/auth/refresh": {
       "post": {
         "description": "Dùng lại refresh token đã xoay → thu hồi cả phiên, 401 `UNAUTHENTICATED`. Hạn trượt 30 ngày, tối đa 90 ngày.",
@@ -817,6 +930,2480 @@
           "workspaces"
         ]
       }
+    },
+    "/v1/onboarding": {
+      "get": {
+        "description": "Mở lại app giữa chừng thì `currentStep` là bước dở (AC3).",
+        "operationId": "onboarding_get",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Onboarding"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Trạng thái 5 bước onboarding (US-0.2)",
+        "tags": [
+          "onboarding"
+        ]
+      }
+    },
+    "/v1/onboarding/steps/{step}": {
+      "patch": {
+        "operationId": "onboarding_patchStep",
+        "parameters": [
+          {
+            "name": "step",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "create_class",
+                "add_students",
+                "set_schedule",
+                "payout_account",
+                "compliance_checklist"
+              ]
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID, giữ nguyên khi thử lại hoặc phát lại từ outbox",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "done",
+                      "skipped"
+                    ],
+                    "description": "`skipped` chỉ cho bước 2 đến 5 (US-0.2 AC2); bước `create_class` bỏ qua → 422"
+                  }
+                },
+                "required": [
+                  "status"
+                ],
+                "example": {
+                  "status": "skipped"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Onboarding"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "IDEMPOTENCY_IN_PROGRESS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED\n\nIDEMPOTENCY_KEY_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Đánh dấu một bước đã xong hoặc bỏ qua (US-0.2 AC2)",
+        "tags": [
+          "onboarding"
+        ]
+      }
+    },
+    "/v1/center-waitlist": {
+      "post": {
+        "description": "Gửi lặp cùng `Idempotency-Key` chỉ tạo một bản ghi.",
+        "operationId": "centerWaitlist_create",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID, giữ nguyên khi thử lại hoặc phát lại từ outbox",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "centerName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120,
+                    "example": "Trung tâm Ánh Dương"
+                  },
+                  "teacherCount": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 1000,
+                    "example": 8
+                  }
+                },
+                "required": [
+                  "centerName",
+                  "teacherCount"
+                ],
+                "example": {
+                  "centerName": "Trung tâm Ánh Dương",
+                  "teacherCount": 8
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CenterWaitlistEntry"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "IDEMPOTENCY_IN_PROGRESS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED\n\nIDEMPOTENCY_KEY_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Đăng ký sớm Chủ trung tâm (US-0.10 AC4)",
+        "tags": [
+          "center-waitlist"
+        ]
+      }
+    },
+    "/v1/classes": {
+      "get": {
+        "description": "`status=active` (mặc định) hoặc `archived`. Lớp lưu trữ ẩn khỏi lịch.",
+        "operationId": "classes_list",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": 1,
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          },
+          {
+            "name": "pageSize",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": 20,
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": "active",
+              "type": "string",
+              "enum": [
+                "active",
+                "archived"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClassPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Danh sách lớp (US-1.1)",
+        "tags": [
+          "classes"
+        ]
+      },
+      "post": {
+        "description": "Bắt buộc tên, môn, khối, hình thức, ngày bắt đầu; địa điểm bắt buộc với lớp tại chỗ; ngày kết thúc không nhỏ hơn ngày bắt đầu. Sai → 422 `VALIDATION_FAILED` kèm `errors` theo trường. Lịch lặp đặt riêng ở `PUT /classes/{id}/schedule-rules`.",
+        "operationId": "classes_create",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID, giữ nguyên khi thử lại hoặc phát lại từ outbox",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120,
+                    "example": "Toán 9A"
+                  },
+                  "subject": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80,
+                    "example": "Toán"
+                  },
+                  "grade": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 12,
+                    "example": 9
+                  },
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "offline",
+                      "online"
+                    ]
+                  },
+                  "location": {
+                    "description": "Bắt buộc khi `mode = offline`",
+                    "example": "Nhà riêng, 12 Trần Phú",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 200
+                  },
+                  "capacity": {
+                    "example": 20,
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 1,
+                    "maximum": 500
+                  },
+                  "startDate": {
+                    "type": "string",
+                    "format": "date",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
+                    "example": "2026-12-14"
+                  },
+                  "endDate": {
+                    "description": "Bỏ trống = lớp không kỳ hạn",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "date",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+                  },
+                  "id": {
+                    "description": "UUID do client sinh (tùy chọn); thiếu thì server sinh",
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  }
+                },
+                "required": [
+                  "name",
+                  "subject",
+                  "grade",
+                  "mode",
+                  "startDate"
+                ],
+                "example": {
+                  "name": "Toán 9A",
+                  "subject": "Toán",
+                  "grade": 9,
+                  "mode": "offline",
+                  "location": "Nhà riêng, 12 Trần Phú",
+                  "capacity": 20,
+                  "startDate": "2026-12-14",
+                  "endDate": null
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Class"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "IDEMPOTENCY_IN_PROGRESS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED\n\nIDEMPOTENCY_KEY_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Tạo lớp (US-1.1 AC1, AC2)",
+        "tags": [
+          "classes"
+        ]
+      }
+    },
+    "/v1/classes/{id}": {
+      "get": {
+        "operationId": "classes_get",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Class"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Chi tiết lớp kèm quy tắc lặp (US-1.1, US-2.1)",
+        "tags": [
+          "classes"
+        ]
+      },
+      "patch": {
+        "operationId": "classes_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID, giữ nguyên khi thử lại hoặc phát lại từ outbox",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120,
+                    "example": "Toán 9A"
+                  },
+                  "subject": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80,
+                    "example": "Toán"
+                  },
+                  "grade": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 12,
+                    "example": 9
+                  },
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "offline",
+                      "online"
+                    ]
+                  },
+                  "location": {
+                    "description": "Bắt buộc khi `mode = offline`",
+                    "example": "Nhà riêng, 12 Trần Phú",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 200
+                  },
+                  "capacity": {
+                    "example": 20,
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 1,
+                    "maximum": 500
+                  },
+                  "startDate": {
+                    "type": "string",
+                    "format": "date",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
+                    "example": "2026-12-14"
+                  },
+                  "endDate": {
+                    "description": "Bỏ trống = lớp không kỳ hạn",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "date",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+                  }
+                },
+                "example": {
+                  "capacity": 25
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Class"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "IDEMPOTENCY_IN_PROGRESS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED\n\nIDEMPOTENCY_KEY_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Sửa lớp (US-1.1)",
+        "tags": [
+          "classes"
+        ]
+      }
+    },
+    "/v1/classes/{id}/archive": {
+      "post": {
+        "description": "Lớp đã lưu trữ thì gọi lại vẫn 200, trả lớp hiện tại.",
+        "operationId": "classes_archive",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID, giữ nguyên khi thử lại hoặc phát lại từ outbox",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Class"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "IDEMPOTENCY_IN_PROGRESS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "IDEMPOTENCY_KEY_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Lưu trữ lớp (US-1.1 AC3)",
+        "tags": [
+          "classes"
+        ]
+      }
+    },
+    "/v1/classes/{id}/roster": {
+      "get": {
+        "description": "Không phân trang. Nhãn \"Giá riêng\" và trạng thái phụ huynh thêm ở sprint sau.",
+        "operationId": "classes_roster",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Roster"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Học viên đang ghi danh của lớp (bản tối thiểu)",
+        "tags": [
+          "classes"
+        ]
+      }
+    },
+    "/v1/classes/{id}/enrollments": {
+      "post": {
+        "description": "Dùng chung hồ sơ `students`, không tạo bản trùng. Học viên đã ghi danh mở ở lớp này → 200 với ghi danh sẵn có.",
+        "operationId": "classes_enroll",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID, giữ nguyên khi thử lại hoặc phát lại từ outbox",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "studentId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "joinedOn": {
+                    "description": "Mặc định: hôm nay (theo múi giờ tenant)",
+                    "type": "string",
+                    "format": "date",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+                  }
+                },
+                "required": [
+                  "studentId"
+                ],
+                "example": {
+                  "studentId": "019b2c4f-0001-7b30-8c01-000000000001"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Đã ghi danh trước đó",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Enrollment"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Enrollment"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "IDEMPOTENCY_IN_PROGRESS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED\n\nIDEMPOTENCY_KEY_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Ghi danh học viên có sẵn vào lớp (US-1.4 AC3)",
+        "tags": [
+          "classes"
+        ]
+      }
+    },
+    "/v1/students": {
+      "get": {
+        "description": "Tìm theo `q` (không phân biệt dấu, dùng `pg_trgm` + `unaccent`); bỏ `q` thì liệt kê tất cả.",
+        "operationId": "students_list",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": 1,
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          },
+          {
+            "name": "pageSize",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": 20,
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "q",
+            "required": false,
+            "in": "query",
+            "description": "Tìm theo họ tên, không phân biệt dấu",
+            "schema": {
+              "description": "Tìm theo họ tên, không phân biệt dấu",
+              "example": "nguyen minh",
+              "type": "string",
+              "maxLength": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudentPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Danh sách và tìm học viên không dấu (US-1.4)",
+        "tags": [
+          "students"
+        ]
+      },
+      "post": {
+        "description": "Chỉ họ tên bắt buộc. Trùng họ tên và ngày sinh với hồ sơ có sẵn → 409 `STUDENT_POSSIBLE_DUPLICATE` kèm `details.candidates` (`[{ id, fullName, dob, school }]`); client hỏi \"Có phải cùng một em?\", chọn \"không\" thì gửi lại với `confirmNew: true` (khóa idempotency mới). Số điện thoại phụ huynh tùy chọn, lưu vào `guardians`.",
+        "operationId": "students_create",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID, giữ nguyên khi thử lại hoặc phát lại từ outbox",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "fullName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120,
+                    "example": "Nguyễn Minh Anh"
+                  },
+                  "dob": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "date",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+                  },
+                  "school": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 120
+                  },
+                  "schoolClass": {
+                    "example": "9A3",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 40
+                  },
+                  "note": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 1000
+                  },
+                  "guardians": {
+                    "default": [],
+                    "maxItems": 2,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "fullName": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 120
+                        },
+                        "relation": {
+                          "default": "guardian",
+                          "type": "string",
+                          "enum": [
+                            "father",
+                            "mother",
+                            "guardian"
+                          ]
+                        },
+                        "phone": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "pattern": "^\\+?[0-9]{8,15}$",
+                          "example": "0912345678"
+                        },
+                        "email": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "maxLength": 254,
+                          "format": "email",
+                          "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+                        }
+                      },
+                      "required": [
+                        "fullName"
+                      ]
+                    },
+                    "description": "Tối đa 2 phụ huynh"
+                  },
+                  "id": {
+                    "description": "UUID do client sinh (tùy chọn); thiếu thì server sinh",
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "confirmNew": {
+                    "default": false,
+                    "description": "Đặt `true` sau khi người dùng xác nhận \"không phải cùng một em\" để bỏ qua kiểm tra trùng",
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "fullName"
+                ],
+                "example": {
+                  "fullName": "Nguyễn Minh Anh",
+                  "dob": "2011-05-20",
+                  "school": "THCS Lê Lợi",
+                  "schoolClass": "9A3",
+                  "guardians": [
+                    {
+                      "fullName": "Nguyễn Văn Hải",
+                      "relation": "father",
+                      "phone": "0912345678"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Student"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "STUDENT_POSSIBLE_DUPLICATE\n\nIDEMPOTENCY_IN_PROGRESS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED\n\nIDEMPOTENCY_KEY_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Thêm học viên (US-1.4 AC1, AC4)",
+        "tags": [
+          "students"
+        ]
+      }
+    },
+    "/v1/students/{id}": {
+      "patch": {
+        "operationId": "students_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID, giữ nguyên khi thử lại hoặc phát lại từ outbox",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "fullName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120,
+                    "example": "Nguyễn Minh Anh"
+                  },
+                  "dob": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "date",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+                  },
+                  "school": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 120
+                  },
+                  "schoolClass": {
+                    "example": "9A3",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 40
+                  },
+                  "note": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 1000
+                  },
+                  "guardians": {
+                    "maxItems": 2,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "fullName": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 120
+                        },
+                        "relation": {
+                          "default": "guardian",
+                          "type": "string",
+                          "enum": [
+                            "father",
+                            "mother",
+                            "guardian"
+                          ]
+                        },
+                        "phone": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "pattern": "^\\+?[0-9]{8,15}$",
+                          "example": "0912345678"
+                        },
+                        "email": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "maxLength": 254,
+                          "format": "email",
+                          "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+                        }
+                      },
+                      "required": [
+                        "fullName"
+                      ]
+                    },
+                    "description": "Tối đa 2 phụ huynh"
+                  }
+                },
+                "example": {
+                  "schoolClass": "9A4"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Student"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "IDEMPOTENCY_IN_PROGRESS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED\n\nIDEMPOTENCY_KEY_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Sửa học viên (US-1.4)",
+        "tags": [
+          "students"
+        ]
+      }
+    },
+    "/v1/classes/{id}/schedule-rules": {
+      "put": {
+        "description": "Thay toàn bộ quy tắc, sinh buổi \"dự kiến\" trong cùng giao dịch: từ ngày bắt đầu tới ngày kết thúc của lớp, hoặc cuốn chiếu 8 tuần nếu lớp không có ngày kết thúc. Chỉ buổi tương lai chưa điểm danh bị thay; buổi đã dạy giữ nguyên. Gửi lại cùng `Idempotency-Key` không sinh buổi trùng.",
+        "operationId": "schedule_putRules",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID, giữ nguyên khi thử lại hoặc phát lại từ outbox",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "rules": {
+                    "maxItems": 14,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "weekday": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 7,
+                          "description": "ISO 8601: 1 = Thứ Hai … 7 = Chủ Nhật",
+                          "example": 2
+                        },
+                        "startTime": {
+                          "type": "string",
+                          "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                          "example": "18:00"
+                        },
+                        "durationMin": {
+                          "type": "integer",
+                          "minimum": 15,
+                          "maximum": 480,
+                          "example": 90
+                        }
+                      },
+                      "required": [
+                        "weekday",
+                        "startTime",
+                        "durationMin"
+                      ]
+                    },
+                    "description": "Toàn bộ bộ quy tắc mới; mảng rỗng = bỏ lịch lặp"
+                  }
+                },
+                "required": [
+                  "rules"
+                ],
+                "example": {
+                  "rules": [
+                    {
+                      "weekday": 2,
+                      "startTime": "18:00",
+                      "durationMin": 90
+                    },
+                    {
+                      "weekday": 4,
+                      "startTime": "18:00",
+                      "durationMin": 90
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleRulesResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "IDEMPOTENCY_IN_PROGRESS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED\n\nIDEMPOTENCY_KEY_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Thay bộ quy tắc lặp của lớp và sinh buổi (US-2.1)",
+        "tags": [
+          "schedule"
+        ]
+      }
+    },
+    "/v1/sessions": {
+      "get": {
+        "description": "Sắp theo `startsAt`. Khoảng `from`…`to` tối đa 62 ngày; lớp đã lưu trữ không xuất hiện.",
+        "operationId": "schedule_sessions",
+        "parameters": [
+          {
+            "name": "from",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
+              "example": "2026-12-14"
+            }
+          },
+          {
+            "name": "to",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
+              "example": "2026-12-20"
+            }
+          },
+          {
+            "name": "classId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Buổi học trong khoảng ngày (US-2.1, US-2.3)",
+        "tags": [
+          "schedule"
+        ]
+      }
+    },
+    "/v1/admin/bank-transfer-orders": {
+      "get": {
+        "description": "Quyền IAM: `/teachhub/admin/bank-transfer`. `status` mặc định `pending`.",
+        "operationId": "admin_listBankTransferOrders",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": 1,
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          },
+          {
+            "name": "pageSize",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": 20,
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": "pending",
+              "type": "string",
+              "enum": [
+                "pending",
+                "confirmed"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BankTransferOrderPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminSecret": [],
+            "adminUserId": [],
+            "adminPermissions": []
+          }
+        ],
+        "summary": "Danh sách đơn chuyển khoản gói Pro (US-0.8 AC3)",
+        "tags": [
+          "admin"
+        ],
+        "x-admin-permission": "/teachhub/admin/bank-transfer"
+      }
+    },
+    "/v1/admin/bank-transfer-orders/{id}/confirm": {
+      "post": {
+        "description": "Quyền IAM: `/teachhub/admin/bank-transfer`. Một giao dịch: đơn → `confirmed` (ghi `x-admin-user-id`), `subscriptions` → Pro, `audit_logs`, rồi push cho giáo viên. Đơn không còn `pending` → 409 `CONFLICT_STALE`.",
+        "operationId": "admin_confirmBankTransferOrder",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID, giữ nguyên khi thử lại hoặc phát lại từ outbox",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BankTransferConfirmed"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CONFLICT_STALE\n\nIDEMPOTENCY_IN_PROGRESS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "IDEMPOTENCY_KEY_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminSecret": [],
+            "adminUserId": [],
+            "adminPermissions": []
+          }
+        ],
+        "summary": "Xác nhận đã nhận chuyển khoản, kích hoạt Pro (US-0.8 AC3)",
+        "tags": [
+          "admin"
+        ],
+        "x-admin-permission": "/teachhub/admin/bank-transfer"
+      }
+    },
+    "/v1/admin/legal-articles": {
+      "get": {
+        "description": "Quyền IAM: `/teachhub/admin/legal-articles`. Lọc tùy chọn theo `status`.",
+        "operationId": "admin_listLegalArticles",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": 1,
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          },
+          {
+            "name": "pageSize",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": 20,
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "draft",
+                "published"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegalArticlePage"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminSecret": [],
+            "adminUserId": [],
+            "adminPermissions": []
+          }
+        ],
+        "summary": "Danh sách bài quy định, cả bản nháp (US-9.6)",
+        "tags": [
+          "admin"
+        ],
+        "x-admin-permission": "/teachhub/admin/legal-articles"
+      },
+      "post": {
+        "description": "Quyền IAM: `/teachhub/admin/legal-articles`. Tạo bản nháp `version = 1`; `slug` trùng → 422 `VALIDATION_FAILED` ở trường `slug`.",
+        "operationId": "admin_createLegalArticle",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID, giữ nguyên khi thử lại hoặc phát lại từ outbox",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "slug": {
+                    "type": "string",
+                    "maxLength": 120,
+                    "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "summary": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1000
+                  },
+                  "bodyMarkdown": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 50000
+                  },
+                  "sources": {
+                    "minItems": 1,
+                    "maxItems": 20,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "title": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "url": {
+                          "type": "string",
+                          "format": "uri"
+                        }
+                      },
+                      "required": [
+                        "title",
+                        "url"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "slug",
+                  "title",
+                  "summary",
+                  "bodyMarkdown",
+                  "sources"
+                ],
+                "example": {
+                  "slug": "cong-khai-mau-02",
+                  "title": "Công khai thông tin dạy thêm (Mẫu 02)",
+                  "summary": "Giáo viên dạy thêm ngoài nhà trường phải niêm yết Mẫu 02.",
+                  "bodyMarkdown": "## Ai phải công khai?\n\nGiáo viên tổ chức dạy thêm...",
+                  "sources": [
+                    {
+                      "title": "Thông tư 29/2024/TT-BGDĐT",
+                      "url": "https://thuvienphapluat.vn/van-ban/Giao-duc/Thong-tu-29-2024-TT-BGDDT-410148.aspx"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegalArticle"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "IDEMPOTENCY_IN_PROGRESS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED\n\nIDEMPOTENCY_KEY_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminSecret": [],
+            "adminUserId": [],
+            "adminPermissions": []
+          }
+        ],
+        "summary": "Soạn bài quy định (bản nháp) (US-9.6)",
+        "tags": [
+          "admin"
+        ],
+        "x-admin-permission": "/teachhub/admin/legal-articles"
+      }
+    },
+    "/v1/admin/legal-articles/{id}/publish": {
+      "post": {
+        "description": "Quyền IAM: `/teachhub/admin/legal-articles`. Bắt buộc ghi tên luật sư/kế toán duyệt trước khi hiển thị; phát hành xong giáo viên nhận thông báo trong app. Bài đã phát hành → 409 `CONFLICT_STALE`.",
+        "operationId": "admin_publishLegalArticle",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID, giữ nguyên khi thử lại hoặc phát lại từ outbox",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reviewedBy": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120,
+                    "example": "LS. Trần Thị Mai"
+                  },
+                  "reviewerRole": {
+                    "type": "string",
+                    "enum": [
+                      "lawyer",
+                      "accountant"
+                    ]
+                  },
+                  "reviewedOn": {
+                    "type": "string",
+                    "format": "date",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
+                    "example": "2026-12-19"
+                  }
+                },
+                "required": [
+                  "reviewedBy",
+                  "reviewerRole",
+                  "reviewedOn"
+                ],
+                "example": {
+                  "reviewedBy": "LS. Trần Thị Mai",
+                  "reviewerRole": "lawyer",
+                  "reviewedOn": "2026-12-19"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegalArticle"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CONFLICT_STALE\n\nIDEMPOTENCY_IN_PROGRESS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED\n\nIDEMPOTENCY_KEY_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminSecret": [],
+            "adminUserId": [],
+            "adminPermissions": []
+          }
+        ],
+        "summary": "Ghi người duyệt và phát hành bài (US-9.6 AC2, AC3)",
+        "tags": [
+          "admin"
+        ],
+        "x-admin-permission": "/teachhub/admin/legal-articles"
+      }
+    },
+    "/v1/admin/support/tenants/{id}": {
+      "get": {
+        "description": "Quyền IAM: `/teachhub/admin/support`. Mỗi lần gọi ghi nhật ký truy cập kèm `x-admin-user-id`. Không trả dữ liệu học viên.",
+        "operationId": "admin_supportTenant",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportTenant"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminSecret": [],
+            "adminUserId": [],
+            "adminPermissions": []
+          }
+        ],
+        "summary": "Tra cứu hỗ trợ một tenant (chỉ đọc)",
+        "tags": [
+          "admin"
+        ],
+        "x-admin-permission": "/teachhub/admin/support"
+      }
     }
   },
   "info": {
@@ -833,6 +3420,24 @@
         "scheme": "bearer",
         "bearerFormat": "JWT",
         "type": "http"
+      },
+      "adminSecret": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-admin-secret",
+        "description": "Secret server-to-server của BFF admin, xoay vòng định kỳ. Sai hoặc thiếu → 401 `UNAUTHENTICATED`."
+      },
+      "adminUserId": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-admin-user-id",
+        "description": "Định danh nhân sự trên IAM Tasco. Bắt buộc, không rỗng; ghi vào `audit_logs`."
+      },
+      "adminPermissions": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-admin-permissions",
+        "description": "Đúng MỘT URI quyền mà BFF vừa kiểm cho thao tác này (không gửi cả danh sách quyền của nhân sự). Giá trị hợp lệ: `/teachhub/admin/bank-transfer`, `/teachhub/admin/legal-articles`, `/teachhub/admin/support`. Khác URI route yêu cầu (`x-admin-permission` của operation) → 403 `FORBIDDEN`."
       }
     },
     "schemas": {
@@ -1002,6 +3607,1342 @@
         "example": {
           "tenantId": "019a8f3e-8a10-7e55-8c1d-0a1b2c3d4e5f",
           "membershipId": "019a8f3e-8a10-7e55-8c1d-2b3c4d5e6f70"
+        }
+      },
+      "Onboarding": {
+        "type": "object",
+        "properties": {
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "step": {
+                  "type": "string",
+                  "enum": [
+                    "create_class",
+                    "add_students",
+                    "set_schedule",
+                    "payout_account",
+                    "compliance_checklist"
+                  ]
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "pending",
+                    "done",
+                    "skipped"
+                  ]
+                }
+              },
+              "required": [
+                "step",
+                "status"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "currentStep": {
+            "description": "Bước `pending` đầu tiên; null khi đã xử lý hết",
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "create_class",
+              "add_students",
+              "set_schedule",
+              "payout_account",
+              "compliance_checklist",
+              null
+            ]
+          }
+        },
+        "required": [
+          "steps",
+          "currentStep"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "steps": [
+            {
+              "step": "create_class",
+              "status": "done"
+            },
+            {
+              "step": "add_students",
+              "status": "pending"
+            },
+            {
+              "step": "set_schedule",
+              "status": "pending"
+            },
+            {
+              "step": "payout_account",
+              "status": "pending"
+            },
+            {
+              "step": "compliance_checklist",
+              "status": "pending"
+            }
+          ],
+          "currentStep": "add_students"
+        }
+      },
+      "CenterWaitlistEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "centerName": {
+            "type": "string"
+          },
+          "teacherCount": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          }
+        },
+        "required": [
+          "id",
+          "centerName",
+          "teacherCount",
+          "createdAt"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "id": "019b2c30-0001-7a10-8a01-000000000001",
+          "centerName": "Trung tâm Ánh Dương",
+          "teacherCount": 8,
+          "createdAt": "2026-12-14T09:00:00+07:00"
+        }
+      },
+      "ClassPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Class"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "pageSize": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "pageSize"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "items": [
+            {
+              "id": "019b2c3f-5e01-7c20-9b01-000000000001",
+              "name": "Toán 9A",
+              "subject": "Toán",
+              "grade": 9,
+              "mode": "offline",
+              "location": "Nhà riêng, 12 Trần Phú",
+              "capacity": 20,
+              "startDate": "2026-12-14",
+              "endDate": null,
+              "status": "active",
+              "enrolledCount": 3,
+              "scheduleRules": [
+                {
+                  "id": "019b2c40-1a01-7a10-8a01-000000000001",
+                  "weekday": 2,
+                  "startTime": "18:00",
+                  "durationMin": 90
+                },
+                {
+                  "id": "019b2c40-1a01-7a10-8a01-000000000002",
+                  "weekday": 4,
+                  "startTime": "18:00",
+                  "durationMin": 90
+                }
+              ],
+              "createdAt": "2026-12-14T09:30:00+07:00"
+            }
+          ],
+          "total": 1,
+          "page": 1,
+          "pageSize": 20
+        }
+      },
+      "Class": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120,
+            "example": "Toán 9A"
+          },
+          "subject": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "example": "Toán"
+          },
+          "grade": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 12,
+            "example": 9
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "offline",
+              "online"
+            ]
+          },
+          "location": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "capacity": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "startDate": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
+            "example": "2026-12-14"
+          },
+          "endDate": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "archived"
+            ]
+          },
+          "enrolledCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "Số học viên đang ghi danh (chưa rời lớp)"
+          },
+          "scheduleRules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScheduleRule"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "subject",
+          "grade",
+          "mode",
+          "location",
+          "capacity",
+          "startDate",
+          "endDate",
+          "status",
+          "enrolledCount",
+          "scheduleRules",
+          "createdAt"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "id": "019b2c3f-5e01-7c20-9b01-000000000001",
+          "name": "Toán 9A",
+          "subject": "Toán",
+          "grade": 9,
+          "mode": "offline",
+          "location": "Nhà riêng, 12 Trần Phú",
+          "capacity": 20,
+          "startDate": "2026-12-14",
+          "endDate": null,
+          "status": "active",
+          "enrolledCount": 3,
+          "scheduleRules": [
+            {
+              "id": "019b2c40-1a01-7a10-8a01-000000000001",
+              "weekday": 2,
+              "startTime": "18:00",
+              "durationMin": 90
+            },
+            {
+              "id": "019b2c40-1a01-7a10-8a01-000000000002",
+              "weekday": 4,
+              "startTime": "18:00",
+              "durationMin": 90
+            }
+          ],
+          "createdAt": "2026-12-14T09:30:00+07:00"
+        }
+      },
+      "ScheduleRule": {
+        "type": "object",
+        "properties": {
+          "weekday": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 7,
+            "description": "ISO 8601: 1 = Thứ Hai … 7 = Chủ Nhật",
+            "example": 2
+          },
+          "startTime": {
+            "type": "string",
+            "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+            "example": "18:00"
+          },
+          "durationMin": {
+            "type": "integer",
+            "minimum": 15,
+            "maximum": 480,
+            "example": 90
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          }
+        },
+        "required": [
+          "weekday",
+          "startTime",
+          "durationMin",
+          "id"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "id": "019b2c40-1a01-7a10-8a01-000000000001",
+          "weekday": 2,
+          "startTime": "18:00",
+          "durationMin": 90
+        }
+      },
+      "Roster": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "enrollmentId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "studentId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "fullName": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "active",
+                    "paused",
+                    "left"
+                  ]
+                },
+                "joinedOn": {
+                  "type": "string",
+                  "format": "date",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+                }
+              },
+              "required": [
+                "enrollmentId",
+                "studentId",
+                "fullName",
+                "status",
+                "joinedOn"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "items": [
+            {
+              "enrollmentId": "019b2c50-0001-7b30-8c01-000000000001",
+              "studentId": "019b2c4f-0001-7b30-8c01-000000000001",
+              "fullName": "Nguyễn Minh Anh",
+              "status": "active",
+              "joinedOn": "2026-12-14"
+            },
+            {
+              "enrollmentId": "019b2c50-0001-7b30-8c01-000000000002",
+              "studentId": "019b2c4f-0001-7b30-8c01-000000000002",
+              "fullName": "Trần Gia Bảo",
+              "status": "active",
+              "joinedOn": "2026-12-14"
+            }
+          ]
+        }
+      },
+      "Enrollment": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "classId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "studentId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "joinedOn": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+          }
+        },
+        "required": [
+          "id",
+          "classId",
+          "studentId",
+          "joinedOn"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "id": "019b2c50-0001-7b30-8c01-000000000001",
+          "classId": "019b2c3f-5e01-7c20-9b01-000000000001",
+          "studentId": "019b2c4f-0001-7b30-8c01-000000000001",
+          "joinedOn": "2026-12-14"
+        }
+      },
+      "StudentPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Student"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "pageSize": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "pageSize"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "items": [
+            {
+              "id": "019b2c4f-0001-7b30-8c01-000000000001",
+              "fullName": "Nguyễn Minh Anh",
+              "dob": "2011-05-20",
+              "school": "THCS Lê Lợi",
+              "schoolClass": "9A3",
+              "note": null,
+              "status": "active",
+              "guardians": [
+                {
+                  "id": "019b2c4f-0002-7b30-8c01-000000000001",
+                  "fullName": "Nguyễn Văn Hải",
+                  "relation": "father",
+                  "phone": "0912345678",
+                  "email": null
+                }
+              ]
+            }
+          ],
+          "total": 1,
+          "page": 1,
+          "pageSize": 20
+        }
+      },
+      "Student": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "fullName": {
+            "type": "string"
+          },
+          "dob": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+          },
+          "school": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "schoolClass": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "paused",
+              "left"
+            ]
+          },
+          "guardians": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Guardian"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "fullName",
+          "dob",
+          "school",
+          "schoolClass",
+          "note",
+          "status",
+          "guardians"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "id": "019b2c4f-0001-7b30-8c01-000000000001",
+          "fullName": "Nguyễn Minh Anh",
+          "dob": "2011-05-20",
+          "school": "THCS Lê Lợi",
+          "schoolClass": "9A3",
+          "note": null,
+          "status": "active",
+          "guardians": [
+            {
+              "id": "019b2c4f-0002-7b30-8c01-000000000001",
+              "fullName": "Nguyễn Văn Hải",
+              "relation": "father",
+              "phone": "0912345678",
+              "email": null
+            }
+          ]
+        }
+      },
+      "Guardian": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "fullName": {
+            "type": "string"
+          },
+          "relation": {
+            "type": "string",
+            "enum": [
+              "father",
+              "mother",
+              "guardian"
+            ]
+          },
+          "phone": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "fullName",
+          "relation",
+          "phone",
+          "email"
+        ],
+        "additionalProperties": false
+      },
+      "ScheduleRulesResult": {
+        "type": "object",
+        "properties": {
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScheduleRule"
+            }
+          },
+          "sessionsGenerated": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "sessionsRemoved": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "rules",
+          "sessionsGenerated",
+          "sessionsRemoved"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "rules": [
+            {
+              "id": "019b2c40-1a01-7a10-8a01-000000000001",
+              "weekday": 2,
+              "startTime": "18:00",
+              "durationMin": 90
+            },
+            {
+              "id": "019b2c40-1a01-7a10-8a01-000000000002",
+              "weekday": 4,
+              "startTime": "18:00",
+              "durationMin": 90
+            }
+          ],
+          "sessionsGenerated": 16,
+          "sessionsRemoved": 0
+        }
+      },
+      "SessionList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Session"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "items": [
+            {
+              "id": "019b2c41-0001-7a10-8a01-000000000001",
+              "classId": "019b2c3f-5e01-7c20-9b01-000000000001",
+              "className": "Toán 9A",
+              "sessionDate": "2026-12-15",
+              "startsAt": "2026-12-15T18:00:00+07:00",
+              "endsAt": "2026-12-15T19:30:00+07:00",
+              "status": "planned",
+              "isMakeup": false
+            },
+            {
+              "id": "019b2c41-0001-7a10-8a01-000000000002",
+              "classId": "019b2c3f-5e01-7c20-9b01-000000000001",
+              "className": "Toán 9A",
+              "sessionDate": "2026-12-17",
+              "startsAt": "2026-12-17T18:00:00+07:00",
+              "endsAt": "2026-12-17T19:30:00+07:00",
+              "status": "planned",
+              "isMakeup": false
+            }
+          ]
+        }
+      },
+      "Session": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "classId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "className": {
+            "type": "string"
+          },
+          "sessionDate": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+          },
+          "startsAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "endsAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "planned",
+              "taught",
+              "cancelled"
+            ]
+          },
+          "isMakeup": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "classId",
+          "className",
+          "sessionDate",
+          "startsAt",
+          "endsAt",
+          "status",
+          "isMakeup"
+        ],
+        "additionalProperties": false
+      },
+      "BankTransferOrderPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BankTransferOrder"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "pageSize": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "pageSize"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "items": [
+            {
+              "id": "019b2d00-0001-7c40-8d01-000000000001",
+              "tenantId": "019b2c10-0001-7a10-8a01-000000000001",
+              "tenantName": "Cô Lan",
+              "amount": 250000,
+              "transferNote": "TEACHHUB PRO CO LAN",
+              "status": "pending",
+              "createdAt": "2026-12-20T10:15:00+07:00",
+              "confirmedBy": null,
+              "confirmedAt": null
+            }
+          ],
+          "total": 1,
+          "page": 1,
+          "pageSize": 20
+        }
+      },
+      "BankTransferOrder": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "tenantName": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "Đồng"
+          },
+          "transferNote": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "confirmed"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "confirmedBy": {
+            "description": "`x-admin-user-id` của người xác nhận",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "confirmedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          }
+        },
+        "required": [
+          "id",
+          "tenantId",
+          "tenantName",
+          "amount",
+          "transferNote",
+          "status",
+          "createdAt",
+          "confirmedBy",
+          "confirmedAt"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "id": "019b2d00-0001-7c40-8d01-000000000001",
+          "tenantId": "019b2c10-0001-7a10-8a01-000000000001",
+          "tenantName": "Cô Lan",
+          "amount": 250000,
+          "transferNote": "TEACHHUB PRO CO LAN",
+          "status": "pending",
+          "createdAt": "2026-12-20T10:15:00+07:00",
+          "confirmedBy": null,
+          "confirmedAt": null
+        }
+      },
+      "BankTransferConfirmed": {
+        "type": "object",
+        "properties": {
+          "order": {
+            "$ref": "#/components/schemas/BankTransferOrder"
+          },
+          "subscription": {
+            "type": "object",
+            "properties": {
+              "planCode": {
+                "type": "string",
+                "enum": [
+                  "free",
+                  "pro"
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "free",
+                  "trialing",
+                  "active",
+                  "expired"
+                ]
+              },
+              "currentPeriodEnd": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              }
+            },
+            "required": [
+              "planCode",
+              "status",
+              "currentPeriodEnd"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "order",
+          "subscription"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "order": {
+            "id": "019b2d00-0001-7c40-8d01-000000000001",
+            "tenantId": "019b2c10-0001-7a10-8a01-000000000001",
+            "tenantName": "Cô Lan",
+            "amount": 250000,
+            "transferNote": "TEACHHUB PRO CO LAN",
+            "status": "confirmed",
+            "createdAt": "2026-12-20T10:15:00+07:00",
+            "confirmedBy": "iam-user-0042",
+            "confirmedAt": "2026-12-20T14:02:00+07:00"
+          },
+          "subscription": {
+            "planCode": "pro",
+            "status": "active",
+            "currentPeriodEnd": "2027-12-20T14:02:00+07:00"
+          }
+        }
+      },
+      "LegalArticlePage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LegalArticle"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "pageSize": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "pageSize"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "items": [
+            {
+              "id": "019b2d10-0001-7c40-8d01-000000000001",
+              "slug": "cong-khai-mau-02",
+              "title": "Công khai thông tin dạy thêm (Mẫu 02)",
+              "summary": "Giáo viên dạy thêm ngoài nhà trường phải niêm yết Mẫu 02.",
+              "bodyMarkdown": "## Ai phải công khai?\n\nGiáo viên tổ chức dạy thêm...",
+              "sources": [
+                {
+                  "title": "Thông tư 29/2024/TT-BGDĐT",
+                  "url": "https://thuvienphapluat.vn/van-ban/Giao-duc/Thong-tu-29-2024-TT-BGDDT-410148.aspx"
+                }
+              ],
+              "version": 1,
+              "status": "draft",
+              "reviewedBy": null,
+              "reviewerRole": null,
+              "reviewedOn": null,
+              "publishedAt": null,
+              "updatedAt": "2026-12-20T09:00:00+07:00"
+            }
+          ],
+          "total": 1,
+          "page": 1,
+          "pageSize": 20
+        }
+      },
+      "LegalArticle": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "bodyMarkdown": {
+            "type": "string"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": [
+                "title",
+                "url"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "published"
+            ]
+          },
+          "reviewedBy": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reviewerRole": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "lawyer",
+              "accountant",
+              null
+            ]
+          },
+          "reviewedOn": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+          },
+          "publishedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "title",
+          "summary",
+          "bodyMarkdown",
+          "sources",
+          "version",
+          "status",
+          "reviewedBy",
+          "reviewerRole",
+          "reviewedOn",
+          "publishedAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "id": "019b2d10-0001-7c40-8d01-000000000001",
+          "slug": "cong-khai-mau-02",
+          "title": "Công khai thông tin dạy thêm (Mẫu 02)",
+          "summary": "Giáo viên dạy thêm ngoài nhà trường phải niêm yết Mẫu 02.",
+          "bodyMarkdown": "## Ai phải công khai?\n\nGiáo viên tổ chức dạy thêm...",
+          "sources": [
+            {
+              "title": "Thông tư 29/2024/TT-BGDĐT",
+              "url": "https://thuvienphapluat.vn/van-ban/Giao-duc/Thong-tu-29-2024-TT-BGDDT-410148.aspx"
+            }
+          ],
+          "version": 1,
+          "status": "draft",
+          "reviewedBy": null,
+          "reviewerRole": null,
+          "reviewedOn": null,
+          "publishedAt": null,
+          "updatedAt": "2026-12-20T09:00:00+07:00"
+        }
+      },
+      "SupportTenant": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "teacher",
+              "center",
+              "chain"
+            ]
+          },
+          "timezone": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "owner": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "userId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "email": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "userId",
+              "email",
+              "displayName"
+            ],
+            "additionalProperties": false
+          },
+          "subscription": {
+            "type": "object",
+            "properties": {
+              "planCode": {
+                "type": "string",
+                "enum": [
+                  "free",
+                  "pro"
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "free",
+                  "trialing",
+                  "active",
+                  "expired"
+                ]
+              },
+              "source": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "enum": [
+                  "app_store",
+                  "play_store",
+                  "bank_transfer",
+                  null
+                ]
+              },
+              "currentPeriodEnd": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              },
+              "trialUsedAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              }
+            },
+            "required": [
+              "planCode",
+              "status",
+              "source",
+              "currentPeriodEnd",
+              "trialUsedAt"
+            ],
+            "additionalProperties": false
+          },
+          "usage": {
+            "type": "object",
+            "properties": {
+              "activeClasses": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "activeStudents": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "activeClasses",
+              "activeStudents"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "type",
+          "timezone",
+          "createdAt",
+          "owner",
+          "subscription",
+          "usage"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "id": "019b2c10-0001-7a10-8a01-000000000001",
+          "name": "Cô Lan",
+          "type": "teacher",
+          "timezone": "Asia/Ho_Chi_Minh",
+          "createdAt": "2026-12-14T09:00:00+07:00",
+          "owner": {
+            "userId": "019a8f3e-7c1b-7d2a-9b3e-5f6a7b8c9d0e",
+            "email": "co.lan@example.com",
+            "displayName": "Cô Lan"
+          },
+          "subscription": {
+            "planCode": "free",
+            "status": "free",
+            "source": null,
+            "currentPeriodEnd": null,
+            "trialUsedAt": null
+          },
+          "usage": {
+            "activeClasses": 2,
+            "activeStudents": 14
+          }
         }
       }
     }
