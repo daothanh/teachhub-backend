@@ -59,7 +59,14 @@ export class Idempotency {
     }
     const endpoint = `${req.method} ${req.routeOptions.url}`;
     const requestHash = createHash('sha256')
-      .update(canonical(req.body))
+      // Cùng key + cùng body nhưng khác đích (id trên đường dẫn) hoặc khác tenant không phải cùng một yêu cầu.
+      .update(
+        canonical({
+          body: req.body,
+          params: req.params,
+          tenantId: ctx.tenantId ?? null,
+        }),
+      )
       .digest('hex');
 
     const replay = async (): Promise<T | undefined> => {

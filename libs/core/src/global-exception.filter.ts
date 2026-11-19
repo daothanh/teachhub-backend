@@ -51,15 +51,21 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 }
 
 /**
- * Lỗi truy vấn của Drizzle mang theo cả câu SQL lẫn `params` (họ tên, SĐT học viên…): chỉ log lỗi gốc của driver.
+ * Lỗi truy vấn của Drizzle mang theo cả câu SQL lẫn `params` (họ tên, SĐT học viên…): chỉ log lỗi gốc của driver;
+ * không có lỗi gốc thì log bản sao không còn `params`/`query`.
  */
 export function loggable(exception: unknown): unknown {
-  return exception instanceof Error &&
-    'params' in exception &&
-    'query' in exception &&
-    exception.cause
-    ? exception.cause
-    : exception;
+  if (
+    !(exception instanceof Error) ||
+    !('params' in exception || 'query' in exception)
+  ) {
+    return exception;
+  }
+  if (exception.cause) return exception.cause;
+  const safe = new Error(exception.message.split('\nparams:')[0]);
+  safe.name = exception.name;
+  safe.stack = exception.stack;
+  return safe;
 }
 
 export function toErrorBody(exception: unknown): {

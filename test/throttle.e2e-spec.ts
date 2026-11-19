@@ -1,9 +1,11 @@
+import { randomUUID } from 'node:crypto';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import {
   RedisContainer,
   type StartedRedisContainer,
 } from '@testcontainers/redis';
 import { Redis } from 'ioredis';
+import pg from 'pg';
 import { startTestDb, type TestDb } from './containers.js';
 
 // S1-BE-09: giới hạn tần suất theo IP, đếm trong Redis.
@@ -96,6 +98,32 @@ describe('giới hạn tần suất theo IP (@nestjs/throttler + Redis)', () => 
       expect((await send(i)).statusCode).not.toBe(429);
     }
     expect((await send(10)).statusCode).toBe(429);
+  });
+
+  it('center-waitlist chặt: 5 request/giờ/IP → request thứ 6 là 429', async () => {
+    const worker = new pg.Pool({ connectionString: db.url('teachhub_worker') });
+    const userId = randomUUID();
+    await worker.query(`insert into users (id, email) values ($1, $2)`, [
+      userId,
+      `${userId}@example.com`,
+    ]);
+    await worker.end();
+    const { SessionService } =
+      await import('../libs/modules/auth/session/session.service.js');
+    const token = (await app.get(SessionService).open(userId)).access_token;
+    const post = () =>
+      app.inject({
+        method: 'POST',
+        url: '/v1/center-waitlist',
+        payload: { centerName: 'Trung tâm Ánh Dương', teacherCount: 8 },
+        headers: {
+          authorization: `Bearer ${token}`,
+          'idempotency-key': randomUUID(),
+        },
+        remoteAddress: '10.0.0.5',
+      });
+    for (let i = 0; i < 5; i++) expect((await post()).statusCode).toBe(201);
+    expect((await post()).statusCode).toBe(429);
   });
 
   it('health không bị tính giới hạn', async () => {

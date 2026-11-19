@@ -1,4 +1,5 @@
 import { Body, Controller, Post, Req, Res } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import {
   ApiBearerAuth,
   ApiCreatedResponse,
@@ -29,14 +30,22 @@ import {
 export class CenterWaitlistController {
   constructor(private readonly idem: Idempotency) {}
 
+  // Form công khai theo nghĩa "ai đăng nhập cũng gọi được": chặn gửi hàng loạt theo IP.
+  @Throttle({ default: { limit: 5, ttl: 3_600_000 } })
   @Post()
   @ApiOperation({
     summary: 'Đăng ký sớm Chủ trung tâm (US-0.10 AC4)',
-    description: 'Gửi lặp cùng `Idempotency-Key` chỉ tạo một bản ghi.',
+    description:
+      'Gửi lặp cùng `Idempotency-Key` chỉ tạo một bản ghi. Tối đa 5 request/giờ/IP, vượt → 429 `RATE_LIMITED`.',
   })
   @ApiCreatedResponse({ standardSchema: centerWaitlistEntrySchema })
   @ApiIdempotencyKey()
-  @ApiErrors('VALIDATION_FAILED', 'UNAUTHENTICATED', 'TOKEN_EXPIRED')
+  @ApiErrors(
+    'VALIDATION_FAILED',
+    'UNAUTHENTICATED',
+    'TOKEN_EXPIRED',
+    'RATE_LIMITED',
+  )
   create(
     @Ctx() ctx: RequestContext,
     @Req() req: FastifyRequest,

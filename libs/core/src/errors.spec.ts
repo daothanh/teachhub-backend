@@ -2,6 +2,7 @@ import { HttpException, NotFoundException } from '@nestjs/common';
 import { z } from 'zod';
 import { AppException } from './app.exception.js';
 import { validateEnv } from './config.js';
+import { reqLogSerializer } from './log-serializer.js';
 import { loggable, toErrorBody } from './global-exception.filter.js';
 import { validationPipe } from './validation.js';
 
@@ -45,6 +46,32 @@ describe('loggable', () => {
     expect(loggable(drizzleErr)).toBe(driver);
     const other = new Error('x');
     expect(loggable(other)).toBe(other);
+  });
+
+  it('lỗi truy vấn không có lỗi gốc: vẫn không còn params/query/văn bản params', () => {
+    const err = Object.assign(
+      new Error('Failed query: insert …\nparams: Nguyễn Văn A,0912345678'),
+      { query: 'insert …', params: ['Nguyễn Văn A', '0912345678'] },
+    );
+    const out = loggable(err) as Error;
+    expect(out).not.toHaveProperty('params');
+    expect(out).not.toHaveProperty('query');
+    expect(
+      JSON.stringify([out.message, out.stack?.split('\n')[0]]),
+    ).not.toMatch(/0912345678|Nguyễn/);
+  });
+});
+
+describe('reqLogSerializer', () => {
+  it('log request bỏ query string (q = tên học viên) nhưng giữ method và đường dẫn', () => {
+    const out = reqLogSerializer({
+      id: 'r1',
+      method: 'GET',
+      url: '/v1/students?q=Nguy%E1%BB%85n&status=active',
+      query: { q: 'Nguyễn' },
+    });
+    expect(out).toMatchObject({ method: 'GET', url: '/v1/students' });
+    expect(JSON.stringify(out)).not.toMatch(/Nguy|q=/);
   });
 });
 
