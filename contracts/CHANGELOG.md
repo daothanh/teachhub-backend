@@ -2,6 +2,78 @@
 
 `contracts/openapi.json` sinh từ schema zod bằng `pnpm openapi:gen`; file này ghi endpoint thêm mới theo sprint. Chỉ thêm, không đổi endpoint cũ (CI chặn bằng `oasdiff`).
 
+## Sprint 5 (S4-FL-10, S4-CT-01)
+
+Thân hàm trả 501 `NOT_IMPLEMENTED` tới khi làm task backend tương ứng; schema đã validate thật. Riêng `PATCH /classes/{id}` có trường học phí vẫn trả 501 cho tới S5-BE-02 (các trường cũ giữ nguyên). Không có bảng hay migration (S5-BE-01 làm cùng task backend).
+
+| Endpoint | Task backend |
+| --- | --- |
+| `PUT /v1/enrollments/{id}/fee-override` | S5-BE-02 |
+| `GET /v1/payout-accounts`, `POST /v1/payout-accounts`, `PATCH /v1/payout-accounts/{id}`, `DELETE /v1/payout-accounts/{id}` | S5-BE-02 |
+| `GET /v1/billing-periods`, `GET /v1/billing-periods/{id}`, `GET /v1/invoices/{id}`, `POST /v1/invoices/{id}/adjustments` | S5-BE-06 |
+| `POST /v1/billing-periods/{id}/issue`, `POST /v1/invoices/{id}/void` | S5-BE-07 |
+| `GET /v1/family/invoices`, `GET /v1/family/invoices/{id}` (chi tiết cho phụ huynh, bổ sung ngoài Spec §5.4) | S5-BE-08 |
+
+Thay đổi trên endpoint cũ (chỉ thêm trường, `oasdiff breaking` sạch):
+
+- `PATCH /classes/{id}` nhận thêm `feeType`, `feeAmount`, `feeRules`. `Class` thêm ba trường cùng tên (null với lớp chưa có học phí). `POST /classes` chưa nhận học phí: tạo lớp rồi `PATCH`.
+- `GET /classes/{id}/roster`: mỗi phần tử thêm `feeOverride` (khác null thì hiện nhãn "Giá riêng").
+- Thông báo `billing_ready` (cho giáo viên) và `invoice_issued` (cho phụ huynh): mô tả payload trong description `GET /notifications`, có sẵn `billingReadyPayloadSchema` và `invoiceIssuedPayloadSchema` trong mã, nhưng CHƯA nằm trong `oneOf` của `Notification`, cùng lý do `oasdiff` như `schedule_changed` ở Sprint 4. Cần Owner/TL chọn một lần cho cả ba loại: chấp nhận ngoại lệ `response-property-one-of-added` rồi thêm vào union, hoặc giữ như hiện tại.
+
+Mã lỗi mới: `PAYOUT_ACCOUNT_MISSING` (422), `INVOICE_IMMUTABLE` (409); cả hai đã có tên trong Spec §5.6. Repo chỉ có `contracts/error_codes.json` là nguồn, không có bước sinh mã; app và web sinh hằng số từ file này.
+
+Quy ước tiền (áp cho mọi endpoint ở trên):
+
+- Số nguyên đồng (VND), không float, không đơn vị nghìn; `libs/core/src/money.ts` giữ `vndSchema` dùng chung. Tên trường `<ý nghĩa>Amount` (`feeAmount`, `totalAmount`, `draftTotalAmount`); dòng hóa đơn và dòng điều chỉnh dùng `amount`; phần trăm miễn giảm là `percent` (1 đến 100). Trần 100 tỷ đồng. Dòng, điều chỉnh và miễn giảm có dấu (`signedVndSchema`); `totalAmount` luôn ≥ 0.
+- Luật làm tròn là luật nghiệp vụ (US-7.1 AC6), ghi trong mô tả schema: mọi dòng có chia tỷ lệ làm tròn tới 1.000 đ, từ 500 đ trở lên làm tròn lên. Đơn giá nhập vào (`feeAmount` > 0, không bắt buộc là bội của 1.000) và dòng điều chỉnh tay giữ nguyên số nhập.
+
+Quyết định khi soạn (cần TL chốt nếu muốn khác):
+
+Học phí lớp và mức riêng:
+
+- Học phí chỉ đặt qua `PATCH` (Plan ghi "trong `PATCH /classes/{id}`"). `feeType` và `feeAmount` cùng đặt hoặc cùng xóa (`null`); `feeRules` thay toàn bộ quy tắc, trường thiếu lấy mặc định (vắng có phép và không phép đều tính, không trừ buổi hủy, 1 đợt). `installments` > 1 chỉ với `course`. Đổi cấu hình chỉ áp dụng từ kỳ chưa chốt tiếp theo (US-1.2 AC4).
+- `PUT /enrollments/{id}/fee-override` thay toàn bộ mức riêng: `feeAmount`, `installments`, ba công tắc quy tắc và `discounts` (tối đa 5 khoản, mỗi khoản có `description` và `percent` hoặc `amount`, theo Spec §4.4 `recurring_discounts`). Trường `null` hoặc thiếu là kế thừa lớp; `discounts` rỗng là không miễn giảm; `{}` xóa mức riêng. Phụ thu thuộc US-7.8 (P1).
+- Vai trò: mọi endpoint giáo viên dùng `tenant_owner`, vì MVP gộp giáo viên và chủ tenant (`teacher`, `accountant` chưa phát hành membership).
+
+Tài khoản nhận tiền:
+
+- CRUD theo Spec §4.4: `bankBin` đúng 6 chữ số, `accountNo` 6 đến 19 chữ số, `accountName` ≤ 50 ký tự, `isPrimary`. Tối đa 5 tài khoản mỗi tenant. Tài khoản đầu tiên tự là chính; xóa tài khoản chính thì tài khoản tạo sớm nhất còn lại lên làm chính. Danh sách chỉ trả `accountNoMasked` (4 số cuối), số đầy đủ không trả lại; `POST` và `PATCH` đổi `bankBin` hoặc `accountNo` bắt buộc `otpCode` (OTP gửi qua `POST /auth/otp/send` với `purpose = payout_account`, sai → 401 `OTP_INVALID`). **Mặc định này chờ Owner chốt.**
+- Server kiểm định dạng BIN. `bankName` của `payout` tra từ bảng BIN phía server, null nếu BIN không có trong bảng; bảng này chưa có (xem "Chờ chốt").
+
+Kỳ thu và hóa đơn:
+
+- Trạng thái hóa đơn khai đủ enum Spec §4.3 (`draft`, `issued`, `pending_confirmation`, `partially_paid`, `paid`, `void`) để Sprint 6 không thêm giá trị vào phản hồi; Sprint 5 chỉ phát sinh `draft`, `issued`, `void`. Loại dòng cũng khai đủ (`carry_over`, `prev_adjustment`, `surcharge` chưa dùng).
+- `GET /invoices/{id}`: `lines` là nguồn duy nhất và là snapshot lúc tính, không có mảng `sessions` riêng. Mỗi dòng có `charged`, `notChargedReason` (4 giá trị không tính), `sessionId`, `sessionDate`, `className`, `adjustmentReason` (chỉ dòng điều chỉnh). Đối chiếu `invoice-calculator.ts` trên main: kiểu theo buổi sinh mỗi buổi một dòng `session`, kể cả buổi hủy và buổi bù 0 đ; kiểu theo tháng và trọn khóa không sinh dòng buổi mà sinh MỘT dòng gốc (`monthly` đã trừ phần buổi hủy khi bật `deductCancelled`, hoặc `course_installment`), rồi các dòng `discount` và `manual_adjustment`. Muốn tách phần trừ buổi hủy thành dòng riêng thì phải sửa calculator. Dòng không đổi sau phát hành. Một hóa đơn gộp mọi lớp của học viên trong kỳ.
+- Kỳ `closed` khi không còn bản nháp nào có số tiền > 0 (bản nháp 0 đ không gửi nên còn lại). `GET /billing-periods/{id}` kèm `invoices` phân trang offset.
+- `POST /invoices/{id}/adjustments`: `amount` ≠ 0 có dấu, bắt buộc `description` và `adjustmentReason`, chỉ khi còn `draft`, ngược lại 409 `INVOICE_IMMUTABLE`. Tối đa 20 dòng điều chỉnh mỗi hóa đơn (vượt → 422). Tổng âm bị cắt về 0, phản hồi có `clampedAmount` (phần âm chuyển kỳ khi có US-7.6). Chưa có endpoint xóa dòng điều chỉnh: sửa nhầm thì thêm dòng ngược dấu.
+
+Phát hành và hủy:
+
+- `issue` nhận `{ invoiceIds }` (`null` là tất cả, đúng ví dụ Spec §5.4) và trả `issuedCount`, `skipped` (`ZERO_AMOUNT`, `NOT_DRAFT`), `totalAmount`, `invoices` (mã, `transferNote`, `qrPayload`, hạn). Trả 200, không phải 201. Thiếu tài khoản nhận tiền → 422 `PAYOUT_ACCOUNT_MISSING` và không phát hành hóa đơn nào. `Idempotency-Key` bắt buộc; sự kiện outbox `invoice_issued` sinh thông báo và email.
+- Mã hóa đơn `TH-xxxxxx` (6 ký tự Crockford, theo ví dụ `TH-25K7Q9` của Spec §4.3); nội dung chuyển khoản `TH xxxxxx` (thay gạch bằng khoảng trắng), `[A-Z0-9 ]`, ≤ 25 ký tự. Kế hoạch ghi "`TH <mã>`": lấy `<mã>` là phần sau `TH-`.
+- `void` nhận `reason` bắt buộc và `createReplacementDraft` (mặc định false; **chờ TL xác nhận**). Spec §5.4 ghi "tùy chọn phát hành hóa đơn thay thế" còn Plan §2.6 ghi Sprint 5 chỉ hủy, thay thế là "tạo lại bản nháp rồi chốt"; không có endpoint nào tạo lại bản nháp, nên cờ này tạo bản nháp thay thế (`replacesInvoiceId`, và hóa đơn hủy có `replacementInvoiceId`) trong cùng giao dịch; kỳ chuyển lại `drafting` nếu đang `closed`. Bỏ cờ nếu TL muốn đúng Plan và chấp nhận thiếu đường tạo lại. Chỉ hủy `issued`; hủy lại hóa đơn đã `void` trả 200; `draft` hoặc hóa đơn đã có thanh toán → 409 `CONFLICT_STALE`.
+- `qrPayload` do `buildVietQrPayload` (spike #63, S2-BE-VQR) sinh; hàm này chưa có trong repo.
+
+Phụ huynh (`/family/invoices`):
+
+- Chỉ vai `parent` và đã đồng ý điều khoản, nên học sinh gọi nhận 403 `FORBIDDEN` và không thấy học phí (US-0.6 AC3). Phân trang con trỏ; không bao giờ có bản nháp; hóa đơn đã hủy vẫn có (`status = void`, `qrPayload = null`) để link trong thông báo cũ không 404. Hóa đơn của con không liên kết, của tenant khác hay bản nháp đều 404.
+- Dữ liệu phụ huynh đã lọc: không có lý do hủy, lý do điều chỉnh, `sessionId`, hay điểm danh chi tiết; dòng có `className`. `payout` (kèm `bankName`) đủ để chép số tài khoản nếu quét QR không được (rủi ro R16), và là null khi hóa đơn `void`. `/family/invoices` lọc thêm theo `status`.
+- Hợp đồng chưa có "thanh toán", "biên nhận", `receivables` (Sprint 6, FL2 soạn ở S5-FL-09).
+
+Trọn khóa, thông báo và giới hạn:
+
+- `PATCH` với `feeType = course` mà lớp không xác định được tổng số buổi (thiếu `endDate` hoặc không có quy tắc lịch) → 422 `VALIDATION_FAILED` ở `feeType`. `Invoice` có `installmentNo` và `installmentCount` (null với kiểu khác). Đợt n là kỳ thứ n kể từ kỳ đầu tiên học viên vào lớp; hết số đợt thì không sinh thêm hóa đơn trọn khóa cho ghi danh đó. Trần số đợt 1 đến 36, khớp calculator.
+- Thông báo `billing_ready`, `invoice_issued`: push chỉ data-only (`notificationId`, `type`), text khay cố định, không tên con, không số tiền; email `invoice_issued` có tiêu đề cố định, không chứa tên con.
+- Route ghi tiền (`issue`, `void`, `adjustments`, `fee-override`, ghi `payout-accounts`) giới hạn 20 lần/phút/user, vượt → 429 `RATE_LIMITED`. `OtpPurpose` thêm `payout_account` ở `POST /auth/otp/send`.
+- Phản hồi `Invoice` thêm `replacementInvoiceId`, `installmentNo`, `installmentCount`, `clampedAmount`.
+
+Chờ chốt:
+
+- Ngày chốt và hạn thanh toán của kỳ: chưa có endpoint cấu hình; hợp đồng chỉ đọc `closeDate`, `dueDate`. Mặc định do PO quyết (kỳ là tháng dương lịch theo PRD; ngày chốt và hạn chưa có số), cần chốt trước S5-BE-05.
+- Ba loại thông báo (`schedule_changed`, `billing_ready`, `invoice_issued`) chưa vào `oneOf` của `Notification` (giữ như hiện tại).
+- Bảng BIN NAPAS: chưa rõ nằm ở server hay client. Hợp đồng giả định server giữ để điền `bankName`.
+- `createReplacementDraft` ở `void` (xem trên) và OTP khi đổi tài khoản nhận tiền (xem trên).
+
 ## Sprint 4 (S3-FL-12)
 
 Thân hàm trả 501 `NOT_IMPLEMENTED` tới khi làm task backend tương ứng; schema đã validate thật. Không có bảng hay migration (S4-BE-01 làm cùng task backend).

@@ -73,11 +73,12 @@
                   },
                   "purpose": {
                     "default": "login",
-                    "description": "Mục đích mã. `delete_account` (S4-BE-09): mã chỉ dùng được cho `DELETE /me`, mã `login` không xóa được tài khoản và ngược lại",
+                    "description": "Mục đích mã. `delete_account` (S4-BE-09): mã chỉ dùng được cho `DELETE /me`, mã `login` không xóa được tài khoản và ngược lại. `payout_account` (S5-BE-02): chỉ dùng được cho `POST`/`PATCH /payout-accounts` khi đổi ngân hàng hoặc số tài khoản",
                     "type": "string",
                     "enum": [
                       "login",
-                      "delete_account"
+                      "delete_account",
+                      "payout_account"
                     ]
                   }
                 },
@@ -1451,6 +1452,406 @@
         ]
       }
     },
+    "/v1/payout-accounts": {
+      "get": {
+        "description": "Tài khoản chính (`isPrimary`) đứng đầu, số tài khoản đã che (`accountNoMasked`). Chưa có tài khoản nào thì `items` rỗng: chốt kỳ sẽ bị chặn bằng 422 `PAYOUT_ACCOUNT_MISSING` (US-7.3 AC5).",
+        "operationId": "payoutAccounts_list",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PayoutAccountList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Danh sách tài khoản nhận tiền (S5-FL-03)",
+        "tags": [
+          "payout-accounts"
+        ]
+      },
+      "post": {
+        "description": "Tài khoản đầu tiên tự là tài khoản chính. `isPrimary = true` ở tài khoản sau chuyển cờ chính sang tài khoản này trong cùng giao dịch. Tối đa 5 tài khoản mỗi tenant, vượt → 422 `VALIDATION_FAILED`. Cần `otpCode` (xem mô tả trường). Ghi tối đa 20 lần/phút/user (429 `RATE_LIMITED`). Hóa đơn dùng tài khoản chính lúc phát hành và chụp lại vào hóa đơn (`payout`), nên sửa hay xóa tài khoản sau đó không đổi hóa đơn đã phát hành.",
+        "operationId": "payoutAccounts_create",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID, giữ nguyên khi thử lại hoặc phát lại từ outbox",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePayoutAccountRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PayoutAccount"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "OTP_INVALID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "IDEMPOTENCY_IN_PROGRESS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED\n\nIDEMPOTENCY_KEY_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "OTP_LOCKED, RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Thêm tài khoản nhận tiền",
+        "tags": [
+          "payout-accounts"
+        ]
+      }
+    },
+    "/v1/payout-accounts/{id}": {
+      "patch": {
+        "description": "Chỉ gửi trường đổi. `isPrimary` chỉ nhận `true` (đặt làm chính). Đổi `bankBin` hoặc `accountNo` bắt buộc `otpCode`, thiếu → 422 `VALIDATION_FAILED`. Không ảnh hưởng hóa đơn đã phát hành.",
+        "operationId": "payoutAccounts_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID, giữ nguyên khi thử lại hoặc phát lại từ outbox",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "bankBin": {
+                    "type": "string",
+                    "pattern": "^\\d{6}$",
+                    "description": "Mã BIN NAPAS 6 chữ số của ngân hàng (vd. Vietcombank `970436`). Server chỉ kiểm định dạng, không có danh mục ngân hàng: app/web giữ bảng BIN để chọn ngân hàng",
+                    "example": "970436"
+                  },
+                  "accountNo": {
+                    "type": "string",
+                    "pattern": "^\\d{6,19}$",
+                    "example": "0123456789"
+                  },
+                  "accountName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 50,
+                    "description": "Tên chủ tài khoản như ngân hàng ghi",
+                    "example": "NGUYEN VAN A"
+                  },
+                  "otpCode": {
+                    "type": "string",
+                    "pattern": "^\\d{6}$",
+                    "description": "Mã OTP 6 số gửi tới email của user qua `POST /auth/otp/send` với `purpose = payout_account`. Bắt buộc khi đặt hoặc đổi `bankBin` hoặc `accountNo` (chặn người cầm máy đổi nơi nhận tiền); sai → 401 `OTP_INVALID`, nhập sai quá nhiều → 429 `OTP_LOCKED`. Mã `payout_account` chỉ dùng được cho route này",
+                    "example": "482913"
+                  },
+                  "isPrimary": {
+                    "type": "boolean",
+                    "enum": [
+                      true
+                    ],
+                    "description": "Chỉ nhận `true` (đặt làm tài khoản chính, tài khoản chính cũ bị bỏ cờ). Muốn bỏ cờ thì đặt tài khoản khác làm chính"
+                  }
+                },
+                "example": {
+                  "accountName": "NGUYEN VAN B"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PayoutAccount"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "OTP_INVALID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "IDEMPOTENCY_IN_PROGRESS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED\n\nIDEMPOTENCY_KEY_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "OTP_LOCKED, RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Sửa tài khoản nhận tiền",
+        "tags": [
+          "payout-accounts"
+        ]
+      },
+      "delete": {
+        "description": "Xóa tài khoản chính khi còn tài khoản khác thì tài khoản tạo sớm nhất còn lại thành chính. Xóa tài khoản cuối cùng cho phép: lần chốt kỳ sau bị chặn bằng 422 `PAYOUT_ACCOUNT_MISSING`. Gọi lại trên tài khoản đã xóa → 404.",
+        "operationId": "payoutAccounts_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID, giữ nguyên khi thử lại hoặc phát lại từ outbox",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "IDEMPOTENCY_IN_PROGRESS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "IDEMPOTENCY_KEY_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Xóa tài khoản nhận tiền",
+        "tags": [
+          "payout-accounts"
+        ]
+      }
+    },
     "/v1/classes": {
       "get": {
         "description": "`status=active` (mặc định) hoặc `archived`. Lớp lưu trữ ẩn khỏi lịch.",
@@ -1881,10 +2282,46 @@
                     ],
                     "format": "date",
                     "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+                  },
+                  "feeType": {
+                    "description": "Kiểu tính học phí; `null` cùng với `feeAmount = null` xóa cấu hình học phí của lớp (lớp chưa có học phí không sinh bản nháp hóa đơn). `course` chỉ hợp lệ khi lớp xác định được tổng số buổi của khóa: có `endDate` và ít nhất một quy tắc lịch (tổng buổi = số buổi theo lịch từ `startDate` đến `endDate`, trừ ngày lễ bỏ qua); thiếu → 422 `VALIDATION_FAILED` ở `feeType`",
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/FeeType"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "feeAmount": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 1,
+                    "maximum": 1000000000,
+                    "description": "VND, số nguyên > 0: đơn giá buổi (`per_session`), học phí tháng (`monthly`) hoặc tổng tiền khóa (`course`)",
+                    "example": 150000
+                  },
+                  "feeRules": {
+                    "description": "Thay toàn bộ quy tắc (xem `FeeRulesInput`); `null` = về mặc định. Chỉ hợp lệ khi lớp có học phí sau khi gộp",
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/FeeRulesInput"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 },
                 "example": {
-                  "capacity": 25
+                  "feeType": "per_session",
+                  "feeAmount": 150000,
+                  "feeRules": {
+                    "chargeExcused": false
+                  }
                 }
               }
             }
@@ -2274,6 +2711,125 @@
           }
         ],
         "summary": "Ghi danh học viên có sẵn vào lớp (US-1.4 AC3)",
+        "tags": [
+          "classes"
+        ]
+      }
+    },
+    "/v1/enrollments/{id}/fee-override": {
+      "put": {
+        "description": "Thay toàn bộ mức riêng của một ghi danh; thứ tự áp dụng học sinh > lớp > mặc định (US-1.3 AC1). Mức riêng chỉ áp dụng từ kỳ chưa chốt tiếp theo, hóa đơn đã phát hành không đổi. Có mức riêng (kể cả chỉ miễn giảm) thì `GET /classes/{id}/roster` trả `feeOverride` khác null để hiện nhãn \"Giá riêng\" (US-1.3 AC2). Miễn giảm 100% → hóa đơn 0 đ không được gửi và không nhắc nợ (AC3). Tối đa 5 khoản `discounts`, mỗi khoản có `description`; `installments` chỉ hợp lệ với lớp trọn khóa (vượt → 422). Giới hạn 20 lần/phút/user (429 `RATE_LIMITED`). `feeAmount` đòi lớp đã có học phí, nếu không → 422 `VALIDATION_FAILED`. Ghi danh đã rời lớp (`leftOn`) → 409 `CONFLICT_STALE`; ghi danh của tenant khác → 404.",
+        "operationId": "enrollmentFees_put",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID, giữ nguyên khi thử lại hoặc phát lại từ outbox",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutFeeOverrideRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeeOverrideResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CONFLICT_STALE\n\nIDEMPOTENCY_IN_PROGRESS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED\n\nIDEMPOTENCY_KEY_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Đặt mức riêng, quy tắc vắng riêng, miễn giảm cho học viên (US-1.3)",
         "tags": [
           "classes"
         ]
@@ -4370,7 +4926,7 @@
     },
     "/v1/notifications": {
       "get": {
-        "description": "Phân trang con trỏ (Spec §5.5), mới nhất trước. Chỉ trả thông báo gửi cho chính user và đúng vai trò `active-membership`; không bao giờ lộ thông báo của người khác. Từ Sprint 4 có thêm loại `schedule_changed` (US-2.2) mà schema chưa liệt kê vì oasdiff coi thêm `oneOf` là breaking; client bỏ qua `type` lạ. Hình dạng: `payload = { classId, className, sessionId, change (rescheduled|cancelled|makeup), sessionStartsAt, previousStartsAt|null, reason|null }`, `deepLink = teachhub://sessions/{sessionId}`.",
+        "description": "Phân trang con trỏ (Spec §5.5), mới nhất trước. Chỉ trả thông báo gửi cho chính user và đúng vai trò `active-membership`; không bao giờ lộ thông báo của người khác. Từ Sprint 4 có thêm loại `schedule_changed` (US-2.2) mà schema chưa liệt kê vì oasdiff coi thêm `oneOf` là breaking; client bỏ qua `type` lạ. Hình dạng: `payload = { classId, className, sessionId, change (rescheduled|cancelled|makeup), sessionStartsAt, previousStartsAt|null, reason|null }`, `deepLink = teachhub://sessions/{sessionId}`. Từ Sprint 5 có thêm hai loại cũng chưa liệt kê vì lý do trên: `billing_ready` (cho giáo viên, `payload = { periodId, periodMonth, draftCount, draftTotalAmount }`, `deepLink = teachhub://billing/periods/{periodId}`) và `invoice_issued` (cho phụ huynh, `payload = { invoiceId, studentId, studentName, periodMonth, totalAmount, dueDate }`, `deepLink = teachhub://invoices/{invoiceId}`). Push của hai loại này chỉ data-only (`notificationId`, `type`): text khay cố định, không tên con, không số tiền; email `invoice_issued` có tiêu đề cố định, không chứa tên con.",
         "operationId": "notifications_list",
         "parameters": [
           {
@@ -5640,6 +6196,829 @@
           "family"
         ]
       }
+    },
+    "/v1/billing-periods": {
+      "get": {
+        "description": "Mới nhất trước, phân trang offset. Kỳ do tác vụ nền `billing.close` (02:00) tạo cho tenant có ngày chốt hôm nay; chạy lại không tạo bản nháp trùng (US-7.2 AC1). `month=YYYY-MM` lọc đúng một tháng. Kỳ gồm tiền: mọi số tiền là số nguyên đồng.",
+        "operationId": "billing_list",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": 1,
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000
+            }
+          },
+          {
+            "name": "pageSize",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": 20,
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "month",
+            "required": false,
+            "in": "query",
+            "description": "Chỉ kỳ của tháng này",
+            "schema": {
+              "description": "Chỉ kỳ của tháng này",
+              "example": "2026-12",
+              "type": "string",
+              "pattern": "^\\d{4}-(0[1-9]|1[0-2])$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingPeriodPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Danh sách kỳ thu (T10, US-7.2)",
+        "tags": [
+          "billing"
+        ]
+      }
+    },
+    "/v1/billing-periods/{id}": {
+      "get": {
+        "description": "Tổng quan kỳ kèm `invoices` phân trang (sắp theo tên học viên không dấu). Mở chi tiết từng hóa đơn bằng `GET /invoices/{id}`. Kỳ của tenant khác → 404.",
+        "operationId": "billing_get",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": 1,
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000
+            }
+          },
+          {
+            "name": "pageSize",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": 20,
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "description": "Lọc theo trạng thái hóa đơn",
+            "schema": {
+              "description": "Lọc theo trạng thái hóa đơn",
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/InvoiceStatus"
+                }
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingPeriodDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Chi tiết kỳ thu: số bản nháp, tổng tiền, danh sách hóa đơn (T10)",
+        "tags": [
+          "billing"
+        ]
+      }
+    },
+    "/v1/billing-periods/{id}/issue": {
+      "post": {
+        "description": "Chạy trong một giao dịch: cấp mã duy nhất trong tenant (`TH-xxxxxx`), nội dung chuyển khoản `TH xxxxxx`, `qrPayload` VietQR từ tài khoản nhận tiền chính, chụp `payout` vào hóa đơn rồi khóa bất biến. `invoiceIds = null` là \"Chốt & gửi tất cả\", mảng là chốt từng hóa đơn. Hóa đơn 0 đ không phát hành, không nhắc nợ (US-1.3 AC3): nằm trong `skipped` với `ZERO_AMOUNT` và vẫn là bản nháp. Hóa đơn đã phát hành hay đã hủy trong `invoiceIds` vào `skipped` với `NOT_DRAFT`. `invoiceIds` chứa id không thuộc kỳ này → 404. Tenant chưa có tài khoản nhận tiền → 422 `PAYOUT_ACCOUNT_MISSING`, không phát hành hóa đơn nào (client mở màn tài khoản nhận tiền, US-7.3 AC5). `Idempotency-Key` bắt buộc: gửi lặp cùng khóa trả lại kết quả đã lưu, gọi lại bằng khóa mới khi đã hết bản nháp thì `issuedCount = 0`, không phát hành hai lần. Mỗi hóa đơn phát hành ghi sự kiện outbox `invoice_issued` → thông báo `invoice_issued` + email cho phụ huynh. Giới hạn 20 lần/phút/user (429 `RATE_LIMITED`). Kỳ chuyển `closed` khi không còn bản nháp nào có số tiền > 0.",
+        "operationId": "billing_issue",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID, giữ nguyên khi thử lại hoặc phát lại từ outbox",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IssueInvoicesRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IssueInvoicesResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "IDEMPOTENCY_IN_PROGRESS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED, PAYOUT_ACCOUNT_MISSING\n\nIDEMPOTENCY_KEY_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Chốt & phát hành hóa đơn của kỳ (US-7.2 AC4, US-7.3)",
+        "tags": [
+          "billing"
+        ]
+      }
+    },
+    "/v1/invoices/{id}": {
+      "get": {
+        "description": "`lines` là nguồn duy nhất và là snapshot lúc tính (không đọc lại điểm danh). Kiểu theo buổi: mỗi buổi một dòng `session` kèm `charged`, `notChargedReason`, `sessionDate`, kể cả buổi hủy và buổi bù 0 đ. Kiểu theo tháng và trọn khóa: một dòng gốc (không có dòng buổi), kèm `installmentNo`/`installmentCount` với trọn khóa. Dòng số dư chuyển kỳ (`carry_over`) chỉ có từ Sprint 6. Hóa đơn của tenant khác → 404.",
+        "operationId": "billing_invoice",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Invoice"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Chi tiết hóa đơn: các dòng, từng buổi tính/không tính (US-7.2 AC2)",
+        "tags": [
+          "billing"
+        ]
+      }
+    },
+    "/v1/invoices/{id}/adjustments": {
+      "post": {
+        "description": "Chỉ khi hóa đơn còn `draft`; đã phát hành hay hủy → 409 `INVOICE_IMMUTABLE`. Thêm dòng `manual_adjustment` có `amount` ≠ 0 (âm giảm, dương phụ thu), bắt buộc `adjustmentReason`, ghi nhật ký kiểm toán; trả hóa đơn đã tính lại. Mỗi hóa đơn tối đa 20 dòng điều chỉnh, vượt → 422 `VALIDATION_FAILED`. Giới hạn 20 lần/phút/user (429 `RATE_LIMITED`). Tổng `totalAmount` không âm: điều chỉnh làm tổng < 0 thì `totalAmount = 0` và `clampedAmount` là phần âm bị cắt (chuyển kỳ khi có US-7.6). Chưa có endpoint xóa dòng điều chỉnh: nhập sai thì thêm dòng ngược dấu.",
+        "operationId": "billing_adjust",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID, giữ nguyên khi thử lại hoặc phát lại từ outbox",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateInvoiceAdjustmentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Invoice"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "INVOICE_IMMUTABLE\n\nIDEMPOTENCY_IN_PROGRESS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED\n\nIDEMPOTENCY_KEY_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Thêm dòng điều chỉnh vào bản nháp (US-7.2 AC3)",
+        "tags": [
+          "billing"
+        ]
+      }
+    },
+    "/v1/invoices/{id}/void": {
+      "post": {
+        "description": "Chỉ hóa đơn `issued`: hóa đơn chưa phát hành (`draft`) → 409 `CONFLICT_STALE`; hóa đơn đã có thanh toán (Sprint 6) cũng 409, phải hủy thanh toán trước. Hóa đơn đã `void` gọi lại vẫn 200, trả bản hiện tại, `replacementInvoiceId = null`. Mã QR của hóa đơn đã hủy không còn hiển thị cho phụ huynh (`payout` và `qrPayload` null phía phụ huynh). `createReplacementDraft = true` tạo bản nháp thay thế để giáo viên sửa rồi chốt (xem mô tả trường); khi đó kỳ chuyển lại `drafting` nếu đang `closed`, và hóa đơn hủy có `replacementInvoiceId`. Giới hạn 20 lần/phút/user (429 `RATE_LIMITED`). Cờ `createReplacementDraft` chờ TL xác nhận.",
+        "operationId": "billing_voidInvoice",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID, giữ nguyên khi thử lại hoặc phát lại từ outbox",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VoidInvoiceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoidInvoiceResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CONFLICT_STALE\n\nIDEMPOTENCY_IN_PROGRESS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED\n\nIDEMPOTENCY_KEY_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Hủy hóa đơn đã phát hành, có lý do (US-7.3 AC4)",
+        "tags": [
+          "billing"
+        ]
+      }
+    },
+    "/v1/family/invoices": {
+      "get": {
+        "description": "Chỉ hóa đơn đã phát hành (hoặc đã hủy) của học viên đã liên kết với user này, ở mọi tenant. Bản nháp không bao giờ lộ. Chưa đồng ý điều khoản hiện hành → 403 `CONSENT_REQUIRED`. `studentId` không phải con đã liên kết cho danh sách rỗng, không lộ học viên có tồn tại.",
+        "operationId": "familyInvoices_list",
+        "parameters": [
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "description": "`nextCursor` của trang trước; bỏ trống = trang đầu",
+            "schema": {
+              "description": "`nextCursor` của trang trước; bỏ trống = trang đầu",
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": 20,
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "description": "Lọc theo trạng thái; bỏ trống = mọi trạng thái trừ `draft`",
+            "schema": {
+              "description": "Lọc theo trạng thái; bỏ trống = mọi trạng thái trừ `draft`",
+              "type": "string",
+              "enum": [
+                "issued",
+                "pending_confirmation",
+                "partially_paid",
+                "paid",
+                "void"
+              ]
+            }
+          },
+          {
+            "name": "studentId",
+            "required": false,
+            "in": "query",
+            "description": "Chỉ hóa đơn của con này; con không liên kết cho danh sách rỗng",
+            "schema": {
+              "description": "Chỉ hóa đơn của con này; con không liên kết cho danh sách rỗng",
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FamilyInvoiceList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN, CONSENT_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Hóa đơn của các con (P03, US-7.3)",
+        "tags": [
+          "family"
+        ]
+      }
+    },
+    "/v1/family/invoices/{id}": {
+      "get": {
+        "description": "Hóa đơn của học viên khác, của tenant khác, bản nháp hay không tồn tại → cùng 404 `NOT_FOUND`. `qrPayload` là chuỗi VietQR đã chứa số tiền và nội dung chuyển khoản; client vẽ QR, cho lưu ảnh và sao chép `transferNote`.",
+        "operationId": "familyInvoices_get",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FamilyInvoice"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN, CONSENT_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Chi tiết hóa đơn kèm VietQR cho phụ huynh (P03, US-7.3 AC1)",
+        "tags": [
+          "family"
+        ]
+      }
     }
   },
   "info": {
@@ -6096,6 +7475,120 @@
           "createdAt": "2026-12-14T09:00:00+07:00"
         }
       },
+      "PayoutAccountList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PayoutAccount"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "additionalProperties": false,
+        "description": "Tối đa 5 tài khoản mỗi tenant, không phân trang"
+      },
+      "PayoutAccount": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "bankBin": {
+            "type": "string",
+            "pattern": "^\\d{6}$"
+          },
+          "accountNoMasked": {
+            "type": "string",
+            "description": "Che số tài khoản, chỉ giữ 4 số cuối; số đầy đủ không trả lại qua API này, chỉ có trong `payout` của hóa đơn đã phát hành",
+            "example": "******6789"
+          },
+          "accountName": {
+            "type": "string"
+          },
+          "isPrimary": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          }
+        },
+        "required": [
+          "id",
+          "bankBin",
+          "accountNoMasked",
+          "accountName",
+          "isPrimary",
+          "createdAt"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "id": "019c0a20-0001-7b30-8c01-000000000001",
+          "bankBin": "970436",
+          "accountNoMasked": "******6789",
+          "accountName": "NGUYEN VAN A",
+          "isPrimary": true,
+          "createdAt": "2027-01-20T09:30:00+07:00"
+        }
+      },
+      "CreatePayoutAccountRequest": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "UUID do client sinh (tùy chọn); thiếu thì server sinh",
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "bankBin": {
+            "type": "string",
+            "pattern": "^\\d{6}$",
+            "description": "Mã BIN NAPAS 6 chữ số của ngân hàng (vd. Vietcombank `970436`). Server chỉ kiểm định dạng, không có danh mục ngân hàng: app/web giữ bảng BIN để chọn ngân hàng",
+            "example": "970436"
+          },
+          "accountNo": {
+            "type": "string",
+            "pattern": "^\\d{6,19}$",
+            "example": "0123456789"
+          },
+          "accountName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 50,
+            "description": "Tên chủ tài khoản như ngân hàng ghi",
+            "example": "NGUYEN VAN A"
+          },
+          "otpCode": {
+            "type": "string",
+            "pattern": "^\\d{6}$",
+            "description": "Mã OTP 6 số gửi tới email của user qua `POST /auth/otp/send` với `purpose = payout_account`. Bắt buộc khi đặt hoặc đổi `bankBin` hoặc `accountNo` (chặn người cầm máy đổi nơi nhận tiền); sai → 401 `OTP_INVALID`, nhập sai quá nhiều → 429 `OTP_LOCKED`. Mã `payout_account` chỉ dùng được cho route này",
+            "example": "482913"
+          },
+          "isPrimary": {
+            "description": "Mặc định `true` với tài khoản đầu tiên, `false` với các tài khoản sau",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "bankBin",
+          "accountNo",
+          "accountName",
+          "otpCode"
+        ],
+        "example": {
+          "bankBin": "970436",
+          "accountNo": "0123456789",
+          "accountName": "NGUYEN VAN A",
+          "otpCode": "482913"
+        }
+      },
       "ClassPage": {
         "type": "object",
         "properties": {
@@ -6142,6 +7635,14 @@
               "endDate": null,
               "status": "active",
               "enrolledCount": 3,
+              "feeType": "per_session",
+              "feeAmount": 150000,
+              "feeRules": {
+                "chargeExcused": true,
+                "chargeUnexcused": true,
+                "deductCancelled": false,
+                "installments": 1
+              },
               "scheduleRules": [
                 {
                   "id": "019b2c40-1a01-7a10-8a01-000000000001",
@@ -6238,6 +7739,38 @@
             "maximum": 9007199254740991,
             "description": "Số học viên đang ghi danh (chưa rời lớp)"
           },
+          "feeType": {
+            "description": "Null = lớp chưa cấu hình học phí (lớp cũ trước Sprint 5): không sinh hóa đơn cho lớp này",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FeeType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "feeAmount": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 1000000000,
+            "description": "VND, số nguyên > 0: đơn giá buổi (`per_session`), học phí tháng (`monthly`) hoặc tổng tiền khóa (`course`)",
+            "example": 150000
+          },
+          "feeRules": {
+            "description": "Quy tắc hiệu lực khi có học phí (đã điền mặc định), null khi không có học phí",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FeeRules"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "scheduleRules": {
             "type": "array",
             "items": {
@@ -6262,6 +7795,9 @@
           "endDate",
           "status",
           "enrolledCount",
+          "feeType",
+          "feeAmount",
+          "feeRules",
           "scheduleRules",
           "createdAt"
         ],
@@ -6278,6 +7814,14 @@
           "endDate": null,
           "status": "active",
           "enrolledCount": 3,
+          "feeType": "per_session",
+          "feeAmount": 150000,
+          "feeRules": {
+            "chargeExcused": true,
+            "chargeUnexcused": true,
+            "deductCancelled": false,
+            "installments": 1
+          },
           "scheduleRules": [
             {
               "id": "019b2c40-1a01-7a10-8a01-000000000001",
@@ -6293,6 +7837,51 @@
             }
           ],
           "createdAt": "2026-12-14T09:30:00+07:00"
+        }
+      },
+      "FeeType": {
+        "type": "string",
+        "enum": [
+          "per_session",
+          "monthly",
+          "course"
+        ],
+        "description": "`per_session` = đơn giá mỗi buổi, `monthly` = mức cố định mỗi tháng, `course` = tổng tiền cả khóa (chia theo `installments` đợt)"
+      },
+      "FeeRules": {
+        "type": "object",
+        "properties": {
+          "chargeExcused": {
+            "type": "boolean",
+            "description": "Tính tiền buổi vắng có phép (kiểu theo buổi). Mặc định bật (US-1.2 AC2)"
+          },
+          "chargeUnexcused": {
+            "type": "boolean",
+            "description": "Tính tiền buổi vắng không phép (kiểu theo buổi). Mặc định bật"
+          },
+          "deductCancelled": {
+            "type": "boolean",
+            "description": "Kiểu theo tháng: trừ phần tiền buổi giáo viên hủy mà không dạy bù = học phí / số buổi theo lịch × số buổi hủy, làm tròn 1.000 đ. Mặc định tắt"
+          },
+          "installments": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 36,
+            "description": "Kiểu trọn khóa: số đợt thu (1 đến 36, khớp `InvoiceCalculator`). Mặc định 1; đợt cuối gánh phần chênh để tổng các đợt bằng đúng tổng khóa"
+          }
+        },
+        "required": [
+          "chargeExcused",
+          "chargeUnexcused",
+          "deductCancelled",
+          "installments"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "chargeExcused": true,
+          "chargeUnexcused": true,
+          "deductCancelled": false,
+          "installments": 1
         }
       },
       "ScheduleRule": {
@@ -6410,6 +7999,38 @@
             "maximum": 9007199254740991,
             "description": "Số học viên đang ghi danh (chưa rời lớp)"
           },
+          "feeType": {
+            "description": "Null = lớp chưa cấu hình học phí (lớp cũ trước Sprint 5): không sinh hóa đơn cho lớp này",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FeeType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "feeAmount": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 1000000000,
+            "description": "VND, số nguyên > 0: đơn giá buổi (`per_session`), học phí tháng (`monthly`) hoặc tổng tiền khóa (`course`)",
+            "example": 150000
+          },
+          "feeRules": {
+            "description": "Quy tắc hiệu lực khi có học phí (đã điền mặc định), null khi không có học phí",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FeeRules"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "scheduleRules": {
             "type": "array",
             "items": {
@@ -6455,6 +8076,9 @@
           "endDate",
           "status",
           "enrolledCount",
+          "feeType",
+          "feeAmount",
+          "feeRules",
           "scheduleRules",
           "createdAt",
           "warnings"
@@ -6472,6 +8096,14 @@
           "endDate": null,
           "status": "active",
           "enrolledCount": 3,
+          "feeType": "per_session",
+          "feeAmount": 150000,
+          "feeRules": {
+            "chargeExcused": true,
+            "chargeUnexcused": true,
+            "deductCancelled": false,
+            "installments": 1
+          },
           "scheduleRules": [
             {
               "id": "019b2c40-1a01-7a10-8a01-000000000001",
@@ -6553,6 +8185,29 @@
         ],
         "additionalProperties": false
       },
+      "FeeRulesInput": {
+        "type": "object",
+        "properties": {
+          "chargeExcused": {
+            "type": "boolean"
+          },
+          "chargeUnexcused": {
+            "type": "boolean"
+          },
+          "deductCancelled": {
+            "type": "boolean"
+          },
+          "installments": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 36
+          }
+        },
+        "description": "Thay toàn bộ quy tắc của lớp; trường thiếu lấy mặc định (`chargeExcused` và `chargeUnexcused` bật, `deductCancelled` tắt, `installments` 1). `installments` > 1 chỉ hợp lệ với `feeType = course`",
+        "example": {
+          "chargeExcused": false
+        }
+      },
       "Roster": {
         "type": "object",
         "properties": {
@@ -6600,6 +8255,17 @@
                   "items": {
                     "$ref": "#/components/schemas/RosterGuardian"
                   }
+                },
+                "feeOverride": {
+                  "description": "Khác null (có mức riêng, quy tắc vắng riêng hoặc miễn giảm) → hiện nhãn \"Giá riêng\" cạnh tên (US-1.3 AC2); null = theo cấu hình lớp",
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/FeeOverride"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               },
               "required": [
@@ -6609,7 +8275,8 @@
                 "studentStatus",
                 "joinedOn",
                 "inviteStatus",
-                "guardians"
+                "guardians",
+                "feeOverride"
               ],
               "additionalProperties": false
             }
@@ -6628,6 +8295,14 @@
               "studentStatus": "active",
               "joinedOn": "2026-12-14",
               "inviteStatus": "invited",
+              "feeOverride": {
+                "feeAmount": 120000,
+                "chargeExcused": null,
+                "chargeUnexcused": null,
+                "deductCancelled": null,
+                "installments": null,
+                "discounts": []
+              },
               "guardians": [
                 {
                   "id": "019b2c4f-0002-7b30-8c01-000000000001",
@@ -6648,6 +8323,7 @@
               "studentStatus": "active",
               "joinedOn": "2026-12-14",
               "inviteStatus": "not_invited",
+              "feeOverride": null,
               "guardians": []
             }
           ]
@@ -6722,6 +8398,138 @@
         ],
         "additionalProperties": false
       },
+      "FeeOverride": {
+        "type": "object",
+        "properties": {
+          "feeAmount": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 100000000000,
+            "description": "VND > 0, thay đơn giá buổi / học phí tháng / tổng khóa của lớp"
+          },
+          "chargeExcused": {
+            "description": "Ghi đè công tắc tính vắng có phép của lớp",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "chargeUnexcused": {
+            "description": "Ghi đè công tắc tính vắng không phép của lớp",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "deductCancelled": {
+            "description": "Ghi đè \"trừ buổi hủy\" của lớp (kiểu theo tháng)",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "installments": {
+            "description": "Ghi đè số đợt của lớp trọn khóa (1 đến 36)",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 36
+          },
+          "discounts": {
+            "maxItems": 5,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FeeDiscount"
+            },
+            "description": "Tối đa 5 khoản miễn giảm định kỳ (Spec §4.4 `recurring_discounts`), mỗi khoản một dòng `discount`; rỗng = không miễn giảm. Với lớp trọn khóa chia đợt, khoản miễn giảm áp ở mỗi đợt, tính trên phần gốc của đợt đó"
+          }
+        },
+        "required": [
+          "feeAmount",
+          "chargeExcused",
+          "chargeUnexcused",
+          "deductCancelled",
+          "installments",
+          "discounts"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "feeAmount": 120000,
+          "chargeExcused": false,
+          "chargeUnexcused": null,
+          "deductCancelled": null,
+          "installments": null,
+          "discounts": []
+        }
+      },
+      "FeeDiscount": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "percent"
+                ]
+              },
+              "description": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100,
+                "description": "Tên khoản miễn giảm, hiện thành dòng `discount`"
+              },
+              "percent": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100,
+                "description": "100 = miễn giảm hoàn toàn (hóa đơn 0 đ không được gửi, US-1.3 AC3)"
+              }
+            },
+            "required": [
+              "kind",
+              "description",
+              "percent"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "amount"
+                ]
+              },
+              "description": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100,
+                "description": "Tên khoản miễn giảm, hiện thành dòng `discount`"
+              },
+              "amount": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1000000000,
+                "description": "VND trừ mỗi kỳ, số nguyên > 0"
+              }
+            },
+            "required": [
+              "kind",
+              "description",
+              "amount"
+            ],
+            "additionalProperties": false
+          }
+        ],
+        "description": "Miễn giảm định kỳ của học viên, áp mỗi kỳ cho đến khi gỡ. Phát sinh dòng hóa đơn `discount`; phần trăm tính trên phần học phí gốc của kỳ"
+      },
       "Enrollment": {
         "type": "object",
         "properties": {
@@ -6758,6 +8566,114 @@
           "classId": "019b2c3f-5e01-7c20-9b01-000000000001",
           "studentId": "019b2c4f-0001-7b30-8c01-000000000001",
           "joinedOn": "2026-12-14"
+        }
+      },
+      "PutFeeOverrideRequest": {
+        "type": "object",
+        "properties": {
+          "feeAmount": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 100000000000,
+            "description": "VND > 0, thay đơn giá buổi / học phí tháng / tổng khóa của lớp"
+          },
+          "chargeExcused": {
+            "description": "Ghi đè công tắc tính vắng có phép của lớp",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "chargeUnexcused": {
+            "description": "Ghi đè công tắc tính vắng không phép của lớp",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "deductCancelled": {
+            "description": "Ghi đè \"trừ buổi hủy\" của lớp (kiểu theo tháng)",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "installments": {
+            "description": "Ghi đè số đợt của lớp trọn khóa (1 đến 36)",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 36
+          },
+          "discounts": {
+            "maxItems": 5,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FeeDiscount"
+            },
+            "description": "Tối đa 5 khoản miễn giảm định kỳ (Spec §4.4 `recurring_discounts`), mỗi khoản một dòng `discount`; rỗng = không miễn giảm. Với lớp trọn khóa chia đợt, khoản miễn giảm áp ở mỗi đợt, tính trên phần gốc của đợt đó"
+          }
+        },
+        "description": "Thay toàn bộ mức riêng: trường thiếu hoặc `null` = kế thừa lớp, `discounts` thiếu hoặc rỗng = không miễn giảm. `{}` xóa mức riêng và bỏ nhãn \"Giá riêng\"",
+        "example": {
+          "feeAmount": 120000,
+          "chargeExcused": false
+        }
+      },
+      "FeeOverrideResult": {
+        "type": "object",
+        "properties": {
+          "enrollmentId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "studentId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "classId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "feeOverride": {
+            "description": "Null khi mọi trường đều rỗng (không còn mức riêng)",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FeeOverride"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "enrollmentId",
+          "studentId",
+          "classId",
+          "feeOverride"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "enrollmentId": "019b2c50-0001-7b30-8c01-000000000001",
+          "studentId": "019b2c4f-0001-7b30-8c01-000000000001",
+          "classId": "019b2c3f-5e01-7c20-9b01-000000000001",
+          "feeOverride": {
+            "feeAmount": 120000,
+            "chargeExcused": false,
+            "chargeUnexcused": null,
+            "deductCancelled": null,
+            "installments": null,
+            "discounts": []
+          }
         }
       },
       "StudentPage": {
@@ -9418,6 +11334,1172 @@
             }
           ]
         }
+      },
+      "BillingPeriodPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BillingPeriod"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "pageSize": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "pageSize"
+        ],
+        "additionalProperties": false
+      },
+      "BillingPeriod": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "periodMonth": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
+            "description": "Ngày 1 của tháng thu (kỳ mặc định là tháng dương lịch)",
+            "example": "2026-12-01"
+          },
+          "closeDate": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
+            "description": "Ngày chốt (tác vụ nền tạo bản nháp)"
+          },
+          "dueDate": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
+            "description": "Hạn thanh toán áp cho hóa đơn phát hành trong kỳ"
+          },
+          "status": {
+            "$ref": "#/components/schemas/BillingPeriodStatus"
+          },
+          "draftCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "issuedCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "Hóa đơn đã phát hành và chưa hủy (mọi trạng thái sau `draft`, trừ `void`)"
+          },
+          "voidCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "draftTotalAmount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "Tổng tiền các bản nháp"
+          },
+          "issuedTotalAmount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "Tổng tiền các hóa đơn đã phát hành, chưa hủy"
+          }
+        },
+        "required": [
+          "id",
+          "periodMonth",
+          "closeDate",
+          "dueDate",
+          "status",
+          "draftCount",
+          "issuedCount",
+          "voidCount",
+          "draftTotalAmount",
+          "issuedTotalAmount"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "id": "019c0a00-0001-7b30-8c01-000000000001",
+          "periodMonth": "2026-12-01",
+          "closeDate": "2026-12-31",
+          "dueDate": "2027-01-10",
+          "status": "drafting",
+          "draftCount": 18,
+          "issuedCount": 0,
+          "voidCount": 0,
+          "draftTotalAmount": 21600000,
+          "issuedTotalAmount": 0
+        }
+      },
+      "BillingPeriodStatus": {
+        "type": "string",
+        "enum": [
+          "drafting",
+          "closed"
+        ],
+        "description": "`drafting` = còn bản nháp có tiền chưa chốt, `closed` = không còn bản nháp nào có số tiền > 0 (bản nháp 0 đ có thể còn lại, không gửi)"
+      },
+      "InvoiceStatus": {
+        "type": "string",
+        "enum": [
+          "draft",
+          "issued",
+          "pending_confirmation",
+          "partially_paid",
+          "paid",
+          "void"
+        ],
+        "description": "Sprint 5 chỉ phát sinh `draft`, `issued`, `void`. Ba trạng thái còn lại (`pending_confirmation`, `partially_paid`, `paid`) do thu tiền ở Sprint 6; client coi giá trị lạ như `issued`."
+      },
+      "BillingPeriodDetail": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "periodMonth": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
+            "description": "Ngày 1 của tháng thu (kỳ mặc định là tháng dương lịch)",
+            "example": "2026-12-01"
+          },
+          "closeDate": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
+            "description": "Ngày chốt (tác vụ nền tạo bản nháp)"
+          },
+          "dueDate": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
+            "description": "Hạn thanh toán áp cho hóa đơn phát hành trong kỳ"
+          },
+          "status": {
+            "$ref": "#/components/schemas/BillingPeriodStatus"
+          },
+          "draftCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "issuedCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "Hóa đơn đã phát hành và chưa hủy (mọi trạng thái sau `draft`, trừ `void`)"
+          },
+          "voidCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "draftTotalAmount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "Tổng tiền các bản nháp"
+          },
+          "issuedTotalAmount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "Tổng tiền các hóa đơn đã phát hành, chưa hủy"
+          },
+          "invoices": {
+            "type": "object",
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/InvoiceSummary"
+                }
+              },
+              "total": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "page": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "pageSize": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "items",
+              "total",
+              "page",
+              "pageSize"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "id",
+          "periodMonth",
+          "closeDate",
+          "dueDate",
+          "status",
+          "draftCount",
+          "issuedCount",
+          "voidCount",
+          "draftTotalAmount",
+          "issuedTotalAmount",
+          "invoices"
+        ],
+        "additionalProperties": false,
+        "description": "Tổng quan kỳ kèm danh sách hóa đơn (bản nháp và đã phát hành) phân trang, sắp theo tên học viên (T10)"
+      },
+      "InvoiceSummary": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^TH-[0-9A-HJKMNP-TV-Z]{6}$",
+            "description": "Mã hóa đơn duy nhất trong tenant, 6 ký tự Crockford (không I, L, O, U) sau `TH-`; null khi còn là bản nháp",
+            "example": "TH-25K7Q9"
+          },
+          "status": {
+            "$ref": "#/components/schemas/InvoiceStatus"
+          },
+          "studentId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "studentName": {
+            "type": "string"
+          },
+          "totalAmount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "Tổng tiền = max(0, Σ `lines.amount`)"
+          },
+          "hasOverride": {
+            "type": "boolean",
+            "description": "Học viên có mức riêng (\"Giá riêng\") ở ít nhất một lớp trong kỳ"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "status",
+          "studentId",
+          "studentName",
+          "totalAmount",
+          "hasOverride"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "id": "019c0a10-0001-7b30-8c01-000000000001",
+          "code": null,
+          "status": "draft",
+          "studentId": "019b2c4f-0001-7b30-8c01-000000000001",
+          "studentName": "Nguyễn Minh Anh",
+          "totalAmount": 1200000,
+          "hasOverride": false
+        }
+      },
+      "IssueInvoicesRequest": {
+        "type": "object",
+        "properties": {
+          "invoiceIds": {
+            "description": "null = \"Chốt & gửi tất cả\" bản nháp của kỳ; mảng = chốt từng hóa đơn đã chọn (US-7.2 AC4). Bắt buộc có, kể cả null",
+            "minItems": 1,
+            "maxItems": 500,
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          }
+        },
+        "required": [
+          "invoiceIds"
+        ],
+        "example": {
+          "invoiceIds": null
+        }
+      },
+      "IssueInvoicesResult": {
+        "type": "object",
+        "properties": {
+          "issuedCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "skipped": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IssueSkipped"
+            }
+          },
+          "totalAmount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "Tổng tiền các hóa đơn vừa phát hành"
+          },
+          "invoices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IssuedInvoice"
+            }
+          }
+        },
+        "required": [
+          "issuedCount",
+          "skipped",
+          "totalAmount",
+          "invoices"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "issuedCount": 1,
+          "skipped": [
+            {
+              "invoiceId": "019c0a10-0001-7b30-8c01-000000000009",
+              "studentName": "Trần Gia Bảo",
+              "reason": "ZERO_AMOUNT"
+            }
+          ],
+          "totalAmount": 1200000,
+          "invoices": [
+            {
+              "id": "019c0a10-0001-7b30-8c01-000000000001",
+              "code": "TH-25K7Q9",
+              "studentId": "019b2c4f-0001-7b30-8c01-000000000001",
+              "studentName": "Nguyễn Minh Anh",
+              "totalAmount": 1200000,
+              "dueDate": "2027-01-10",
+              "transferNote": "TH 25K7Q9",
+              "qrPayload": "00020101021238570010A000000727012700069704360113…5303704540712000005802VN62130809TH 25K7Q96304A1B2"
+            }
+          ]
+        }
+      },
+      "IssueSkipped": {
+        "type": "object",
+        "properties": {
+          "invoiceId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "studentName": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "ZERO_AMOUNT",
+              "NOT_DRAFT"
+            ],
+            "description": "`ZERO_AMOUNT` = hóa đơn 0 đ, không gửi và không nhắc nợ (US-1.3 AC3, bản nháp vẫn còn). `NOT_DRAFT` = đã phát hành hoặc đã hủy từ trước (chỉ gặp khi chọn `invoiceIds`)"
+          }
+        },
+        "required": [
+          "invoiceId",
+          "studentName",
+          "reason"
+        ],
+        "additionalProperties": false
+      },
+      "IssuedInvoice": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "code": {
+            "type": "string",
+            "pattern": "^TH-[0-9A-HJKMNP-TV-Z]{6}$",
+            "description": "Mã hóa đơn duy nhất trong tenant, 6 ký tự Crockford (không I, L, O, U) sau `TH-`; null khi còn là bản nháp",
+            "example": "TH-25K7Q9"
+          },
+          "studentId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "studentName": {
+            "type": "string"
+          },
+          "totalAmount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "VND, > 0 (hóa đơn 0 đ không bao giờ được phát hành)"
+          },
+          "dueDate": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+          },
+          "transferNote": {
+            "type": "string",
+            "pattern": "^TH [0-9A-HJKMNP-TV-Z]{6}$",
+            "description": "Nội dung chuyển khoản = mã bỏ dấu gạch, thay bằng khoảng trắng (`TH 25K7Q9`): chỉ `[A-Z0-9 ]`, không dấu, ≤ 25 ký tự (US-7.3 AC3). Định dạng cố định để Giai đoạn 2 tự đối soát qua webhook",
+            "example": "TH 25K7Q9"
+          },
+          "qrPayload": {
+            "type": "string",
+            "maxLength": 512,
+            "description": "Chuỗi VietQR chuẩn EMVCo/NAPAS sinh nội bộ bằng `buildVietQrPayload` (có CRC16): đã chứa số tiền `totalAmount` và nội dung `transferNote`. Client chỉ vẽ mã QR từ chuỗi này, không tự ghép"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "studentId",
+          "studentName",
+          "totalAmount",
+          "dueDate",
+          "transferNote",
+          "qrPayload"
+        ],
+        "additionalProperties": false
+      },
+      "Invoice": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "periodId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "periodMonth": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+          },
+          "code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^TH-[0-9A-HJKMNP-TV-Z]{6}$",
+            "description": "Mã hóa đơn duy nhất trong tenant, 6 ký tự Crockford (không I, L, O, U) sau `TH-`; null khi còn là bản nháp",
+            "example": "TH-25K7Q9"
+          },
+          "transferNote": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^TH [0-9A-HJKMNP-TV-Z]{6}$",
+            "description": "Nội dung chuyển khoản = mã bỏ dấu gạch, thay bằng khoảng trắng (`TH 25K7Q9`): chỉ `[A-Z0-9 ]`, không dấu, ≤ 25 ký tự (US-7.3 AC3). Định dạng cố định để Giai đoạn 2 tự đối soát qua webhook",
+            "example": "TH 25K7Q9"
+          },
+          "qrPayload": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 512,
+            "description": "Chuỗi VietQR chuẩn EMVCo/NAPAS sinh nội bộ bằng `buildVietQrPayload` (có CRC16): đã chứa số tiền `totalAmount` và nội dung `transferNote`. Client chỉ vẽ mã QR từ chuỗi này, không tự ghép"
+          },
+          "status": {
+            "$ref": "#/components/schemas/InvoiceStatus"
+          },
+          "studentId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "studentName": {
+            "type": "string"
+          },
+          "totalAmount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "Tổng tiền = max(0, Σ `lines.amount`); phần âm không hấp thụ được chuyển kỳ sau (US-7.6, Sprint 6)"
+          },
+          "dueDate": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+          },
+          "issuedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "payout": {
+            "description": "Null khi còn là bản nháp",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PayoutSnapshot"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "voidedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "voidReason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "replacesInvoiceId": {
+            "description": "Bản nháp được tạo để thay hóa đơn đã hủy (xem `POST /invoices/{id}/void`)",
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "replacementInvoiceId": {
+            "description": "Có khi hóa đơn này đã hủy kèm bản nháp thay thế",
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InvoiceLine"
+            }
+          },
+          "installmentNo": {
+            "description": "Kiểu trọn khóa: đợt của hóa đơn này (n trong n/`installmentCount`). Đợt n là kỳ thứ n kể từ kỳ đầu tiên học viên vào lớp; hết đợt thì kỳ sau không sinh hóa đơn trọn khóa cho ghi danh đó. Null với kiểu khác",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 36
+          },
+          "installmentCount": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 36
+          },
+          "clampedAmount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "Phần âm bị cắt khi Σ `lines.amount` < 0 để `totalAmount` không âm; 0 khi không cắt. Phần này chuyển kỳ sau (US-7.6, Sprint 6)"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          }
+        },
+        "required": [
+          "id",
+          "periodId",
+          "periodMonth",
+          "code",
+          "transferNote",
+          "qrPayload",
+          "status",
+          "studentId",
+          "studentName",
+          "totalAmount",
+          "dueDate",
+          "issuedAt",
+          "payout",
+          "voidedAt",
+          "voidReason",
+          "replacesInvoiceId",
+          "replacementInvoiceId",
+          "lines",
+          "installmentNo",
+          "installmentCount",
+          "clampedAmount",
+          "createdAt"
+        ],
+        "additionalProperties": false,
+        "description": "Hóa đơn của giáo viên. Từ khi rời `draft`, mọi cột tiền bất biến (trigger CSDL): sửa `totalAmount` hay dòng → 409 `INVOICE_IMMUTABLE`",
+        "example": {
+          "id": "019c0a10-0001-7b30-8c01-000000000001",
+          "periodId": "019c0a00-0001-7b30-8c01-000000000001",
+          "periodMonth": "2026-12-01",
+          "code": null,
+          "transferNote": null,
+          "qrPayload": null,
+          "status": "draft",
+          "studentId": "019b2c4f-0001-7b30-8c01-000000000001",
+          "studentName": "Nguyễn Minh Anh",
+          "totalAmount": 150000,
+          "dueDate": "2027-01-10",
+          "issuedAt": null,
+          "payout": null,
+          "voidedAt": null,
+          "voidReason": null,
+          "replacesInvoiceId": null,
+          "replacementInvoiceId": null,
+          "installmentNo": null,
+          "installmentCount": null,
+          "clampedAmount": 0,
+          "lines": [
+            {
+              "id": "019c0a11-0001-7b30-8c01-000000000001",
+              "kind": "session",
+              "description": "Buổi 2026-12-15",
+              "amount": 150000,
+              "charged": true,
+              "notChargedReason": null,
+              "sessionId": "019b2c41-0001-7a10-8a01-000000000001",
+              "sessionDate": "2026-12-15",
+              "className": "Toán 9A",
+              "adjustmentReason": null
+            },
+            {
+              "id": "019c0a11-0001-7b30-8c01-000000000002",
+              "kind": "session",
+              "description": "Buổi 2026-12-17 (không tính)",
+              "amount": 0,
+              "charged": false,
+              "notChargedReason": "excused_not_charged",
+              "sessionId": "019b2c41-0001-7a10-8a01-000000000002",
+              "sessionDate": "2026-12-17",
+              "className": "Toán 9A",
+              "adjustmentReason": null
+            }
+          ],
+          "createdAt": "2026-12-31T02:00:00+07:00"
+        }
+      },
+      "PayoutSnapshot": {
+        "type": "object",
+        "properties": {
+          "bankBin": {
+            "type": "string",
+            "pattern": "^\\d{6}$"
+          },
+          "bankName": {
+            "description": "Tên ngân hàng tra từ bảng BIN NAPAS của server lúc phát hành; null nếu BIN không có trong bảng (client hiện BIN)",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "accountNo": {
+            "type": "string"
+          },
+          "accountName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "bankBin",
+          "bankName",
+          "accountNo",
+          "accountName"
+        ],
+        "additionalProperties": false
+      },
+      "InvoiceLine": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/InvoiceLineKind"
+          },
+          "description": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "integer",
+            "minimum": -100000000000,
+            "maximum": 100000000000,
+            "description": "Có dấu: giảm trừ, miễn giảm và điều chỉnh giảm là số âm; dòng buổi không tính tiền là 0"
+          },
+          "charged": {
+            "type": "boolean",
+            "description": "Dòng `session`: buổi có tính tiền không. Mọi loại dòng khác luôn `true`"
+          },
+          "notChargedReason": {
+            "description": "Có khi `kind = session` và `charged = false`, còn lại null",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SessionNotChargedReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sessionId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "sessionDate": {
+            "description": "Ngày buổi học theo múi giờ tenant; có với dòng `session`",
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+          },
+          "className": {
+            "description": "Lớp phát sinh dòng này (một hóa đơn gộp mọi lớp của học viên trong kỳ); null với dòng không thuộc lớp nào",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "adjustmentReason": {
+            "description": "Lý do của người sửa, bắt buộc và chỉ có với `manual_adjustment`; không liên quan lý do không tính của buổi",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "description",
+          "amount",
+          "charged",
+          "notChargedReason",
+          "sessionId",
+          "sessionDate",
+          "className",
+          "adjustmentReason"
+        ],
+        "additionalProperties": false,
+        "description": "`lines` là nguồn duy nhất của hóa đơn và là SNAPSHOT lúc tính: mở hóa đơn không đọc lại điểm danh, và dòng không đổi sau phát hành (chênh lệch do sửa điểm danh về sau vào kỳ sau, `prev_adjustment`). Kiểu theo buổi: mỗi buổi trong kỳ một dòng `session`, kể cả buổi hủy và buổi bù (0 đ). Kiểu theo tháng và trọn khóa: không có dòng buổi, một dòng gốc (`monthly` đã trừ phần buổi hủy nếu bật `deductCancelled`, hoặc `course_installment`), rồi các dòng `discount` và `manual_adjustment`"
+      },
+      "InvoiceLineKind": {
+        "type": "string",
+        "enum": [
+          "session",
+          "monthly",
+          "course_installment",
+          "carry_over",
+          "prev_adjustment",
+          "discount",
+          "surcharge",
+          "manual_adjustment"
+        ],
+        "description": "Sprint 5 sinh `session`, `monthly`, `course_installment`, `discount`, `manual_adjustment`. `carry_over` và `prev_adjustment` cần số dư chuyển kỳ (US-7.6, Sprint 6); `surcharge` cần US-7.8 (P1). Client coi giá trị lạ như dòng thường"
+      },
+      "SessionNotChargedReason": {
+        "type": "string",
+        "enum": [
+          "excused_not_charged",
+          "unexcused_not_charged",
+          "cancelled",
+          "makeup"
+        ],
+        "description": "`excused_not_charged`/`unexcused_not_charged` = lớp hoặc học viên tắt tính vắng có phép/không phép, `cancelled` = giáo viên hủy buổi, `makeup` = buổi bù không tính thêm tiền (US-7.1 AC3). Ứng với `reason` của `InvoiceCalculator` (trừ `taught`, nghĩa là có tính)"
+      },
+      "CreateInvoiceAdjustmentRequest": {
+        "type": "object",
+        "properties": {
+          "amount": {
+            "type": "integer",
+            "minimum": -1000000000,
+            "maximum": 1000000000,
+            "description": "VND có dấu, ≠ 0: âm = giảm trừ, dương = phụ thu. Giữ nguyên số nhập, không làm tròn 1.000 đ",
+            "example": -100000
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "example": "Giảm học phí buổi học thử"
+          },
+          "adjustmentReason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300,
+            "description": "Bắt buộc (US-7.2 AC3); ghi nhật ký kiểm toán cùng người sửa và giá trị trước/sau"
+          }
+        },
+        "required": [
+          "amount",
+          "description",
+          "adjustmentReason"
+        ],
+        "example": {
+          "amount": -100000,
+          "description": "Giảm học phí buổi học thử",
+          "adjustmentReason": "Buổi 05/12 học thử, đã thỏa thuận với phụ huynh"
+        }
+      },
+      "VoidInvoiceRequest": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300,
+            "description": "Bắt buộc (US-7.3 AC4); ghi nhật ký kiểm toán"
+          },
+          "createReplacementDraft": {
+            "default": false,
+            "description": "true = trong cùng giao dịch tạo một bản nháp mới thay hóa đơn này, tính lại từ điểm danh hiện tại (`replacesInvoiceId` trỏ về hóa đơn hủy). Phát hành thay thế = chốt bản nháp đó như bình thường (Plan §2.6: Sprint 5 chưa có phát hành thay thế một bước)",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "example": {
+          "reason": "Sai số buổi học",
+          "createReplacementDraft": true
+        }
+      },
+      "VoidInvoiceResult": {
+        "type": "object",
+        "properties": {
+          "invoice": {
+            "$ref": "#/components/schemas/Invoice"
+          },
+          "replacementInvoiceId": {
+            "description": "Id bản nháp thay thế khi `createReplacementDraft = true`, ngược lại null",
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          }
+        },
+        "required": [
+          "invoice",
+          "replacementInvoiceId"
+        ],
+        "additionalProperties": false
+      },
+      "FamilyInvoiceList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FamilyInvoiceSummary"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "additionalProperties": false,
+        "description": "Hóa đơn của các con đã liên kết, mới phát hành trước, phân trang con trỏ. Không bao giờ có bản nháp. Hóa đơn đã hủy vẫn có (`status = void`) để link cũ hiện \"đã hủy\" chứ không 404"
+      },
+      "FamilyInvoiceSummary": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "code": {
+            "type": "string",
+            "pattern": "^TH-[0-9A-HJKMNP-TV-Z]{6}$",
+            "description": "Mã hóa đơn duy nhất trong tenant, 6 ký tự Crockford (không I, L, O, U) sau `TH-`; null khi còn là bản nháp",
+            "example": "TH-25K7Q9"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "issued",
+              "pending_confirmation",
+              "partially_paid",
+              "paid",
+              "void"
+            ]
+          },
+          "studentId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "studentName": {
+            "type": "string"
+          },
+          "teacherName": {
+            "type": "string"
+          },
+          "periodMonth": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+          },
+          "totalAmount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "VND"
+          },
+          "dueDate": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+          },
+          "issuedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "status",
+          "studentId",
+          "studentName",
+          "teacherName",
+          "periodMonth",
+          "totalAmount",
+          "dueDate",
+          "issuedAt"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "id": "019c0a10-0001-7b30-8c01-000000000001",
+          "code": "TH-25K7Q9",
+          "status": "issued",
+          "studentId": "019b2c4f-0001-7b30-8c01-000000000001",
+          "studentName": "Nguyễn Minh Anh",
+          "teacherName": "Cô Lan",
+          "periodMonth": "2026-12-01",
+          "totalAmount": 1200000,
+          "dueDate": "2027-01-10",
+          "issuedAt": "2027-01-02T09:00:00+07:00"
+        }
+      },
+      "FamilyInvoice": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "code": {
+            "type": "string",
+            "pattern": "^TH-[0-9A-HJKMNP-TV-Z]{6}$",
+            "description": "Mã hóa đơn duy nhất trong tenant, 6 ký tự Crockford (không I, L, O, U) sau `TH-`; null khi còn là bản nháp",
+            "example": "TH-25K7Q9"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "issued",
+              "pending_confirmation",
+              "partially_paid",
+              "paid",
+              "void"
+            ]
+          },
+          "studentId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "studentName": {
+            "type": "string"
+          },
+          "teacherName": {
+            "type": "string"
+          },
+          "periodMonth": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+          },
+          "totalAmount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "VND"
+          },
+          "dueDate": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+          },
+          "issuedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FamilyInvoiceLine"
+            }
+          },
+          "transferNote": {
+            "type": "string",
+            "pattern": "^TH [0-9A-HJKMNP-TV-Z]{6}$",
+            "description": "Nội dung chuyển khoản = mã bỏ dấu gạch, thay bằng khoảng trắng (`TH 25K7Q9`): chỉ `[A-Z0-9 ]`, không dấu, ≤ 25 ký tự (US-7.3 AC3). Định dạng cố định để Giai đoạn 2 tự đối soát qua webhook",
+            "example": "TH 25K7Q9"
+          },
+          "qrPayload": {
+            "description": "Null khi `status = void` (không được chuyển khoản vào hóa đơn đã hủy)",
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 512
+          },
+          "payout": {
+            "description": "Tài khoản nhận tiền; null khi `status = void` (không còn nơi để chuyển khoản)",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PayoutSnapshot"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "voidedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "status",
+          "studentId",
+          "studentName",
+          "teacherName",
+          "periodMonth",
+          "totalAmount",
+          "dueDate",
+          "issuedAt",
+          "lines",
+          "transferNote",
+          "qrPayload",
+          "payout",
+          "voidedAt"
+        ],
+        "additionalProperties": false,
+        "description": "Chi tiết hóa đơn cho phụ huynh (P03): kỳ, dòng, tổng tiền, hạn, tài khoản nhận, VietQR (US-7.3 AC1). Không có lý do hủy hay lý do điều chỉnh của giáo viên"
+      },
+      "FamilyInvoiceLine": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/InvoiceLineKind"
+          },
+          "className": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "description": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "integer",
+            "minimum": -100000000000,
+            "maximum": 100000000000,
+            "description": "Có dấu như `InvoiceLine.amount`"
+          }
+        },
+        "required": [
+          "kind",
+          "className",
+          "description",
+          "amount"
+        ],
+        "additionalProperties": false
       }
     }
   }

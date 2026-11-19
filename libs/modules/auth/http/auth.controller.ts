@@ -75,7 +75,9 @@ export class AuthController {
     const what =
       body.purpose === 'delete_account'
         ? 'xác nhận xóa tài khoản'
-        : 'đăng nhập';
+        : body.purpose === 'payout_account'
+          ? 'xác nhận tài khoản nhận tiền'
+          : 'đăng nhập';
     await this.mailer.send({
       to: email,
       subject: `${code} là mã ${what} TeachHub của bạn`,

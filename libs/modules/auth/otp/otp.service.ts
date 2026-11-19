@@ -16,7 +16,7 @@ export const OTP = {
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 
 /** Mục đích mã (khớp `purpose` của `POST /auth/otp/send`): mã mục đích này không dùng được cho mục đích kia. */
-export type OtpPurpose = 'login' | 'delete_account';
+export type OtpPurpose = 'login' | 'delete_account' | 'payout_account';
 
 /** So và tiêu mã trong một bước: mã đổi giữa chừng (gửi mã mới) không bị request cũ tiêu nhầm. */
 const CONSUME_IF_MATCH = `if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end return 0`;

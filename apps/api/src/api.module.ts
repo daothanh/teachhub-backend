@@ -16,6 +16,7 @@ import {
 import { AdminModule } from '@teachhub/modules/admin';
 import { AttendanceModule } from '@teachhub/modules/attendance';
 import { AuthModule } from '@teachhub/modules/auth';
+import { BillingModule } from '@teachhub/modules/billing';
 import { ClassesModule } from '@teachhub/modules/classes';
 import { FamilyModule } from '@teachhub/modules/family';
 import { IdentityModule } from '@teachhub/modules/identity';
@@ -47,6 +48,7 @@ import { HealthController } from './health/health.controller.js';
     NotificationsModule,
     InvitesModule,
     FamilyModule,
+    BillingModule,
   ],
   controllers: [AppConfigController, HealthController],
   providers: [

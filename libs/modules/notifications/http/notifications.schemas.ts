@@ -40,11 +40,13 @@ export type PushUnregisterRequest = z.infer<typeof pushUnregisterRequestSchema>;
 
 // ---- GET /notifications · POST /notifications/read ----
 
-/** Sprint 3: báo vắng (US-3.2). Sprint 4 thêm `schedule_changed` (US-2.2); loại khác thêm ở sprint sau. */
+/** Sprint 3: báo vắng (US-3.2). Sprint 4 thêm `schedule_changed` (US-2.2). Sprint 5 thêm `billing_ready` và `invoice_issued`. */
 export const notificationTypeSchema = z.enum([
   'student_absent',
   'student_absent_correction',
   'schedule_changed',
+  'billing_ready',
+  'invoice_issued',
 ]);
 
 const absencePayloadSchema = z
@@ -81,6 +83,40 @@ export const scheduleChangedPayloadSchema = z
   .meta({
     description:
       'Lớp, buổi, giờ mới/cũ và lý do (nếu giáo viên nhập); không có dữ liệu học viên',
+  });
+
+/**
+ * Payload loại `billing_ready` (US-7.2 AC1, gửi giáo viên khi `billing.close` tạo bản nháp). CHƯA nằm trong `notificationSchema`
+ * vì cùng lý do `oasdiff` như `schedule_changed`. Push FCM chỉ data-only (`notificationId`, `type`); text khay do app dựng cố định, không có số tiền hay tên.
+ */
+export const billingReadyPayloadSchema = z
+  .object({
+    periodId: z.uuid(),
+    periodMonth: z.iso.date(),
+    draftCount: z.int().min(0),
+    draftTotalAmount: z.int().min(0).meta({ description: 'VND' }),
+  })
+  .meta({
+    description:
+      'Kỳ và số bản nháp, chỉ có trong hộp thông báo sau khi đăng nhập (`GET /notifications`), không bao giờ trong push. Khay hiện text cố định, không có tên con hay số tiền; text "Học phí tháng X đã sẵn sàng" chỉ dựng khi app đã mở. deepLink `teachhub://billing/periods/{periodId}`',
+  });
+
+/**
+ * Payload loại `invoice_issued` (US-7.3, gửi phụ huynh qua outbox `invoice_issued`, kèm email). CHƯA nằm trong `notificationSchema`.
+ * Push FCM data-only (`notificationId`, `type`); email có tiêu đề cố định, không chứa tên con. Payload này chỉ có trong hộp thông báo sau khi đăng nhập. Không có số tài khoản hay mã QR: phụ huynh mở hóa đơn qua `GET /family/invoices/{invoiceId}`.
+ */
+export const invoiceIssuedPayloadSchema = z
+  .object({
+    invoiceId: z.uuid(),
+    studentId: z.uuid(),
+    studentName: z.string(),
+    periodMonth: z.iso.date(),
+    totalAmount: z.int().min(1).meta({ description: 'VND' }),
+    dueDate: z.iso.date(),
+  })
+  .meta({
+    description:
+      'Hóa đơn mới phát hành của một con; có tên con và số tiền nên không bao giờ nằm trong push hay tiêu đề email, khay hiện text cố định. deepLink `teachhub://invoices/{invoiceId}`',
   });
 
 const notificationBase = z.object({
