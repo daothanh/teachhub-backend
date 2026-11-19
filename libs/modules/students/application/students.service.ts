@@ -2,13 +2,21 @@ import { Injectable } from '@nestjs/common';
 import { and, asc, count, eq, inArray, isNull, sql } from 'drizzle-orm';
 import {
   AppException,
+  guardianInviteStatus,
   type PageQuery,
   type Paginated,
   paginated,
   toLimitOffset,
   uuidv7,
 } from '@teachhub/core';
-import { enrollments, guardians, students, type Tx } from '@teachhub/db';
+import {
+  enrollments,
+  guardians,
+  invites,
+  latestInvitesByGuardian,
+  students,
+  type Tx,
+} from '@teachhub/db';
 import { planGuardianSync } from '../domain/guardian-sync.js';
 import type {
   CreateStudentRequest,
@@ -160,6 +168,17 @@ export class StudentsService {
               inArray(guardians.id, plan.toRemove),
             ),
           );
+        // Gỡ phụ huynh = thu hồi lời mời còn hiệu lực của họ (link/mã dùng được ngay sau đó là lỗ hổng).
+        await tx
+          .update(invites)
+          .set({ status: 'revoked', revokedAt: sql`now()` })
+          .where(
+            and(
+              eq(invites.tenantId, tenantId),
+              inArray(invites.guardianId, plan.toRemove),
+              eq(invites.status, 'pending'),
+            ),
+          );
       }
       for (const g of plan.toUpdate) {
         // Lọc cả tenant_id và student_id: id của học viên/tenant khác không bao giờ khớp.
@@ -242,17 +261,29 @@ export class StudentsService {
     input: GuardianIn[],
   ): Promise<void> {
     if (!input.length) return;
-    await tx.insert(guardians).values(
-      input.map((g) => ({
-        id: uuidv7(),
-        tenantId,
-        studentId,
-        fullName: g.fullName,
-        relation: g.relation,
-        phone: g.phone ?? null,
-        email: g.email ?? null,
-      })),
-    );
+    await tx
+      .insert(guardians)
+      .values(
+        input.map((g) => ({
+          id: uuidv7(),
+          tenantId,
+          studentId,
+          fullName: g.fullName,
+          relation: g.relation,
+          phone: g.phone ?? null,
+          email: g.email ?? null,
+        })),
+      )
+      .catch((e: unknown) => {
+        // Trigger giới hạn 2 phụ huynh chặn hai PATCH song song cùng vượt giới hạn (US-1.6 AC1).
+        const code = (e as { cause?: { code?: string } }).cause?.code;
+        if (code === '23514') {
+          throw new AppException('VALIDATION_FAILED', undefined, {
+            guardians: ['Tối đa 2 phụ huynh.'],
+          });
+        }
+        throw e;
+      });
   }
 
   private async hydrate(
@@ -276,6 +307,12 @@ export class StudentsService {
           )
           .orderBy(asc(guardians.createdAt), asc(guardians.id))
       : [];
+    const latest = await latestInvitesByGuardian(
+      tx,
+      tenantId,
+      gs.map((g) => g.id),
+    );
+    const now = new Date();
     return rows.map((r) => ({
       id: r.id,
       fullName: r.fullName,
@@ -292,9 +329,13 @@ export class StudentsService {
           relation: g.relation as 'father' | 'mother' | 'guardian',
           phone: g.phone,
           email: g.email,
-          // shortcut: chưa có bảng lời mời phụ huynh; S4-BE-03 thay bằng trạng thái và lời mời gần nhất thật.
-          inviteStatus: 'not_invited' as const,
-          latestInvite: null,
+          inviteStatus: guardianInviteStatus(g, latest.get(g.id), now),
+          latestInvite: latest.has(g.id)
+            ? {
+                id: latest.get(g.id)!.id,
+                expiresAt: latest.get(g.id)!.expiresAt.toISOString(),
+              }
+            : null,
         })),
     }));
   }

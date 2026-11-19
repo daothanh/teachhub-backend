@@ -19,3 +19,39 @@ export const latestInviteSchema = z
     description:
       'Lời mời mới nhất (kể cả hết hạn); null nếu chưa mời. Không có token hay mã',
   });
+
+export interface LatestInviteRow {
+  id: string;
+  status: 'pending' | 'used' | 'revoked';
+  expiresAt: Date;
+}
+
+/**
+ * Trạng thái mời của một phụ huynh: đã gắn tài khoản (`userId`) = activated; còn lại theo lời mời mới nhất:
+ * pending còn hạn = invited, pending quá hạn = expired, used = activated, revoked hoặc chưa mời = not_invited.
+ */
+export function guardianInviteStatus(
+  g: { userId: string | null },
+  latest: LatestInviteRow | undefined,
+  now: Date,
+): GuardianInviteStatus {
+  if (g.userId || latest?.status === 'used') return 'activated';
+  if (latest?.status === 'pending') {
+    return latest.expiresAt > now ? 'invited' : 'expired';
+  }
+  return 'not_invited';
+}
+
+const RANK: GuardianInviteStatus[] = [
+  'activated',
+  'invited',
+  'expired',
+  'not_invited',
+];
+
+/** Gộp theo học viên: activated > invited > expired > not_invited. */
+export function mergeInviteStatus(
+  statuses: GuardianInviteStatus[],
+): GuardianInviteStatus {
+  return RANK.find((s) => statuses.includes(s)) ?? 'not_invited';
+}
