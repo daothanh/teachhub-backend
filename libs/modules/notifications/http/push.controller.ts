@@ -24,10 +24,12 @@ export class PushController {
   @ApiOperation({
     summary: 'Đăng ký token FCM của thiết bị (FR-6.2)',
     description:
-      'Upsert theo `deviceToken`: đăng ký lặp không tạo dòng mới; token đang gắn user khác thì chuyển sang user hiện tại. Mọi vai trò dùng chung.',
+      'Upsert theo `deviceToken`: đăng ký lặp không tạo dòng mới; token đang gắn user khác thì chuyển sang user hiện tại. Mọi vai trò dùng chung. `Idempotency-Key` tùy chọn vì lệnh vốn idempotent theo `deviceToken`. ' +
+      '`userId` ở body chỉ để khớp hợp đồng gói `tasco_notifications`: server so với user của token, lệch → 403 `FORBIDDEN`, và không bao giờ dùng `userId` ở body làm danh tính. ' +
+      'Push gửi tới thiết bị là data-only, chỉ có `notificationId` và `type`; không có tên con, lớp hay trạng thái vắng trên khay thông báo. App `GET /notifications` sau khi mở để lấy nội dung.',
   })
   @ApiNoContentResponse()
-  @ApiIdempotencyKey()
+  @ApiIdempotencyKey(false)
   @ApiErrors('VALIDATION_FAILED', 'FORBIDDEN')
   register(
     @Body({ schema: pushRegisterRequestSchema }) _body: PushRegisterRequest,
@@ -43,7 +45,7 @@ export class PushController {
       'Idempotent: token không có hoặc không thuộc user → vẫn 204, không lộ token của người khác.',
   })
   @ApiNoContentResponse()
-  @ApiIdempotencyKey()
+  @ApiIdempotencyKey(false)
   @ApiErrors('VALIDATION_FAILED', 'FORBIDDEN')
   unregister(
     @Body({ schema: pushUnregisterRequestSchema }) _body: PushUnregisterRequest,

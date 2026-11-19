@@ -83,12 +83,8 @@
           "name": "auth_identities_user_id_users_id_fk",
           "tableFrom": "auth_identities",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -242,12 +238,8 @@
           "name": "memberships_user_id_users_id_fk",
           "tableFrom": "memberships",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -255,12 +247,8 @@
           "name": "memberships_tenant_id_tenants_id_fk",
           "tableFrom": "memberships",
           "tableTo": "tenants",
-          "columnsFrom": [
-            "tenant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["tenant_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -268,14 +256,8 @@
           "name": "memberships_tenant_branch_fk",
           "tableFrom": "memberships",
           "tableTo": "branches",
-          "columnsFrom": [
-            "tenant_id",
-            "branch_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
+          "columnsFrom": ["tenant_id", "branch_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -406,12 +388,8 @@
           "name": "refresh_tokens_user_id_users_id_fk",
           "tableFrom": "refresh_tokens",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -421,9 +399,7 @@
         "refresh_tokens_tokenHash_unique": {
           "name": "refresh_tokens_tokenHash_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "token_hash"
-          ]
+          "columns": ["token_hash"]
         }
       },
       "policies": {},
@@ -498,12 +474,8 @@
           "name": "users_last_membership_id_memberships_id_fk",
           "tableFrom": "users",
           "tableTo": "memberships",
-          "columnsFrom": [
-            "last_membership_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["last_membership_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -513,9 +485,7 @@
         "users_email_unique": {
           "name": "users_email_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "email"
-          ]
+          "columns": ["email"]
         }
       },
       "policies": {},
@@ -804,12 +774,8 @@
           "name": "branches_tenant_id_tenants_id_fk",
           "tableFrom": "branches",
           "tableTo": "tenants",
-          "columnsFrom": [
-            "tenant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["tenant_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -819,10 +785,7 @@
         "branches_tenant_id_id_uq": {
           "name": "branches_tenant_id_id_uq",
           "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "id"
-          ]
+          "columns": ["tenant_id", "id"]
         }
       },
       "policies": {},
@@ -935,12 +898,8 @@
           "name": "subscriptions_tenant_id_tenants_id_fk",
           "tableFrom": "subscriptions",
           "tableTo": "tenants",
-          "columnsFrom": [
-            "tenant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["tenant_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -948,12 +907,8 @@
           "name": "subscriptions_plan_code_plans_code_fk",
           "tableFrom": "subscriptions",
           "tableTo": "plans",
-          "columnsFrom": [
-            "plan_code"
-          ],
-          "columnsTo": [
-            "code"
-          ],
+          "columnsFrom": ["plan_code"],
+          "columnsTo": ["code"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -963,9 +918,7 @@
         "subscriptions_tenantId_unique": {
           "name": "subscriptions_tenantId_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id"
-          ]
+          "columns": ["tenant_id"]
         }
       },
       "policies": {},

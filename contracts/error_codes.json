@@ -13,6 +13,7 @@
   "CONSENT_REQUIRED": { "http": 403, "message": "Cần đồng ý xử lý dữ liệu." },
   "NOT_FOUND": { "http": 404, "message": "Không tìm thấy." },
   "STUDENT_POSSIBLE_DUPLICATE": { "http": 409, "message": "Có thể đã có học viên này, vui lòng kiểm tra lại." },
+  "SESSION_CANCELLED": { "http": 409, "message": "Buổi học đã hủy, không điểm danh được." },
   "CONFLICT_STALE": { "http": 409, "message": "Dữ liệu đã thay đổi, vui lòng tải lại." },
   "IDEMPOTENCY_IN_PROGRESS": { "http": 409, "message": "Yêu cầu đang được xử lý." },
   "RATE_LIMITED": { "http": 429, "message": "Bạn thao tác quá nhanh, vui lòng thử lại sau." },

@@ -42,7 +42,7 @@ export class NotificationsController {
   @ApiOperation({
     summary: 'Đánh dấu đã đọc (US-6.1)',
     description:
-      'Id không phải của user hoặc đã đọc được bỏ qua, không báo lỗi (không dò được id của người khác).',
+      'Id trùng trong danh sách chỉ tính một lần. Id của người khác và id không tồn tại không phân biệt: đều bị bỏ qua, không báo lỗi (không dò được id của người khác); id đã đọc cũng bỏ qua.',
   })
   @ApiOkResponse({ standardSchema: markReadResultSchema })
   @ApiIdempotencyKey()

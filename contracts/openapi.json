@@ -3523,7 +3523,7 @@
     },
     "/v1/sessions/{id}/attendance": {
       "get": {
-        "description": "Trả học viên đang học của lớp kèm trạng thái đã ghi (`null` nếu chưa). Chỉ trả họ tên, trạng thái, ghi chú; không trả liên hệ hay phụ huynh. Buổi quá 7 ngày tính theo ngày buổi học: `canEdit = false`. Buổi của tenant khác → 404.",
+        "description": "Trả học viên đang học của lớp kèm trạng thái đã ghi (`null` nếu chưa). Chỉ trả họ tên, trạng thái, ghi chú; không trả liên hệ hay phụ huynh. Buổi quá 7 ngày (tính theo ngày buổi học, múi giờ tenant) hoặc buổi đã hủy: `canEdit = false`, `editableUntil` cho biết hạn. Buổi của tenant khác → 404.",
         "operationId": "attendance_get",
         "parameters": [
           {
@@ -3592,7 +3592,7 @@
     },
     "/v1/attendance/sync": {
       "post": {
-        "description": "Một đường chung cho lưu online, đồng bộ offline và sửa sau (không có PATCH riêng). Tối đa 500 mutation, một buổi mỗi lô. Kết quả theo từng phần tử, HTTP 200 kể cả khi có phần tử `rejected`/`stale`. `clientMutationId` đã nhận → `duplicate`; bản trên server mới hơn (LWW theo `clientUpdatedAt`, có hiệu chỉnh lệch đồng hồ) → `stale`; buổi quá 7 ngày → `rejected` kèm `ATTENDANCE_EDIT_WINDOW_CLOSED`. Buổi đã hủy → 409 `CONFLICT_STALE`. Báo vắng cho phụ huynh gửi sau commit, qua outbox.",
+        "description": "Một đường chung cho lưu online, đồng bộ offline và sửa sau (không có PATCH riêng). Tối đa 500 mutation, một buổi mỗi lô. Kết quả theo từng phần tử, HTTP 200 kể cả khi có phần tử `rejected`/`stale`. `clientMutationId` đã nhận → `duplicate`; bản trên server mới hơn (LWW theo `clientUpdatedAt`, có hiệu chỉnh lệch đồng hồ) → `stale`; buổi quá 7 ngày → `rejected` kèm `ATTENDANCE_EDIT_WINDOW_CLOSED`. Lỗi cả lô: buổi không có → 404 `NOT_FOUND`, buổi đã hủy → 409 `SESSION_CANCELLED`; client đánh dấu lô lỗi, giữ lại cho người dùng xem và không retry vô hạn. Báo vắng cho phụ huynh gửi sau commit, qua outbox.",
         "operationId": "attendance_sync",
         "parameters": [
           {
@@ -3658,7 +3658,7 @@
             }
           },
           "409": {
-            "description": "CONFLICT_STALE\n\nIDEMPOTENCY_IN_PROGRESS",
+            "description": "SESSION_CANCELLED\n\nIDEMPOTENCY_IN_PROGRESS",
             "content": {
               "application/json": {
                 "schema": {
@@ -3691,7 +3691,7 @@
     },
     "/v1/sessions/{id}/attendance/history": {
       "get": {
-        "description": "Đọc từ `audit_logs`: người sửa, thời điểm, trạng thái trước và sau. Mới nhất trước, tối đa 500 dòng.",
+        "description": "Đọc từ `audit_logs`: người sửa, thời điểm, trạng thái trước và sau. Mới nhất trước, phân trang con trỏ (`limit` tối đa 100). Chỉ trả `changedByName`, không trả userId hay email người sửa.",
         "operationId": "attendance_history",
         "parameters": [
           {
@@ -3702,6 +3702,28 @@
               "type": "string",
               "format": "uuid",
               "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "description": "`nextCursor` của trang trước; bỏ trống = trang đầu",
+            "schema": {
+              "description": "`nextCursor` của trang trước; bỏ trống = trang đầu",
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": 20,
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
             }
           }
         ],
@@ -3745,6 +3767,16 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -3767,9 +3799,9 @@
             "name": "cursor",
             "required": false,
             "in": "query",
-            "description": "`nextCursor` của trang trước (mã hóa `(created_at, id)`)",
+            "description": "`nextCursor` của trang trước; bỏ trống = trang đầu",
             "schema": {
-              "description": "`nextCursor` của trang trước (mã hóa `(created_at, id)`)",
+              "description": "`nextCursor` của trang trước; bỏ trống = trang đầu",
               "type": "string",
               "maxLength": 200
             }
@@ -3831,7 +3863,7 @@
     },
     "/v1/notifications/read": {
       "post": {
-        "description": "Id không phải của user hoặc đã đọc được bỏ qua, không báo lỗi (không dò được id của người khác).",
+        "description": "Id trùng trong danh sách chỉ tính một lần. Id của người khác và id không tồn tại không phân biệt: đều bị bỏ qua, không báo lỗi (không dò được id của người khác); id đã đọc cũng bỏ qua.",
         "operationId": "notifications_read",
         "parameters": [
           {
@@ -3910,14 +3942,14 @@
     },
     "/v1/push/register": {
       "post": {
-        "description": "Upsert theo `deviceToken`: đăng ký lặp không tạo dòng mới; token đang gắn user khác thì chuyển sang user hiện tại. Mọi vai trò dùng chung.",
+        "description": "Upsert theo `deviceToken`: đăng ký lặp không tạo dòng mới; token đang gắn user khác thì chuyển sang user hiện tại. Mọi vai trò dùng chung. `Idempotency-Key` tùy chọn vì lệnh vốn idempotent theo `deviceToken`. `userId` ở body chỉ để khớp hợp đồng gói `tasco_notifications`: server so với user của token, lệch → 403 `FORBIDDEN`, và không bao giờ dùng `userId` ở body làm danh tính. Push gửi tới thiết bị là data-only, chỉ có `notificationId` và `type`; không có tên con, lớp hay trạng thái vắng trên khay thông báo. App `GET /notifications` sau khi mở để lấy nội dung.",
         "operationId": "push_register",
         "parameters": [
           {
             "name": "Idempotency-Key",
             "in": "header",
             "description": "UUID, giữ nguyên khi thử lại hoặc phát lại từ outbox",
-            "required": true,
+            "required": false,
             "schema": {
               "type": "string",
               "format": "uuid"
@@ -3999,7 +4031,7 @@
             "name": "Idempotency-Key",
             "in": "header",
             "description": "UUID, giữ nguyên khi thử lại hoặc phát lại từ outbox",
-            "required": true,
+            "required": false,
             "schema": {
               "type": "string",
               "format": "uuid"
@@ -5959,6 +5991,12 @@
           "className": {
             "type": "string"
           },
+          "sessionDate": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
+            "description": "Ngày buổi học theo múi giờ của tenant; cửa sổ 7 ngày tính theo ngày này"
+          },
           "startsAt": {
             "type": "string",
             "format": "date-time",
@@ -5974,7 +6012,13 @@
           },
           "canEdit": {
             "type": "boolean",
-            "description": "false khi buổi quá 7 ngày tính theo ngày buổi học: chỉ xem"
+            "description": "false khi buổi quá 7 ngày theo ngày buổi học hoặc buổi đã hủy: chỉ xem"
+          },
+          "editableUntil": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "description": "Hết cửa sổ sửa (cuối ngày thứ 7 theo múi giờ tenant); app hiện hạn cho người dùng"
           },
           "serverTime": {
             "type": "string",
@@ -5997,9 +6041,11 @@
           "sessionId",
           "classId",
           "className",
+          "sessionDate",
           "startsAt",
           "sessionStatus",
           "canEdit",
+          "editableUntil",
           "serverTime",
           "items",
           "summary"
@@ -6009,9 +6055,11 @@
           "sessionId": "019b2c41-0001-7a10-8a01-000000000001",
           "classId": "019b2c3f-5e01-7c20-9b01-000000000001",
           "className": "Toán 9A",
+          "sessionDate": "2026-12-15",
           "startsAt": "2026-12-15T18:00:00+07:00",
           "sessionStatus": "taught",
           "canEdit": true,
+          "editableUntil": "2026-12-22T23:59:59+07:00",
           "serverTime": "2026-12-15T19:40:00+07:00",
           "items": [
             {
@@ -6019,14 +6067,16 @@
               "fullName": "Nguyễn Minh An",
               "status": "present",
               "note": null,
-              "updatedAt": "2026-12-15T19:35:00+07:00"
+              "clientUpdatedAt": "2026-12-15T19:35:00+07:00",
+              "syncedAt": "2026-12-15T19:35:02+07:00"
             },
             {
               "studentId": "019b2c42-0001-7a10-8a01-000000000002",
               "fullName": "Trần Bảo Châu",
               "status": "unexcused",
               "note": null,
-              "updatedAt": "2026-12-15T19:35:00+07:00"
+              "clientUpdatedAt": "2026-12-15T19:35:00+07:00",
+              "syncedAt": "2026-12-15T19:35:02+07:00"
             }
           ],
           "summary": {
@@ -6063,9 +6113,20 @@
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "maxLength": 500
           },
-          "updatedAt": {
+          "clientUpdatedAt": {
+            "description": "Mốc LWW của bản đang lưu, đã hiệu chỉnh lệch đồng hồ. Mutation chỉ thắng khi `clientUpdatedAt` của nó LỚN HƠN (`>`) mốc này; bằng nhau → `stale`.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "syncedAt": {
+            "description": "Giờ server nhận bản đang lưu",
             "type": [
               "string",
               "null"
@@ -6079,7 +6140,8 @@
           "fullName",
           "status",
           "note",
-          "updatedAt"
+          "clientUpdatedAt",
+          "syncedAt"
         ],
         "additionalProperties": false
       },
@@ -6146,7 +6208,7 @@
           },
           "markSessionTaught": {
             "default": false,
-            "description": "true = chuyển buổi sang \"đã dạy\"; học viên không có trong `mutations` được hiểu là \"Có mặt\"",
+            "description": "true = chuyển buổi sang \"đã dạy\". Buổi đã \"đã dạy\" thì idempotent: bỏ qua cờ, không lỗi `SESSION_ALREADY_TAUGHT`. Học viên không có trong `mutations` được hiểu là \"Có mặt\": server chỉ tạo dòng cho học viên CHƯA có dòng, không ghi đè dòng sẵn có; `summary` đếm cả dòng tạo ngầm.",
             "type": "boolean"
           },
           "mutations": {
@@ -6160,7 +6222,7 @@
                   "type": "string",
                   "format": "uuid",
                   "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-                  "description": "UUID do app sinh, duy nhất toàn cục; gửi lặp → `duplicate`"
+                  "description": "UUID do app sinh. Khóa dedupe là (tenant, `clientMutationId`), phạm vi TENANT. `duplicate` chỉ khi bản đã nhận cùng tenant và cùng `sessionId`; trùng với tenant khác hay buổi khác không bao giờ lộ ra."
                 },
                 "studentId": {
                   "type": "string",
@@ -6240,6 +6302,11 @@
               "cancelled"
             ]
           },
+          "serverTime": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
           "results": {
             "type": "array",
             "items": {
@@ -6248,7 +6315,12 @@
             "description": "Đúng thứ tự và số phần tử của `mutations`"
           },
           "summary": {
-            "$ref": "#/components/schemas/AttendanceSummary"
+            "description": "Cả buổi sau lô này, kể cả dòng \"Có mặt\" tạo ngầm",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AttendanceSummary"
+              }
+            ]
           },
           "parentsToNotify": {
             "type": "integer",
@@ -6260,6 +6332,7 @@
         "required": [
           "sessionId",
           "sessionStatus",
+          "serverTime",
           "results",
           "summary",
           "parentsToNotify"
@@ -6268,15 +6341,23 @@
         "example": {
           "sessionId": "019b2c41-0001-7a10-8a01-000000000001",
           "sessionStatus": "taught",
+          "serverTime": "2026-12-15T19:02:12+07:00",
           "results": [
             {
               "clientMutationId": "019b2c51-0001-7a10-8a01-000000000001",
+              "studentId": "019b2c42-0001-7a10-8a01-000000000002",
               "result": "applied"
             },
             {
               "clientMutationId": "019b2c51-0001-7a10-8a01-000000000002",
-              "result": "rejected",
-              "errorCode": "ATTENDANCE_EDIT_WINDOW_CLOSED"
+              "studentId": "019b2c42-0001-7a10-8a01-000000000003",
+              "result": "stale",
+              "current": {
+                "status": "present",
+                "note": null,
+                "clientUpdatedAt": "2026-12-15T19:03:00+07:00",
+                "recordedByName": "Cô Lan"
+              }
             }
           ],
           "summary": {
@@ -6296,6 +6377,11 @@
             "format": "uuid",
             "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
           },
+          "studentId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
           "result": {
             "type": "string",
             "enum": [
@@ -6304,21 +6390,59 @@
               "stale",
               "rejected"
             ],
-            "description": "applied = đã ghi; duplicate = đã nhận trước đó; stale = bản trên server mới hơn (client tải lại bằng GET); rejected = không ghi, xem `errorCode`"
+            "description": "applied = đã ghi; duplicate = đã nhận trước đó; stale = bản trên server mới hơn hoặc bằng (LWW dùng `>`), client cập nhật theo `current`; rejected = không ghi, xem `errorCode`"
           },
           "errorCode": {
-            "description": "Chỉ có khi `rejected`. NOT_FOUND: học viên không thuộc lớp của buổi.",
+            "description": "Chỉ có khi `rejected`. NOT_FOUND: học viên của tenant khác và học viên không thuộc lớp của buổi cho cùng kết quả, không phân biệt được.",
             "type": "string",
             "enum": [
               "ATTENDANCE_EDIT_WINDOW_CLOSED",
               "READONLY_PLAN_LIMIT",
               "NOT_FOUND"
             ]
+          },
+          "current": {
+            "description": "Bản đang lưu trên server; có khi `stale` và `duplicate`",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AttendanceCurrent"
+              }
+            ]
           }
         },
         "required": [
           "clientMutationId",
+          "studentId",
           "result"
+        ],
+        "additionalProperties": false
+      },
+      "AttendanceCurrent": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/AttendanceStatus"
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 500
+          },
+          "clientUpdatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "recordedByName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "note",
+          "clientUpdatedAt"
         ],
         "additionalProperties": false
       },
@@ -6326,16 +6450,21 @@
         "type": "object",
         "properties": {
           "items": {
-            "maxItems": 500,
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/AttendanceHistoryItem"
-            },
-            "description": "Mới nhất trước; tối đa 500 dòng, không phân trang"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
-          "items"
+          "items",
+          "nextCursor"
         ],
         "additionalProperties": false,
         "example": {
@@ -6355,7 +6484,8 @@
                 "note": "Đến trễ, nhầm trạng thái"
               }
             }
-          ]
+          ],
+          "nextCursor": null
         }
       },
       "AttendanceHistoryItem": {
@@ -6375,6 +6505,7 @@
             "type": "string"
           },
           "changedByName": {
+            "description": "Chỉ tên hiển thị; không trả userId hay email của người sửa",
             "type": [
               "string",
               "null"
@@ -6490,91 +6621,191 @@
         }
       },
       "Notification": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-          },
-          "type": {
-            "type": "string",
-            "enum": [
-              "student_absent",
-              "student_absent_correction"
-            ]
-          },
-          "urgency": {
-            "type": "string",
-            "enum": [
-              "normal",
-              "urgent"
-            ]
-          },
-          "payload": {
+        "oneOf": [
+          {
             "type": "object",
             "properties": {
-              "studentId": {
+              "id": {
                 "type": "string",
                 "format": "uuid",
                 "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
               },
-              "studentName": {
-                "type": "string"
-              },
-              "classId": {
+              "urgency": {
                 "type": "string",
-                "format": "uuid",
-                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                "enum": [
+                  "normal",
+                  "urgent"
+                ]
               },
-              "className": {
-                "type": "string"
-              },
-              "sessionId": {
+              "deepLink": {
+                "description": "Đường dẫn mở đúng màn; thiếu thì client tự suy từ `payload`",
                 "type": "string",
-                "format": "uuid",
-                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                "maxLength": 500
               },
-              "sessionStartsAt": {
+              "readAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              },
+              "createdAt": {
                 "type": "string",
                 "format": "date-time",
                 "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "student_absent"
+                ]
+              },
+              "payload": {
+                "type": "object",
+                "properties": {
+                  "studentId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "studentName": {
+                    "type": "string"
+                  },
+                  "classId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "className": {
+                    "type": "string"
+                  },
+                  "sessionId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "sessionStartsAt": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                  }
+                },
+                "required": [
+                  "studentId",
+                  "studentName",
+                  "classId",
+                  "className",
+                  "sessionId",
+                  "sessionStartsAt"
+                ],
+                "additionalProperties": false,
+                "description": "Chỉ tên con, lớp, giờ buổi và các id để mở đúng màn; không có trạng thái khác hay ghi chú"
               }
             },
             "required": [
-              "studentId",
-              "studentName",
-              "classId",
-              "className",
-              "sessionId",
-              "sessionStartsAt"
+              "id",
+              "urgency",
+              "readAt",
+              "createdAt",
+              "type",
+              "payload"
             ],
-            "additionalProperties": false,
-            "description": "Chỉ tên con, lớp, giờ buổi và các id để mở đúng màn; không có trạng thái khác hay ghi chú"
+            "additionalProperties": false
           },
-          "readAt": {
-            "type": [
-              "string",
-              "null"
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "urgency": {
+                "type": "string",
+                "enum": [
+                  "normal",
+                  "urgent"
+                ]
+              },
+              "deepLink": {
+                "description": "Đường dẫn mở đúng màn; thiếu thì client tự suy từ `payload`",
+                "type": "string",
+                "maxLength": 500
+              },
+              "readAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              },
+              "createdAt": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "student_absent_correction"
+                ]
+              },
+              "payload": {
+                "type": "object",
+                "properties": {
+                  "studentId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "studentName": {
+                    "type": "string"
+                  },
+                  "classId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "className": {
+                    "type": "string"
+                  },
+                  "sessionId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "sessionStartsAt": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                  }
+                },
+                "required": [
+                  "studentId",
+                  "studentName",
+                  "classId",
+                  "className",
+                  "sessionId",
+                  "sessionStartsAt"
+                ],
+                "additionalProperties": false,
+                "description": "Chỉ tên con, lớp, giờ buổi và các id để mở đúng màn; không có trạng thái khác hay ghi chú"
+              }
+            },
+            "required": [
+              "id",
+              "urgency",
+              "readAt",
+              "createdAt",
+              "type",
+              "payload"
             ],
-            "format": "date-time",
-            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time",
-            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+            "additionalProperties": false
           }
-        },
-        "required": [
-          "id",
-          "type",
-          "urgency",
-          "payload",
-          "readAt",
-          "createdAt"
         ],
-        "additionalProperties": false
+        "description": "`payload` theo `type`. Client bỏ qua (không lỗi) phần tử có `type` lạ để tương thích khi server thêm loại mới."
       },
       "MarkNotificationsReadRequest": {
         "type": "object",

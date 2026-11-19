@@ -29,3 +29,16 @@ export function paginated<T>(
 ): Paginated<T> {
   return { items, total, page, pageSize };
 }
+
+/** Query phân trang con trỏ (Mục 5.5): `cursor` mờ do server cấp, `limit` do endpoint giới hạn. */
+export const cursorQuerySchema = (maxLimit: number, defaultLimit = 20) =>
+  z.object({
+    cursor: z.string().max(200).optional().meta({
+      description: '`nextCursor` của trang trước; bỏ trống = trang đầu',
+    }),
+    limit: z.coerce.number().int().min(1).max(maxLimit).default(defaultLimit),
+  });
+
+/** Thân danh sách con trỏ (Mục 5.5): `{ items, nextCursor }`, `nextCursor = null` khi hết. */
+export const cursorPageSchema = <T extends z.ZodType>(item: T) =>
+  z.object({ items: z.array(item), nextCursor: z.string().nullable() });

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { cursorPageSchema, cursorQuerySchema } from '@teachhub/core';
 
 // ---- POST /push/register · /push/unregister (G10, hợp đồng gói tasco_notifications) ----
 
@@ -45,41 +46,52 @@ export const notificationTypeSchema = z.enum([
   'student_absent_correction',
 ]);
 
-export const notificationSchema = z
+const absencePayloadSchema = z
   .object({
-    id: z.uuid(),
-    type: notificationTypeSchema,
-    urgency: z.enum(['normal', 'urgent']),
-    payload: z
-      .object({
-        studentId: z.uuid(),
-        studentName: z.string(),
-        classId: z.uuid(),
-        className: z.string(),
-        sessionId: z.uuid(),
-        sessionStartsAt: z.iso.datetime({ offset: true }),
-      })
-      .meta({
-        description:
-          'Chỉ tên con, lớp, giờ buổi và các id để mở đúng màn; không có trạng thái khác hay ghi chú',
-      }),
-    readAt: z.iso.datetime({ offset: true }).nullable(),
-    createdAt: z.iso.datetime({ offset: true }),
+    studentId: z.uuid(),
+    studentName: z.string(),
+    classId: z.uuid(),
+    className: z.string(),
+    sessionId: z.uuid(),
+    sessionStartsAt: z.iso.datetime({ offset: true }),
   })
-  .meta({ id: 'Notification' });
+  .meta({
+    description:
+      'Chỉ tên con, lớp, giờ buổi và các id để mở đúng màn; không có trạng thái khác hay ghi chú',
+  });
 
-export const notificationsQuerySchema = z.object({
-  cursor: z.string().max(200).optional().meta({
-    description: '`nextCursor` của trang trước (mã hóa `(created_at, id)`)',
+const notificationBase = z.object({
+  id: z.uuid(),
+  urgency: z.enum(['normal', 'urgent']),
+  deepLink: z.string().max(500).optional().meta({
+    description: 'Đường dẫn mở đúng màn; thiếu thì client tự suy từ `payload`',
   }),
-  limit: z.coerce.number().int().min(1).max(50).default(20),
+  readAt: z.iso.datetime({ offset: true }).nullable(),
+  createdAt: z.iso.datetime({ offset: true }),
 });
+
+export const notificationSchema = z
+  .discriminatedUnion('type', [
+    notificationBase.extend({
+      type: z.literal('student_absent'),
+      payload: absencePayloadSchema,
+    }),
+    notificationBase.extend({
+      type: z.literal('student_absent_correction'),
+      payload: absencePayloadSchema,
+    }),
+  ])
+  .meta({
+    id: 'Notification',
+    description:
+      '`payload` theo `type`. Client bỏ qua (không lỗi) phần tử có `type` lạ để tương thích khi server thêm loại mới.',
+  });
+
+export const notificationsQuerySchema = cursorQuerySchema(50);
 export type NotificationsQuery = z.infer<typeof notificationsQuerySchema>;
 
-export const notificationsResponseSchema = z
-  .object({
-    items: z.array(notificationSchema),
-    nextCursor: z.string().nullable(),
+export const notificationsResponseSchema = cursorPageSchema(notificationSchema)
+  .extend({
     unreadCount: z.int().min(0).meta({
       description: 'Số chưa đọc của vai trò đang mở, dùng cho huy hiệu',
     }),
