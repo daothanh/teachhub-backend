@@ -13,7 +13,7 @@ apps/worker/src/     main.ts, worker.module.ts
 libs/core/           config (zod), CoreModule (config + pino), AppException, GlobalExceptionFilter, validationPipe, request id, RequestContext, phân trang
 libs/db/             DbModule (pg Pool + Drizzle), TxService (BEGIN + SET LOCAL app.user_id), schema/, migrations/
 libs/infra/          RedisModule, ObjectStorage (kho S3: MinIO/R2); sau này: FCM, Web Push, SES, PDF, Excel
-libs/modules/        auth, identity, tenancy (Sprint 1); classes, students, schedule, admin và onboarding/center-waitlist trong tenancy (hợp đồng Sprint 2, thân hàm trả 501 tới S2-BE-*), … — mỗi module: http/ application/ domain/ infrastructure/ jobs/ index.ts
+libs/modules/        auth, identity, tenancy (Sprint 1); classes, students, schedule, admin và onboarding/center-waitlist trong tenancy (hợp đồng Sprint 2, thân hàm trả 501 tới S2-BE-*); attendance, notifications (hợp đồng Sprint 3, 501 tới S3-BE-*), … — mỗi module: http/ application/ domain/ infrastructure/ jobs/ index.ts
 docs/adr/            quyết định kiến trúc backend (ADR-TH-BE-xxx)
 contracts/           error_codes.json (nguồn duy nhất cho API, web, app)
 docker/              Dockerfile (api + worker + target migrate), postgres-init/ (vai trò DB local)

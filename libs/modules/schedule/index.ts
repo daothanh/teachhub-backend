@@ -4,6 +4,7 @@ export { ScheduleService } from './application/schedule.service.js';
 export { ScheduleRulesReader } from './application/schedule-rules.reader.js';
 export {
   scheduleRuleSchema,
+  sessionStatusSchema,
   type ScheduleRule,
 } from './http/schedule.schemas.js';
 export { localDate } from './domain/zoned-time.js';

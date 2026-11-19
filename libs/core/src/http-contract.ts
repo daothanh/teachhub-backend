@@ -65,11 +65,11 @@ export const ApiPlanLimitExceeded = () =>
   );
 
 /** Lệnh ghi nhận `Idempotency-Key` (Mục 5.1): một khóa cho một ý định, giữ nguyên khi retry. */
-export function ApiIdempotencyKey() {
+export function ApiIdempotencyKey(required = true) {
   return applyDecorators(
     ApiHeader({
       name: 'Idempotency-Key',
-      required: true,
+      required,
       description: 'UUID, giữ nguyên khi thử lại hoặc phát lại từ outbox',
       schema: { type: 'string', format: 'uuid' },
     }),
