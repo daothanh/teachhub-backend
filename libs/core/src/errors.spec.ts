@@ -33,32 +33,56 @@ describe('toErrorBody', () => {
 });
 
 describe('loggable', () => {
-  it('lỗi truy vấn Drizzle: bỏ params (PII), chỉ giữ lỗi gốc của driver', () => {
-    const driver = new Error('duplicate key value violates unique constraint');
-    const drizzleErr = Object.assign(
-      new Error('Failed query: insert … params: Nguyễn Văn A,0912345678'),
+  const PII = ['Nguyễn Văn A', '0912345678'];
+  /** Mọi thứ log có thể in ra: message, stack và các trường tự có của object. */
+  const dump = (e: unknown) =>
+    JSON.stringify([
+      (e as Error).message,
+      (e as Error).stack,
+      Object.fromEntries(
+        Object.getOwnPropertyNames(e).map((k) => [k, (e as never)[k]]),
+      ),
+    ]);
+
+  it('lỗi truy vấn Drizzle có lỗi gốc: không còn params/detail (PII) ở message, stack hay trường nào', () => {
+    const driver = Object.assign(
+      new Error('duplicate key value violates unique constraint "x"'),
       {
-        query: 'insert …',
-        params: ['Nguyễn Văn A', '0912345678'],
-        cause: driver,
+        code: '23505',
+        constraint: 'x',
+        detail: 'Key (full_name)=(Nguyễn Văn A) already exists.',
       },
     );
-    expect(loggable(drizzleErr)).toBe(driver);
-    const other = new Error('x');
-    expect(loggable(other)).toBe(other);
+    const drizzleErr = Object.assign(
+      new Error(`Failed query: insert …\nparams: ${PII.join(',')}`),
+      { query: 'insert …', params: PII, cause: driver },
+    );
+    const out = loggable(drizzleErr) as Error;
+    expect(out.message).toBe(driver.message);
+    expect(out).toMatchObject({ code: '23505', constraint: 'x' });
+    expect(out).not.toHaveProperty('detail');
+    expect(out).not.toHaveProperty('params');
+    expect(out.stack).toMatch(/^Error: duplicate key[^\n]*\n\s+at /);
+    for (const v of PII) expect(dump(out)).not.toContain(v);
   });
 
-  it('lỗi truy vấn không có lỗi gốc: vẫn không còn params/query/văn bản params', () => {
+  it('lỗi truy vấn không có lỗi gốc: stack dựng lại từ message đã cắt, không dòng nào chứa params', () => {
     const err = Object.assign(
-      new Error('Failed query: insert …\nparams: Nguyễn Văn A,0912345678'),
-      { query: 'insert …', params: ['Nguyễn Văn A', '0912345678'] },
+      new Error(`Failed query: insert …\nparams: ${PII.join(',')}`),
+      { query: 'insert …', params: PII },
     );
+    expect(err.stack).toContain('0912345678'); // stack gốc quả có PII ở dòng đầu
     const out = loggable(err) as Error;
+    expect(out.message).toBe('Failed query: insert …');
+    expect(out.stack).toContain('\n    at ');
     expect(out).not.toHaveProperty('params');
     expect(out).not.toHaveProperty('query');
-    expect(
-      JSON.stringify([out.message, out.stack?.split('\n')[0]]),
-    ).not.toMatch(/0912345678|Nguyễn/);
+    for (const v of PII) expect(dump(out)).not.toContain(v);
+  });
+
+  it('lỗi khác giữ nguyên', () => {
+    const other = new Error('x');
+    expect(loggable(other)).toBe(other);
   });
 });
 

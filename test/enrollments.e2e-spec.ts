@@ -244,7 +244,9 @@ describe('enrollments + roster API', () => {
     const c = await newClass(A, 'Song song');
     const s = await newStudent(A, 'Lê Song Song');
     const [r1, r2] = await Promise.all([enroll(A, c, s), enroll(A, c, s)]);
-    expect([r1.statusCode, r2.statusCode].sort()).toEqual([200, 201]);
+    expect([r1.statusCode, r2.statusCode].sort((a, b) => a - b)).toEqual([
+      200, 201,
+    ]);
     expect(r1.json().id).toBe(r2.json().id);
     expect(
       await count(

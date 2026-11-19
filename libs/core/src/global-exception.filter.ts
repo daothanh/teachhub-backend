@@ -51,8 +51,9 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 }
 
 /**
- * Lỗi truy vấn của Drizzle mang theo cả câu SQL lẫn `params` (họ tên, SĐT học viên…): chỉ log lỗi gốc của driver;
- * không có lỗi gốc thì log bản sao không còn `params`/`query`.
+ * Lỗi truy vấn của Drizzle mang theo cả câu SQL lẫn `params` (họ tên, SĐT học viên…), và lỗi gốc của driver có
+ * `detail` kiểu `Key (full_name)=(…)`. Log chỉ nhận bản dựng lại: tên lỗi, message đã cắt phần `params:`, các frame
+ * của stack gốc (không dòng đầu, vì dòng đầu chứa message gốc), cùng `code`/`constraint` của driver.
  */
 export function loggable(exception: unknown): unknown {
   if (
@@ -61,10 +62,19 @@ export function loggable(exception: unknown): unknown {
   ) {
     return exception;
   }
-  if (exception.cause) return exception.cause;
-  const safe = new Error(exception.message.split('\nparams:')[0]);
-  safe.name = exception.name;
-  safe.stack = exception.stack;
+  const src = exception.cause instanceof Error ? exception.cause : exception;
+  const { code, constraint } = src as { code?: unknown; constraint?: unknown };
+  const safe = Object.assign(new Error(src.message.split('\nparams:')[0]), {
+    name: src.name,
+    ...(typeof code === 'string' && { code }),
+    ...(typeof constraint === 'string' && { constraint }),
+  });
+  safe.stack =
+    `${safe.name}: ${safe.message}\n` +
+    (src.stack ?? '')
+      .split('\n')
+      .filter((l) => /^\s+at /.test(l))
+      .join('\n');
   return safe;
 }
 
