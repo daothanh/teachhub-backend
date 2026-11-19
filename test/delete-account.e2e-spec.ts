@@ -398,6 +398,18 @@ describe('xóa tài khoản: DELETE /v1/me', () => {
     await expect(
       asUser(`select app_private.delete_account()`, []),
     ).rejects.toThrow();
+    await expect(
+      asUser(
+        `select * from app_private.create_teacher_workspace($1, $2, $3, $4)`,
+        [randomUUID(), randomUUID(), randomUUID(), randomUUID()],
+      ),
+    ).rejects.toThrow();
+    await expect(
+      asUser(
+        `insert into center_waitlist (id, user_id, center_name, teacher_count) values ($1, $2, 'X', 1)`,
+        [randomUUID(), parent],
+      ),
+    ).rejects.toThrow();
     await appDb.end();
     expect(
       (await q(`select 1 from memberships where user_id = $1`, [parent]))
@@ -452,5 +464,31 @@ describe('xóa tài khoản: DELETE /v1/me', () => {
         await q(`select deleted_at from tenants where id = $1`, [solo.tenantId])
       )[0].deleted_at,
     ).not.toBeNull();
+  });
+
+  it('refresh token còn sót của user đã xóa → invalid (401), không xoay thêm token', async () => {
+    const u = await seedTenant(t.worker);
+    const email = await emailOf(u.userId);
+    const session = (
+      await login(email, await otp.issue(email, 'login'))
+    ).json();
+    // Giả lập token sống sót: đánh dấu xóa thẳng ở CSDL, không qua delete_account.
+    await t.worker.query(`update users set deleted_at = now() where id = $1`, [
+      u.userId,
+    ]);
+    const res = await t.app.inject({
+      method: 'POST',
+      url: '/v1/auth/refresh',
+      payload: { refresh_token: session.refresh_token },
+    });
+    expect(res.statusCode).toBe(401);
+    expect(
+      (
+        await q(
+          `select count(*)::int n from refresh_tokens where user_id = $1`,
+          [u.userId],
+        )
+      )[0].n,
+    ).toBe(1);
   });
 });

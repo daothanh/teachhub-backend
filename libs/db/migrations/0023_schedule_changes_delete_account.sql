@@ -122,3 +122,101 @@ end;
 $$;
 --> statement-breakpoint
 revoke execute on function app_private.delete_account(boolean) from teachhub_worker, teachhub_readonly, public;
+
+--> statement-breakpoint
+-- Vòng sửa 2: mọi đường tạo/làm sống dữ liệu của user phải kiểm users.deleted_at và tuần tự hóa với delete_account
+-- (vốn khóa users `for update`), để token cũ hay request đang chạy dở không dựng lại dữ liệu sau khi xóa.
+create or replace function app_private.create_teacher_workspace(
+  p_tenant_id uuid, p_branch_id uuid, p_membership_id uuid, p_subscription_id uuid
+) returns table (tenant_id uuid, membership_id uuid, created boolean)
+language plpgsql security definer set search_path = '' as $$
+declare
+  uid uuid := nullif(current_setting('app.user_id', true), '')::uuid;
+  t_name text;
+begin
+  if uid is null then
+    raise exception 'create_teacher_workspace: thiếu app.user_id' using errcode = '42501';
+  end if;
+  perform 1 from public.users u where u.id = uid and u.deleted_at is null for update;
+  if not found then
+    raise exception 'create_teacher_workspace: tài khoản không còn' using errcode = '42501';
+  end if;
+  perform pg_advisory_xact_lock(hashtextextended('workspace:' || uid::text, 0));
+
+  return query
+    select m.tenant_id, m.id, false
+      from public.memberships m join public.tenants t on t.id = m.tenant_id
+     where m.user_id = uid and m.role = 'tenant_owner' and m.status = 'active' and t.type = 'teacher'
+     order by m.created_at limit 1;
+  if found then
+    return;
+  end if;
+
+  select coalesce(u.display_name, split_part(u.email, '@', 1), 'Không gian của tôi') into t_name
+    from public.users u where u.id = uid;
+  insert into public.tenants (id, type, name, created_by) values (p_tenant_id, 'teacher', t_name, uid);
+  insert into public.branches (id, tenant_id, name, is_default) values (p_branch_id, p_tenant_id, 'Mặc định', true);
+  insert into public.memberships (id, user_id, role, tenant_id) values (p_membership_id, uid, 'tenant_owner', p_tenant_id);
+  insert into public.subscriptions (id, tenant_id, plan_code) values (p_subscription_id, p_tenant_id, 'free');
+  update public.users set memberships_version = memberships_version + 1 where id = uid;
+  return query select p_tenant_id, p_membership_id, true;
+end;
+$$;
+--> statement-breakpoint
+-- Khóa users trước token (cùng thứ tự với delete_account: users rồi refresh_tokens) để không kẹt khóa chéo.
+create or replace function app_private.rotate_refresh_token(p_hash text, p_new_id uuid, p_new_hash text)
+returns table (status text, user_id uuid, session_id uuid)
+language plpgsql security definer set search_path = '' as $$
+declare
+  r public.refresh_tokens%rowtype;
+  uid uuid;
+  family_start timestamptz;
+begin
+  select t.user_id into uid from public.refresh_tokens t where t.token_hash = p_hash;
+  if not found then
+    return query select 'invalid', null::uuid, null::uuid;
+    return;
+  end if;
+  perform 1 from public.users u where u.id = uid and u.deleted_at is null for share;
+  if not found then
+    return query select 'invalid', null::uuid, null::uuid;
+    return;
+  end if;
+  select * into r from public.refresh_tokens t where t.token_hash = p_hash for update;
+  if not found then
+    return query select 'invalid', null::uuid, null::uuid;
+    return;
+  end if;
+  if r.revoked_at is not null then
+    update public.refresh_tokens t set revoked_at = now()
+     where t.family_id = r.family_id and t.revoked_at is null;
+    return query select 'reused', r.user_id, r.session_id;
+    return;
+  end if;
+  select min(t.created_at) into family_start from public.refresh_tokens t where t.family_id = r.family_id;
+  if r.expires_at <= now() or family_start + interval '90 days' <= now() then
+    update public.refresh_tokens t set revoked_at = now()
+     where t.family_id = r.family_id and t.revoked_at is null;
+    return query select 'expired', r.user_id, r.session_id;
+    return;
+  end if;
+
+  insert into public.refresh_tokens (id, user_id, session_id, family_id, token_hash, device_info, expires_at)
+  values (p_new_id, r.user_id, r.session_id, r.family_id, p_new_hash, r.device_info,
+          least(now() + interval '30 days', family_start + interval '90 days'));
+  update public.refresh_tokens t set revoked_at = now(), replaced_by = p_new_id where t.id = r.id;
+  return query select 'ok', r.user_id, r.session_id;
+end;
+$$;
+--> statement-breakpoint
+-- shortcut: classes_staff_all vẫn cho insert vào tenant đã ẩn danh (deleted_at); membership của staff bị xóa cùng tài khoản
+-- nên staff_tenant_ids() không còn trả tenant đó, chỉ còn tenant_owner đã xóa mới chạm được và họ đã bị chặn ở các lớp trên.
+-- Nâng cấp khi có luồng khác giữ membership trên tenant đã xóa.
+drop policy center_waitlist_self on center_waitlist;
+--> statement-breakpoint
+create policy center_waitlist_self on center_waitlist for all to teachhub_app
+  using (user_id = nullif(current_setting('app.user_id', true), '')::uuid)
+  with check (
+    user_id = nullif(current_setting('app.user_id', true), '')::uuid
+    and exists (select 1 from users u where u.id = center_waitlist.user_id and u.deleted_at is null)
+  );

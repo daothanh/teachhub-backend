@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { Redis } from 'ioredis';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { AppException, uuidv7 } from '@teachhub/core';
@@ -31,15 +31,26 @@ const newRefreshToken = () => randomBytes(32).toString('base64url');
 /** Phiên đăng nhập: mở (sau khi xác minh danh tính), làm mới (xoay vòng), đóng (đăng xuất). */
 @Injectable()
 export class SessionService {
+  private readonly log = new Logger(SessionService.name);
+
   constructor(
     private readonly tx: TxService,
     private readonly jwt: JwtKeysService,
     @Inject(REDIS) private readonly redis: Redis,
   ) {}
 
-  /** Sau DELETE /me: token cũ (≤ 15 phút) không dùng được nữa. */
+  /**
+   * Sau DELETE /me: access token cũ (≤ 15 phút) bị guard chặn. Chỉ là lớp phụ, TTL ngắn hơn refresh token; lớp chính là
+   * kiểm `users.deleted_at` trong CSDL. Lỗi Redis không được làm hỏng lệnh xóa đã commit.
+   */
   async markDeleted(userId: string): Promise<void> {
-    await this.redis.set(deletedKey(userId), '1', 'EX', ACCESS_TTL_SEC + 60);
+    try {
+      await this.redis.set(deletedKey(userId), '1', 'EX', ACCESS_TTL_SEC + 60);
+    } catch (e) {
+      this.log.error(
+        `không ghi được khóa tài khoản đã xóa: ${e instanceof Error ? e.name : 'lỗi'}`,
+      );
+    }
   }
 
   async open(userId: string): Promise<LoginResponse> {
