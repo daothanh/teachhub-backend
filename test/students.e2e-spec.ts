@@ -248,10 +248,9 @@ describe('students API', () => {
       `select full_name, phone, student_id from guardians where id = any($1)`,
       [[sameTenant.guardians[0].id, foreign.guardians[0].id]],
     );
-    expect(rows.rows.map((r) => r.full_name).sort()).toEqual([
-      'PH Ba',
-      'PH Hai',
-    ]);
+    expect(
+      rows.rows.map((r) => r.full_name).sort((a, b) => a.localeCompare(b)),
+    ).toEqual(['PH Ba', 'PH Hai']);
     expect((await guardianRows(mine.id)).map((x) => x.full_name)).toEqual([
       'PH Một',
     ]);

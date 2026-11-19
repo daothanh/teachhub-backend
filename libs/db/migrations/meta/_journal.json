@@ -92,6 +92,13 @@
       "when": 1795073392357,
       "tag": "0012_students",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1795073917008,
+      "tag": "0013_schedule",
+      "breakpoints": true
     }
   ]
 }
