@@ -391,7 +391,7 @@ describe('vòng sửa review: biên, tràn số, validate', () => {
     expect(calculateInvoice(course({ classRules: nul })).total).toBe(2_400_000);
   });
 
-  it('tràn số: fee=5e12, remaining=2000 ném RangeError, không ra số sai', () => {
+  it('fee=5e12 không tràn nhờ BigInt (total = 5e12); vượt safe integer thì ném RangeError', () => {
     expect(() =>
       calculateInvoice(
         course({
@@ -674,3 +674,27 @@ describe('lý do tính / không tính của từng buổi (US-7.2 AC2)', () => {
   });
 });
 
+describe('validate chia đợt', () => {
+  it.each([0, 37, 1.5, NaN, -1])('installments=%s ném RangeError', (n) => {
+    expect(() => splitInstallments(1_000_000, n)).toThrow(RangeError);
+    expect(() =>
+      calculateInvoice({
+        ...base,
+        feeType: 'course',
+        feeAmount: 1_000_000,
+        totalSessions: 10,
+        sessions: [],
+        classRules: { installments: n },
+      }),
+    ).toThrow(RangeError);
+  });
+  it('installments=36 hợp lệ', () => {
+    expect(splitInstallments(36_000_000, 36)).toHaveLength(36);
+  });
+  it.each([-1000, 1.5, NaN])(
+    'splitInstallments total=%s ném RangeError',
+    (t) => {
+      expect(() => splitInstallments(t, 2)).toThrow(RangeError);
+    },
+  );
+});
