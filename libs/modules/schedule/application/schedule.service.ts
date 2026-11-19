@@ -76,10 +76,24 @@ export class ScheduleService {
       const ids = dropped.map((r) => r.id);
       const gone = await tx
         .delete(sessions)
-        .where(this.futurePlanned(classId, now, inArray(sessions.ruleId, ids)))
+        .where(
+          this.futurePlanned(
+            tenantId,
+            classId,
+            now,
+            inArray(sessions.ruleId, ids),
+          ),
+        )
         .returning({ id: sessions.id });
       removed += gone.length;
-      await tx.delete(scheduleRules).where(inArray(scheduleRules.id, ids));
+      await tx
+        .delete(scheduleRules)
+        .where(
+          and(
+            eq(scheduleRules.tenantId, tenantId),
+            inArray(scheduleRules.id, ids),
+          ),
+        );
     }
     const rules = body.rules.map((r) => {
       const kept = byKey.get(ruleKey(r));
@@ -99,76 +113,24 @@ export class ScheduleService {
       );
     }
 
-    // 2. Buổi mong muốn (chỉ tương lai) so với buổi dự kiến đang có.
-    const desired = generateSessions(rules, {
-      classStart: cls.startDate,
-      classEnd: cls.endDate,
-      today: localDate(now, tz),
+    const { generated, removed: gone } = await this.reconcile(
+      tx,
+      tenantId,
+      cls,
+      now,
       tz,
-    }).filter((s) => s.startsAt > now);
-    const wantedKeys = new Set(
-      desired.map((s) => sessionKey(s.ruleId, s.sessionDate)),
     );
-    const ruleIds = rules.map((r) => r.id);
-    if (ruleIds.length) {
-      const planned = await tx
-        .select({
-          id: sessions.id,
-          ruleId: sessions.ruleId,
-          sessionDate: sessions.sessionDate,
-        })
-        .from(sessions)
-        .where(
-          this.futurePlanned(classId, now, inArray(sessions.ruleId, ruleIds)),
-        );
-      const stale = planned
-        .filter((s) => !wantedKeys.has(sessionKey(s.ruleId, s.sessionDate)))
-        .map((s) => s.id);
-      if (stale.length) {
-        await tx.delete(sessions).where(inArray(sessions.id, stale));
-        removed += stale.length;
-      }
-    }
-    // Buổi đã có (mọi trạng thái, kể cả đã dạy hôm nay) không sinh lại; unique (rule_id, session_date) giữ lưới an toàn.
-    const have = ruleIds.length
-      ? await tx
-          .select({
-            ruleId: sessions.ruleId,
-            sessionDate: sessions.sessionDate,
-          })
-          .from(sessions)
-          .where(inArray(sessions.ruleId, ruleIds))
-      : [];
-    const haveKeys = new Set(
-      have.map((s) => sessionKey(s.ruleId, s.sessionDate)),
-    );
-    const missing = desired.filter(
-      (s) => !haveKeys.has(sessionKey(s.ruleId, s.sessionDate)),
-    );
-    let generated = 0;
-    if (missing.length) {
-      const rows = await tx
-        .insert(sessions)
-        .values(
-          missing.map((s) => ({
-            id: uuidv7(),
-            tenantId,
-            classId,
-            ruleId: s.ruleId,
-            sessionDate: s.sessionDate,
-            startsAt: s.startsAt,
-            endsAt: s.endsAt,
-          })),
-        )
-        .onConflictDoNothing()
-        .returning({ id: sessions.id });
-      generated = rows.length;
-    }
+    removed += gone;
 
     const final = await tx
       .select()
       .from(scheduleRules)
-      .where(eq(scheduleRules.classId, classId))
+      .where(
+        and(
+          eq(scheduleRules.tenantId, tenantId),
+          eq(scheduleRules.classId, classId),
+        ),
+      )
       .orderBy(asc(scheduleRules.weekday), asc(scheduleRules.startTime));
     return {
       rules: final.map(toRule),
@@ -216,8 +178,14 @@ export class ScheduleService {
     };
   }
 
-  private futurePlanned(classId: string, now: Date, extra: SQL) {
+  private futurePlanned(
+    tenantId: string,
+    classId: string,
+    now: Date,
+    extra: SQL,
+  ) {
     return and(
+      eq(sessions.tenantId, tenantId),
       eq(sessions.classId, classId),
       eq(sessions.status, 'planned'),
       eq(sessions.isMakeup, false),
@@ -227,7 +195,113 @@ export class ScheduleService {
     );
   }
 
-  private async timezone(tx: Tx, tenantId: string): Promise<string> {
+  /**
+   * Đối chiếu buổi tương lai của lớp với bộ quy tắc hiện có: xóa buổi `planned` không còn khớp, sinh buổi còn thiếu.
+   * Gọi trong giao dịch đã khóa dòng lớp. Idempotent: chạy lại không sinh trùng. Buổi đã có (mọi trạng thái, kể cả
+   * `cancelled` hoặc mồ côi `rule_id`) tính theo (lớp, ngày, giờ bắt đầu) nên không bị sinh lại thành buổi dự kiến.
+   */
+  async reconcile(
+    tx: Tx,
+    tenantId: string,
+    cls: { id: string; startDate: string; endDate: string | null },
+    now: Date,
+    tz: string,
+  ): Promise<{ generated: number; removed: number }> {
+    const rules = (
+      await tx
+        .select()
+        .from(scheduleRules)
+        .where(
+          and(
+            eq(scheduleRules.tenantId, tenantId),
+            eq(scheduleRules.classId, cls.id),
+          ),
+        )
+    ).map(toRule);
+    if (!rules.length) return { generated: 0, removed: 0 };
+    const desired = generateSessions(rules, {
+      classStart: cls.startDate,
+      classEnd: cls.endDate,
+      today: localDate(now, tz),
+      tz,
+    }).filter((s) => s.startsAt > now);
+    const wantedKeys = new Set(
+      desired.map((s) => sessionKey(s.ruleId, s.sessionDate)),
+    );
+    const planned = await tx
+      .select({
+        id: sessions.id,
+        ruleId: sessions.ruleId,
+        sessionDate: sessions.sessionDate,
+      })
+      .from(sessions)
+      .where(
+        this.futurePlanned(
+          tenantId,
+          cls.id,
+          now,
+          inArray(
+            sessions.ruleId,
+            rules.map((r) => r.id),
+          ),
+        ),
+      );
+    const stale = planned
+      .filter((s) => !wantedKeys.has(sessionKey(s.ruleId, s.sessionDate)))
+      .map((s) => s.id);
+    if (stale.length) {
+      await tx
+        .delete(sessions)
+        .where(
+          and(eq(sessions.tenantId, tenantId), inArray(sessions.id, stale)),
+        );
+    }
+    let generated = 0;
+    if (desired.length) {
+      const have = await tx
+        .select({ date: sessions.sessionDate, startsAt: sessions.startsAt })
+        .from(sessions)
+        .where(
+          and(
+            eq(sessions.tenantId, tenantId),
+            eq(sessions.classId, cls.id),
+            between(
+              sessions.sessionDate,
+              desired[0]!.sessionDate,
+              desired[desired.length - 1]!.sessionDate,
+            ),
+          ),
+        );
+      const haveKeys = new Set(
+        have.map((s) => `${s.date}|${s.startsAt.getTime()}`),
+      );
+      const missing = desired.filter(
+        (s) => !haveKeys.has(`${s.sessionDate}|${s.startsAt.getTime()}`),
+      );
+      if (missing.length) {
+        const rows = await tx
+          .insert(sessions)
+          .values(
+            missing.map((s) => ({
+              id: uuidv7(),
+              tenantId,
+              classId: cls.id,
+              ruleId: s.ruleId,
+              sessionDate: s.sessionDate,
+              startsAt: s.startsAt,
+              endsAt: s.endsAt,
+            })),
+          )
+          .onConflictDoNothing()
+          .returning({ id: sessions.id });
+        generated = rows.length;
+      }
+    }
+    return { generated, removed: stale.length };
+  }
+
+  /** Múi giờ của tenant (mặc định `Asia/Ho_Chi_Minh`). */
+  async timezone(tx: Tx, tenantId: string): Promise<string> {
     const [t] = await tx
       .select({ tz: tenants.timezone })
       .from(tenants)

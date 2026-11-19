@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { startTestApp, type TestApp } from './support/app.js';
-import { seedTenant, type SeededTenant } from './support/seed.js';
+import { seedMember, seedTenant, type SeededTenant } from './support/seed.js';
 
 type Who = SeededTenant & { token: string };
 
@@ -304,5 +304,36 @@ describe('students API', () => {
     expect([r1.statusCode, r2.statusCode]).toEqual([201, 201]);
     expect(r2.headers['idempotent-replayed']).toBe('true');
     expect(r2.json().id).toBe(r1.json().id);
+  });
+
+  it('GET /students?classId=<lớp tenant khác> → danh sách rỗng, không lộ học viên của lớp đó', async () => {
+    const cls = await call(B, 'POST', '/classes', {
+      name: 'Lớp của B',
+      subject: 'Toán',
+      grade: 9,
+      mode: 'online',
+      startDate: '2026-12-14',
+    });
+    const sB = await add(B, { fullName: 'Học Viên Của B' });
+    await call(B, 'POST', `/classes/${cls.json().id}/enrollments`, {
+      studentId: sB.id,
+    });
+    const res = await call(A, 'GET', `/students?classId=${cls.json().id}`);
+    expect(res.statusCode).toBe(200);
+    expect(res.json().items).toEqual([]);
+    expect(res.json().total).toBe(0);
+  });
+
+  it('user không phải tenant_owner → 403 trên danh sách, tạo và sửa học viên', async () => {
+    const teacher = await seedMember(t.worker, A.tenantId, 'teacher');
+    const w = { ...A, token: await t.tokenFor(teacher) };
+    const s = await add(A, { fullName: 'Chỉ Chủ Mới Sửa' });
+    expect((await call(w, 'GET', '/students')).statusCode).toBe(403);
+    expect(
+      (await call(w, 'POST', '/students', { fullName: 'X Y' })).statusCode,
+    ).toBe(403);
+    expect(
+      (await call(w, 'PATCH', `/students/${s.id}`, { note: 'n' })).statusCode,
+    ).toBe(403);
   });
 });

@@ -90,7 +90,7 @@ export class StudentsController {
   })
   @ApiCreatedResponse({ standardSchema: studentSchema })
   @ApiIdempotencyKey()
-  @ApiErrors('VALIDATION_FAILED')
+  @ApiErrors('VALIDATION_FAILED', 'CONFLICT_STALE')
   @ApiPlanLimitExceeded()
   create(
     @Ctx() ctx: RequestContext,

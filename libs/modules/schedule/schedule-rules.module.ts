@@ -1,6 +1,10 @@
 import { Module } from '@nestjs/common';
 import { ScheduleRulesReader } from './application/schedule-rules.reader.js';
+import { ScheduleService } from './application/schedule.service.js';
 
-/** Phần đọc của module schedule cho module khác dùng; tách riêng để không kéo controller vào module phụ thuộc. */
-@Module({ providers: [ScheduleRulesReader], exports: [ScheduleRulesReader] })
+/** Phần không có controller của module schedule cho module khác (classes, worker) dùng. */
+@Module({
+  providers: [ScheduleRulesReader, ScheduleService],
+  exports: [ScheduleRulesReader, ScheduleService],
+})
 export class ScheduleRulesModule {}

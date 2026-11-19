@@ -32,3 +32,21 @@ export async function seedTenant(worker: pg.Pool): Promise<SeededTenant> {
   );
   return s;
 }
+
+/** User có membership `role` ở tenant (vd. `teacher`): không phải `tenant_owner` nên bị guard chặn 403. */
+export async function seedMember(
+  worker: pg.Pool,
+  tenantId: string,
+  role: 'teacher' | 'accountant' | 'branch_manager',
+): Promise<string> {
+  const userId = randomUUID();
+  await worker.query(`insert into users (id, email) values ($1, $2)`, [
+    userId,
+    `${userId}@example.com`,
+  ]);
+  await worker.query(
+    `insert into memberships (id, user_id, role, tenant_id) values ($1, $2, $3, $4)`,
+    [randomUUID(), userId, role, tenantId],
+  );
+  return userId;
+}

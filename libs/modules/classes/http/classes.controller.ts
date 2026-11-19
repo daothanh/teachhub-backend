@@ -104,7 +104,7 @@ export class ClassesController {
   })
   @ApiCreatedResponse({ standardSchema: classCreatedSchema })
   @ApiIdempotencyKey()
-  @ApiErrors('VALIDATION_FAILED')
+  @ApiErrors('VALIDATION_FAILED', 'CONFLICT_STALE')
   @ApiPlanLimitExceeded()
   create(
     @Ctx() ctx: RequestContext,
@@ -123,10 +123,14 @@ export class ClassesController {
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Sửa lớp (US-1.1)' })
+  @ApiOperation({
+    summary: 'Sửa lớp (US-1.1)',
+    description:
+      'Đổi ngày bắt đầu hoặc kết thúc thì buổi dự kiến tương lai được đối chiếu lại trong cùng giao dịch. Lớp đã lưu trữ → 409 `CONFLICT_STALE`.',
+  })
   @ApiOkResponse({ standardSchema: classSchema })
   @ApiIdempotencyKey()
-  @ApiErrors('VALIDATION_FAILED', 'NOT_FOUND')
+  @ApiErrors('VALIDATION_FAILED', 'NOT_FOUND', 'CONFLICT_STALE')
   update(
     @Ctx() ctx: RequestContext,
     @Req() req: FastifyRequest,

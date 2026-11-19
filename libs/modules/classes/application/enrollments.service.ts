@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { and, asc, eq, isNull, ne } from 'drizzle-orm';
 import { AppException, uuidv7 } from '@teachhub/core';
 import { classes, enrollments, students, tenants, type Tx } from '@teachhub/db';
+import { localDate } from '@teachhub/modules/schedule';
 import type {
   CreateEnrollmentRequest,
   Enrollment,
@@ -28,14 +29,17 @@ export class EnrollmentsService {
     const [cls] = await tx
       .select({ status: classes.status })
       .from(classes)
-      .where(and(eq(classes.tenantId, tenantId), eq(classes.id, classId)));
+      .where(and(eq(classes.tenantId, tenantId), eq(classes.id, classId)))
+      // Khóa chia sẻ: lớp bị lưu trữ / học viên bị đánh dấu nghỉ song song phải chờ ghi danh này xong.
+      .for('share');
     // studentId của tenant khác trả cùng mã với studentId không tồn tại.
     const [student] = await tx
       .select({ status: students.status })
       .from(students)
       .where(
         and(eq(students.tenantId, tenantId), eq(students.id, body.studentId)),
-      );
+      )
+      .for('share');
     if (!cls || !student) throw new AppException('NOT_FOUND');
     if (cls.status === 'archived' || student.status === 'left') {
       throw new AppException('CONFLICT_STALE');
@@ -50,6 +54,8 @@ export class EnrollmentsService {
     const [existing] = await tx.select().from(enrollments).where(open);
     if (existing) return { status: 200, body: toEnrollment(existing) };
 
+    // shortcut: không chặn vượt sĩ số tối đa (`classes.capacity`): PRD/Spec không yêu cầu chặn cứng; thêm khi có
+    // yêu cầu (khóa FOR UPDATE dòng lớp rồi đếm ghi danh mở trước khi insert).
     // shortcut: chưa kiểm hạn mức gói khi ghi danh (max_active_students, US-0.7); PlanLimitService vào cùng US-0.7
     // → kiểm ở đây trước khi insert và ném PLAN_LIMIT_EXCEEDED.
     const [row] = await tx
@@ -109,8 +115,6 @@ export class EnrollmentsService {
       .select({ tz: tenants.timezone })
       .from(tenants)
       .where(eq(tenants.id, tenantId));
-    return new Intl.DateTimeFormat('en-CA', {
-      timeZone: t?.tz ?? 'Asia/Ho_Chi_Minh',
-    }).format(new Date());
+    return localDate(new Date(), t?.tz ?? 'Asia/Ho_Chi_Minh');
   }
 }

@@ -72,7 +72,11 @@ export class StudentsService {
         .offset(offset),
       tx.select({ n: count() }).from(students).where(where),
     ]);
-    return paginated(await this.hydrate(tx, rows), total?.n ?? 0, query);
+    return paginated(
+      await this.hydrate(tx, tenantId, rows),
+      total?.n ?? 0,
+      query,
+    );
   }
 
   async create(
@@ -110,7 +114,7 @@ export class StudentsService {
     // `id` do client gửi đã có (kể cả ở tenant khác): không tiết lộ, coi như dữ liệu cũ.
     if (!row) throw new AppException('CONFLICT_STALE');
     await this.insertGuardians(tx, ctx.tenantId, row.id, plan.toCreate);
-    return (await this.hydrate(tx, [row]))[0]!;
+    return (await this.hydrate(tx, ctx.tenantId, [row]))[0]!;
   }
 
   async update(
@@ -123,7 +127,8 @@ export class StudentsService {
       .select()
       .from(students)
       .where(and(eq(students.tenantId, tenantId), eq(students.id, id)))
-      .for('update');
+      // Không khóa khóa chính: trigger giới hạn phụ huynh (FOR NO KEY UPDATE) và FK từ ghi danh không chặn nhau.
+      .for('no key update');
     if (!cur) throw new AppException('NOT_FOUND');
 
     if (body.guardians !== undefined) {
@@ -149,7 +154,12 @@ export class StudentsService {
         await tx
           .update(guardians)
           .set({ deletedAt: sql`now()` })
-          .where(inArray(guardians.id, plan.toRemove));
+          .where(
+            and(
+              eq(guardians.tenantId, tenantId),
+              inArray(guardians.id, plan.toRemove),
+            ),
+          );
       }
       for (const g of plan.toUpdate) {
         // Lọc cả tenant_id và student_id: id của học viên/tenant khác không bao giờ khớp.
@@ -187,10 +197,10 @@ export class StudentsService {
       ? await tx
           .update(students)
           .set(set)
-          .where(eq(students.id, id))
+          .where(and(eq(students.tenantId, tenantId), eq(students.id, id)))
           .returning()
       : [cur];
-    return (await this.hydrate(tx, [row!]))[0]!;
+    return (await this.hydrate(tx, tenantId, [row!]))[0]!;
   }
 
   /** Ứng viên trùng: cùng họ tên (không phân biệt dấu/hoa thường) và cùng ngày sinh (cùng không có cũng tính). */
@@ -245,13 +255,18 @@ export class StudentsService {
     );
   }
 
-  private async hydrate(tx: Tx, rows: StudentRow[]): Promise<Student[]> {
+  private async hydrate(
+    tx: Tx,
+    tenantId: string,
+    rows: StudentRow[],
+  ): Promise<Student[]> {
     const gs = rows.length
       ? await tx
           .select()
           .from(guardians)
           .where(
             and(
+              eq(guardians.tenantId, tenantId),
               inArray(
                 guardians.studentId,
                 rows.map((r) => r.id),

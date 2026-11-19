@@ -15,7 +15,10 @@ import {
   students,
   type Tx,
 } from '@teachhub/db';
-import { ScheduleRulesReader } from '@teachhub/modules/schedule';
+import {
+  ScheduleRulesReader,
+  ScheduleService,
+} from '@teachhub/modules/schedule';
 import { classDraftErrors } from '../domain/class-rules.js';
 import type {
   Class,
@@ -32,7 +35,10 @@ type ClassRow = typeof classes.$inferSelect;
  */
 @Injectable()
 export class ClassesService {
-  constructor(private readonly rules: ScheduleRulesReader) {}
+  constructor(
+    private readonly rules: ScheduleRulesReader,
+    private readonly schedule: ScheduleService,
+  ) {}
 
   async list(
     tx: Tx,
@@ -119,6 +125,7 @@ export class ClassesService {
       .where(and(eq(classes.tenantId, tenantId), eq(classes.id, id)))
       .for('update');
     if (!cur) throw new AppException('NOT_FOUND');
+    if (cur.status === 'archived') throw new AppException('CONFLICT_STALE');
     const patch = Object.fromEntries(
       Object.entries(body).filter(([, v]) => v !== undefined),
     ) as UpdateClassRequest;
@@ -132,12 +139,21 @@ export class ClassesService {
     if (Object.keys(errors).length) {
       throw new AppException('VALIDATION_FAILED', undefined, errors);
     }
-    // shortcut: đổi startDate/endDate không sinh lại buổi; chỉ `PUT schedule-rules` sinh buổi (S2-BE-08).
     const [row] = await tx
       .update(classes)
       .set(patch)
-      .where(eq(classes.id, id))
+      .where(and(eq(classes.tenantId, tenantId), eq(classes.id, id)))
       .returning();
+    // Đổi kỳ hạn lớp → buổi dự kiến tương lai phải khớp lại (cắt phần quá hạn, sinh phần mở rộng).
+    if (row!.startDate !== cur.startDate || row!.endDate !== cur.endDate) {
+      await this.schedule.reconcile(
+        tx,
+        tenantId,
+        row!,
+        new Date(),
+        await this.schedule.timezone(tx, tenantId),
+      );
+    }
     return (await this.hydrate(tx, tenantId, [row!]))[0]!;
   }
 
@@ -171,6 +187,8 @@ export class ClassesService {
           .innerJoin(students, eq(students.id, enrollments.studentId))
           .where(
             and(
+              eq(enrollments.tenantId, tenantId),
+              eq(students.tenantId, tenantId),
               inArray(
                 enrollments.classId,
                 rows.map((r) => r.id),

@@ -201,4 +201,37 @@ describe('classes API', () => {
     );
     expect(res.statusCode).toBe(403);
   });
+
+  it('PATCH lớp đã lưu trữ → 409 CONFLICT_STALE, lớp không đổi', async () => {
+    const id = (
+      await call(A, 'POST', '/classes', body({ name: 'Văn 7' }))
+    ).json().id;
+    await call(A, 'POST', `/classes/${id}/archive`);
+    const res = await call(A, 'PATCH', `/classes/${id}`, { name: 'Đổi tên' });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe('CONFLICT_STALE');
+    expect((await call(A, 'GET', `/classes/${id}`)).json().name).toBe('Văn 7');
+  });
+
+  it('cùng Idempotency-Key nhưng khác lớp trên đường dẫn → 422 IDEMPOTENCY_KEY_REUSED, không phát lại phản hồi của lớp kia', async () => {
+    const [c1, c2] = await Promise.all(
+      ['Sử 6', 'Địa 6'].map(
+        async (name) =>
+          (await call(A, 'POST', '/classes', body({ name }))).json()
+            .id as string,
+      ),
+    );
+    const key = randomUUID();
+    const r1 = await call(A, 'POST', `/classes/${c1}/archive`, undefined, key);
+    expect(r1.statusCode).toBe(200);
+    const r2 = await call(A, 'POST', `/classes/${c2}/archive`, undefined, key);
+    expect(r2.statusCode).toBe(422);
+    expect(r2.json().code).toBe('IDEMPOTENCY_KEY_REUSED');
+    expect((await call(A, 'GET', `/classes/${c2}`)).json().status).toBe(
+      'active',
+    );
+    // cùng key + cùng lớp vẫn phát lại
+    const r3 = await call(A, 'POST', `/classes/${c1}/archive`, undefined, key);
+    expect(r3.headers['idempotent-replayed']).toBe('true');
+  });
 });

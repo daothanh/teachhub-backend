@@ -1102,7 +1102,7 @@
     },
     "/v1/center-waitlist": {
       "post": {
-        "description": "Gửi lặp cùng `Idempotency-Key` chỉ tạo một bản ghi.",
+        "description": "Gửi lặp cùng `Idempotency-Key` chỉ tạo một bản ghi. Tối đa 5 request/giờ/IP, vượt → 429 `RATE_LIMITED`.",
         "operationId": "centerWaitlist_create",
         "parameters": [
           {
@@ -1181,6 +1181,16 @@
           },
           "422": {
             "description": "VALIDATION_FAILED\n\nIDEMPOTENCY_KEY_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
             "content": {
               "application/json": {
                 "schema": {
@@ -1444,7 +1454,7 @@
             }
           },
           "409": {
-            "description": "IDEMPOTENCY_IN_PROGRESS",
+            "description": "CONFLICT_STALE\n\nIDEMPOTENCY_IN_PROGRESS",
             "content": {
               "application/json": {
                 "schema": {
@@ -1543,6 +1553,7 @@
         ]
       },
       "patch": {
+        "description": "Đổi ngày bắt đầu hoặc kết thúc thì buổi dự kiến tương lai được đối chiếu lại trong cùng giao dịch. Lớp đã lưu trữ → 409 `CONFLICT_STALE`.",
         "operationId": "classes_update",
         "parameters": [
           {
@@ -1681,7 +1692,7 @@
             }
           },
           "409": {
-            "description": "IDEMPOTENCY_IN_PROGRESS",
+            "description": "CONFLICT_STALE\n\nIDEMPOTENCY_IN_PROGRESS",
             "content": {
               "application/json": {
                 "schema": {
@@ -2330,7 +2341,7 @@
             }
           },
           "409": {
-            "description": "IDEMPOTENCY_IN_PROGRESS\n\nSTUDENT_POSSIBLE_DUPLICATE",
+            "description": "CONFLICT_STALE\n\nIDEMPOTENCY_IN_PROGRESS\n\nSTUDENT_POSSIBLE_DUPLICATE",
             "content": {
               "application/json": {
                 "schema": {

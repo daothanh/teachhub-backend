@@ -125,4 +125,27 @@ describe('zoned-time', () => {
     expect(localDate(at, TZ)).toBe('2026-12-15');
     expect(localDate(at, 'UTC')).toBe('2026-12-14');
   });
+
+  it('múi giờ có DST: giờ không tồn tại (khoảng trống mùa xuân) lấy lần đầu, buổi vẫn sinh và không trùng', () => {
+    // America/New_York 2027-03-14: 02:00 → 03:00, nên 02:30 không tồn tại.
+    const ny = 'America/New_York';
+    const out = generateSessions(
+      [{ id: 'r', weekday: 7, startTime: '02:30', durationMin: 60 }],
+      {
+        classStart: '2027-03-07',
+        classEnd: '2027-03-21',
+        today: '2027-03-01',
+        tz: ny,
+      },
+    );
+    expect(dates(out)).toEqual(['2027-03-07', '2027-03-14', '2027-03-21']);
+    expect(out[0]!.startsAt.toISOString()).toBe('2027-03-07T07:30:00.000Z');
+    // ngày chuyển giờ: giờ lùi/tiến một giờ, không ném lỗi và vẫn sau buổi trước
+    const gap = out[1]!.startsAt.getTime();
+    expect(Number.isNaN(gap)).toBe(false);
+    expect(localDate(out[1]!.startsAt, ny)).toBe('2027-03-14');
+    expect(out[2]!.startsAt.toISOString()).toBe('2027-03-21T06:30:00.000Z');
+    expect(gap).toBeGreaterThan(out[0]!.startsAt.getTime());
+    expect(gap).toBeLessThan(out[2]!.startsAt.getTime());
+  });
 });

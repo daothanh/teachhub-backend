@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { startTestApp, type TestApp } from './support/app.js';
-import { seedTenant, type SeededTenant } from './support/seed.js';
+import { seedMember, seedTenant, type SeededTenant } from './support/seed.js';
 
 type Who = SeededTenant & { token: string };
 
@@ -221,5 +221,45 @@ describe('enrollments + roster API', () => {
         [c2],
       ),
     ).toBe(1);
+  });
+
+  it('classId của tenant khác: ghi danh và roster đều 404, không ghi gì', async () => {
+    const cA = await newClass(A, 'Của A');
+    const sB = await newStudent(B, 'Học viên B');
+    const res = await enroll(B, cA, sB);
+    expect(res.statusCode).toBe(404);
+    expect(res.json().code).toBe('NOT_FOUND');
+    expect((await call(B, 'GET', `/classes/${cA}/roster`)).statusCode).toBe(
+      404,
+    );
+    expect(
+      await count(
+        `select count(*)::int n from enrollments where class_id = $1`,
+        [cA],
+      ),
+    ).toBe(0);
+  });
+
+  it('hai ghi danh song song cùng học viên + lớp: một 201, một 200 cùng bản ghi', async () => {
+    const c = await newClass(A, 'Song song');
+    const s = await newStudent(A, 'Lê Song Song');
+    const [r1, r2] = await Promise.all([enroll(A, c, s), enroll(A, c, s)]);
+    expect([r1.statusCode, r2.statusCode].sort()).toEqual([200, 201]);
+    expect(r1.json().id).toBe(r2.json().id);
+    expect(
+      await count(
+        `select count(*)::int n from enrollments where class_id = $1`,
+        [c],
+      ),
+    ).toBe(1);
+  });
+
+  it('user không phải tenant_owner → 403 ở ghi danh và roster', async () => {
+    const teacher = await seedMember(t.worker, A.tenantId, 'teacher');
+    const w = { ...A, token: await t.tokenFor(teacher) };
+    const c = await newClass(A, 'Cấm');
+    const s = await newStudent(A, 'Nguyễn Cấm');
+    expect((await enroll(w, c, s)).statusCode).toBe(403);
+    expect((await call(w, 'GET', `/classes/${c}/roster`)).statusCode).toBe(403);
   });
 });

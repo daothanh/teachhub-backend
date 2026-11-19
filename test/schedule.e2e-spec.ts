@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { startTestApp, type TestApp } from './support/app.js';
-import { seedTenant, type SeededTenant } from './support/seed.js';
+import { seedMember, seedTenant, type SeededTenant } from './support/seed.js';
 
 type Who = SeededTenant & { token: string };
 type Rule = { weekday: number; startTime: string; durationMin: number };
@@ -235,16 +235,23 @@ describe('schedule API', () => {
     expect(items[0]!.endsAt).toBe(`${addDays(nextMonday, 1)}T19:00:00+07:00`);
   });
 
-  it('thu hẹp ngày kết thúc rồi PUT lại: buổi vượt ngày kết thúc bị xóa', async () => {
+  it('thu hẹp ngày kết thúc: PATCH đã cắt buổi vượt ngày; PUT lại sau đó không còn gì để xóa', async () => {
     const id = await newClass(A);
     await put(A, id, [T3, T5]);
     await call(A, 'PATCH', `/classes/${id}`, {
       endDate: addDays(nextMonday, 6),
     });
+    expect(
+      (
+        await rows(`select count(*)::int n from sessions where class_id = $1`, [
+          id,
+        ])
+      )[0].n,
+    ).toBe(2);
     const res = await put(A, id, [T3, T5]);
     expect(res.json()).toMatchObject({
       sessionsGenerated: 0,
-      sessionsRemoved: 2,
+      sessionsRemoved: 0,
     });
   });
 
@@ -362,5 +369,83 @@ describe('schedule API', () => {
       )[0].n,
     ).toBe(2);
     expect((await call(B, 'GET', `/classes/${id}`)).statusCode).toBe(404);
+  });
+
+  it('buổi đã hủy (hoặc mồ côi rule_id) không bị sinh lại thành buổi dự kiến trùng ngày + giờ', async () => {
+    const id = await newClass(A);
+    await put(A, id, [T3]);
+    const [first] = await rows(
+      `select id, session_date::text d from sessions where class_id = $1 order by starts_at`,
+      [id],
+    );
+    await t.worker.query(
+      `update sessions set status = 'cancelled' where id = $1`,
+      [first.id],
+    );
+    // Đổi thời lượng: quy tắc cũ bị thay, buổi hủy mất liên kết quy tắc; quy tắc mới cùng ngày + giờ.
+    const res = await put(A, id, [{ ...T3, durationMin: 60 }]);
+    expect(res.json()).toMatchObject({
+      sessionsGenerated: 1,
+      sessionsRemoved: 1,
+    });
+    const same = await rows(
+      `select status, rule_id from sessions where class_id = $1 and session_date = $2`,
+      [id, first.d],
+    );
+    expect(same).toEqual([{ status: 'cancelled', rule_id: null }]);
+  });
+
+  it('PATCH ngày kết thúc/bắt đầu của lớp đối chiếu lại buổi dự kiến trong cùng giao dịch', async () => {
+    const id = await newClass(A);
+    await put(A, id, [T3, T5]);
+    const total = async () =>
+      (
+        await rows(`select count(*)::int n from sessions where class_id = $1`, [
+          id,
+        ])
+      )[0].n as number;
+    expect(await total()).toBe(4);
+    const shrink = await call(A, 'PATCH', `/classes/${id}`, {
+      endDate: addDays(nextMonday, 6),
+    });
+    expect(shrink.statusCode, shrink.body).toBe(200);
+    expect(await total()).toBe(2);
+    await call(A, 'PATCH', `/classes/${id}`, {
+      endDate: addDays(nextMonday, 20),
+    });
+    expect(await total()).toBe(6);
+    // dời ngày bắt đầu sang sau buổi đầu: buổi trước ngày mới bị cắt
+    await call(A, 'PATCH', `/classes/${id}`, {
+      startDate: addDays(nextMonday, 7),
+    });
+    expect(await total()).toBe(4);
+  });
+
+  it('hai PUT song song trên cùng lớp: tuần tự hóa theo khóa dòng lớp, buổi đúng với bộ quy tắc cuối', async () => {
+    const id = await newClass(A);
+    const [r1, r2] = await Promise.all([
+      put(A, id, [T3]),
+      put(A, id, [T3, T5]),
+    ]);
+    expect([r1.statusCode, r2.statusCode]).toEqual([200, 200]);
+    const rules = (await call(A, 'GET', `/classes/${id}`)).json().scheduleRules;
+    const n = (
+      await rows(
+        `select count(*)::int n, count(distinct (session_date, starts_at))::int u from sessions where class_id = $1`,
+        [id],
+      )
+    )[0];
+    expect(n).toEqual({ n: rules.length * 2, u: rules.length * 2 });
+  });
+
+  it('PUT lịch/GET sessions: user không phải tenant_owner → 403', async () => {
+    const teacher = await seedMember(t.worker, A.tenantId, 'teacher');
+    const w = { ...A, token: await t.tokenFor(teacher) };
+    const id = await newClass(A);
+    expect((await put(w, id, [T3])).statusCode).toBe(403);
+    expect(
+      (await call(w, 'GET', `/sessions?from=${nextMonday}&to=${nextMonday}`))
+        .statusCode,
+    ).toBe(403);
   });
 });
