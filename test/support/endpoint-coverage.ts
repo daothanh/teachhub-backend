@@ -58,8 +58,8 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
       'hợp đồng S1-CT-02, thân hàm trả 501 tới S2-BE-10; test chéo tenant làm cùng task đó',
   },
   'POST /v1/center-waitlist': {
-    notApplicable:
-      'hợp đồng S1-CT-02, thân hàm trả 501 tới S2-BE-11; test chéo tenant làm cùng task đó',
+    file: 'center-waitlist.e2e-spec.ts',
+    test: 'user khác dùng cùng Idempotency-Key vẫn tạo bản ghi riêng; RLS chặn đọc/sửa/xóa bản của người khác',
   },
   'POST /v1/auth/sso/apple': {
     notApplicable:
