@@ -78,6 +78,48 @@
       "when": 1795013785041,
       "tag": "0010_create_workspace_fn",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1795073192841,
+      "tag": "0011_classes",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1795073392357,
+      "tag": "0012_students",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1795073917008,
+      "tag": "0013_schedule",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1795074410101,
+      "tag": "0014_center_waitlist",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1795075249563,
+      "tag": "0015_guardians_limit_lock",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1795075666521,
+      "tag": "0016_drop_students_trgm_idx",
+      "breakpoints": true
     }
   ]
 }

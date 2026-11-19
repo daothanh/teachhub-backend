@@ -12,9 +12,14 @@ const phone = z
   .meta({ example: '0912345678' });
 
 export const guardianInputSchema = z.object({
-  id: z.uuid().optional().meta({
-    description: 'Có `id` = cập nhật phụ huynh đó; không có = tạo mới',
-  }),
+  id: z
+    .uuid()
+    .optional()
+    .meta({
+      description:
+        'Có `id` = cập nhật phụ huynh đó; không có = tạo mới. `id` phải là phụ huynh đang liên kết với chính học viên này; ' +
+        'sai (không tồn tại, của học viên hoặc tenant khác) → 422 `VALIDATION_FAILED` ở trường `guardians.N.id`. `POST /students` không nhận `id`.',
+    }),
   fullName: z.string().trim().min(1, 'Vui lòng nhập tên phụ huynh.').max(120),
   relation: z.enum(['father', 'mother', 'guardian']).default('guardian'),
   phone: phone.nullish(),

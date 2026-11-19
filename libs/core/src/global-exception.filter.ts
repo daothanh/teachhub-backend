@@ -40,7 +40,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 
     const { status, body } = toErrorBody(exception);
     body.requestId = req.id;
-    if (status >= 500) this.logger.error(exception);
+    if (status >= 500) this.logger.error(loggable(exception));
     // 429 (RATE_LIMITED, OTP_LOCKED): client đọc được cả header chuẩn lẫn details (§5.6).
     const retryAfter = body.details?.retryAfterSec;
     if (typeof retryAfter === 'number') {
@@ -48,6 +48,40 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     }
     void reply.status(status).send(body);
   }
+}
+
+const MAX_CAUSE_DEPTH = 5;
+
+/** Một cấp lỗi: tên, message cắt phần `params:`, frame `at` của stack gốc, `code`/`constraint`; không `detail`/`params`. */
+function scrub(err: Error, depth: number): Error {
+  const { code, constraint } = err as { code?: unknown; constraint?: unknown };
+  const safe = Object.assign(new Error(err.message.split('\nparams:')[0]), {
+    name: err.name,
+    ...(typeof code === 'string' && { code }),
+    ...(typeof constraint === 'string' && { constraint }),
+  });
+  safe.stack =
+    `${safe.name}: ${safe.message}\n` +
+    (err.stack ?? '')
+      .split('\n')
+      .filter((l) => /^\s+at /.test(l))
+      .join('\n');
+  if (err.cause instanceof Error && depth < MAX_CAUSE_DEPTH) {
+    safe.cause = scrub(err.cause, depth + 1);
+  }
+  return safe;
+}
+
+/**
+ * Lỗi truy vấn của Drizzle mang theo cả câu SQL lẫn `params` (họ tên, SĐT học viên…), và lỗi gốc của driver có
+ * `detail` kiểu `Key (full_name)=(…)`. Lỗi truy vấn được dựng lại theo cả chuỗi `cause` (mỗi cấp chỉ giữ message
+ * rút gọn và frame `at`, vì dòng đầu của stack chứa message gốc); lỗi khác giữ nguyên.
+ */
+export function loggable(exception: unknown): unknown {
+  return exception instanceof Error &&
+    ('params' in exception || 'query' in exception)
+    ? scrub(exception, 0)
+    : exception;
 }
 
 export function toErrorBody(exception: unknown): {

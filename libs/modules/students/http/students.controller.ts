@@ -6,6 +6,8 @@ import {
   Patch,
   Post,
   Query,
+  Req,
+  Res,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -14,15 +16,20 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
   ApiErrors,
   ApiErrorWithDetails,
   ApiIdempotencyKey,
   ApiPlanLimitExceeded,
-  AppException,
+  Ctx,
+  type RequestContext,
 } from '@teachhub/core';
+import { TxService } from '@teachhub/db';
+import { Idempotency } from '@teachhub/infra';
 import { RequiresRole } from '@teachhub/modules/identity';
+import { StudentsService } from '../application/students.service.js';
 import {
   type CreateStudentRequest,
   createStudentRequestSchema,
@@ -39,13 +46,19 @@ import {
 
 const idParam = z.uuid();
 
-// Hợp đồng Sprint 2 (S1-CT-02); thân hàm ở S2-BE-05.
+// Hợp đồng Sprint 2 (S1-CT-02); S2-BE-05.
 @ApiTags('students')
 @ApiBearerAuth('bearer')
 @RequiresRole('tenant_owner')
 @ApiErrors('UNAUTHENTICATED', 'TOKEN_EXPIRED', 'FORBIDDEN')
 @Controller('students')
 export class StudentsController {
+  constructor(
+    private readonly tx: TxService,
+    private readonly idem: Idempotency,
+    private readonly students: StudentsService,
+  ) {}
+
   @Get()
   @ApiOperation({
     summary: 'Danh sách và tìm học viên không dấu (US-1.4)',
@@ -55,9 +68,10 @@ export class StudentsController {
   @ApiOkResponse({ standardSchema: studentPageSchema })
   @ApiErrors('VALIDATION_FAILED')
   list(
-    @Query({ schema: studentListQuerySchema }) _query: StudentListQuery,
-  ): StudentPage {
-    throw new AppException('NOT_IMPLEMENTED');
+    @Ctx() ctx: RequestContext,
+    @Query({ schema: studentListQuerySchema }) query: StudentListQuery,
+  ): Promise<StudentPage> {
+    return this.tx.run(ctx, (t) => this.students.list(t, ctx.tenantId!, query));
   }
 
   @Post()
@@ -76,12 +90,22 @@ export class StudentsController {
   })
   @ApiCreatedResponse({ standardSchema: studentSchema })
   @ApiIdempotencyKey()
-  @ApiErrors('VALIDATION_FAILED')
+  @ApiErrors('VALIDATION_FAILED', 'CONFLICT_STALE')
   @ApiPlanLimitExceeded()
   create(
-    @Body({ schema: createStudentRequestSchema }) _body: CreateStudentRequest,
-  ): Student {
-    throw new AppException('NOT_IMPLEMENTED');
+    @Ctx() ctx: RequestContext,
+    @Req() req: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @Body({ schema: createStudentRequestSchema }) body: CreateStudentRequest,
+  ): Promise<Student> {
+    return this.idem.run(req, reply, ctx, async (t) => ({
+      status: 201,
+      body: await this.students.create(
+        t,
+        { tenantId: ctx.tenantId!, userId: ctx.userId! },
+        body,
+      ),
+    }));
   }
 
   @Patch(':id')
@@ -95,9 +119,15 @@ export class StudentsController {
   @ApiIdempotencyKey()
   @ApiErrors('VALIDATION_FAILED', 'NOT_FOUND')
   update(
-    @Param('id', { schema: idParam }) _id: string,
-    @Body({ schema: updateStudentRequestSchema }) _body: UpdateStudentRequest,
-  ): Student {
-    throw new AppException('NOT_IMPLEMENTED');
+    @Ctx() ctx: RequestContext,
+    @Req() req: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @Param('id', { schema: idParam }) id: string,
+    @Body({ schema: updateStudentRequestSchema }) body: UpdateStudentRequest,
+  ): Promise<Student> {
+    return this.idem.run(req, reply, ctx, async (t) => ({
+      status: 200,
+      body: await this.students.update(t, ctx.tenantId!, id, body),
+    }));
   }
 }

@@ -58,60 +58,60 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
     test: 'chéo tenant: trạng thái của A không lộ sang B và PATCH của B không đổi A',
   },
   'POST /v1/center-waitlist': {
-    notApplicable:
-      'hợp đồng S1-CT-02, thân hàm trả 501 tới S2-BE-11; test chéo tenant làm cùng task đó',
+    file: 'center-waitlist.e2e-spec.ts',
+    test: 'user khác dùng cùng Idempotency-Key vẫn tạo bản ghi riêng; RLS chặn đọc/sửa/xóa bản của người khác',
   },
   'POST /v1/auth/sso/apple': {
     file: 'auth-apple.e2e-spec.ts',
     test: 'email chưa xác minh trùng user có sẵn → không gộp, không tạo, yêu cầu OTP',
   },
   'GET /v1/classes': {
-    notApplicable:
-      'hợp đồng S1-CT-02, thân hàm trả 501 tới S2-BE-03; test chéo tenant làm cùng task đó',
+    file: 'classes.e2e-spec.ts',
+    test: 'tenant B không xem/sửa/lưu trữ lớp của A → 404, lớp A không đổi; danh sách B trống',
   },
   'POST /v1/classes': {
-    notApplicable:
-      'hợp đồng S1-CT-02, thân hàm trả 501 tới S2-BE-03; test chéo tenant làm cùng task đó',
+    file: 'classes.e2e-spec.ts',
+    test: 'id client gửi trùng id lớp của tenant khác → 409, không lộ và không ghi đè',
   },
   'GET /v1/classes/{id}': {
-    notApplicable:
-      'hợp đồng S1-CT-02, thân hàm trả 501 tới S2-BE-03; test chéo tenant làm cùng task đó',
+    file: 'classes.e2e-spec.ts',
+    test: 'tenant B không xem/sửa/lưu trữ lớp của A → 404, lớp A không đổi; danh sách B trống',
   },
   'PATCH /v1/classes/{id}': {
-    notApplicable:
-      'hợp đồng S1-CT-02, thân hàm trả 501 tới S2-BE-03; test chéo tenant làm cùng task đó',
+    file: 'classes.e2e-spec.ts',
+    test: 'tenant B không xem/sửa/lưu trữ lớp của A → 404, lớp A không đổi; danh sách B trống',
   },
   'POST /v1/classes/{id}/archive': {
-    notApplicable:
-      'hợp đồng S1-CT-02, thân hàm trả 501 tới S2-BE-03; test chéo tenant làm cùng task đó',
+    file: 'classes.e2e-spec.ts',
+    test: 'tenant B không xem/sửa/lưu trữ lớp của A → 404, lớp A không đổi; danh sách B trống',
   },
   'GET /v1/classes/{id}/roster': {
-    notApplicable:
-      'hợp đồng S1-CT-02, thân hàm trả 501 tới S2-BE-06b; test chéo tenant làm cùng task đó',
+    file: 'enrollments.e2e-spec.ts',
+    test: 'studentId của tenant khác trả cùng mã và nội dung với studentId không tồn tại; không ghi danh chéo tenant',
   },
   'POST /v1/classes/{id}/enrollments': {
-    notApplicable:
-      'hợp đồng S1-CT-02, thân hàm trả 501 tới S2-BE-06; test chéo tenant làm cùng task đó',
+    file: 'enrollments.e2e-spec.ts',
+    test: 'studentId của tenant khác trả cùng mã và nội dung với studentId không tồn tại; không ghi danh chéo tenant',
   },
   'GET /v1/students': {
-    notApplicable:
-      'hợp đồng S1-CT-02, thân hàm trả 501 tới S2-BE-05; test chéo tenant làm cùng task đó',
+    file: 'students.e2e-spec.ts',
+    test: 'tenant B không sửa học viên của A (404) và không thấy trong danh sách/tìm kiếm',
   },
   'POST /v1/students': {
-    notApplicable:
-      'hợp đồng S1-CT-02, thân hàm trả 501 tới S2-BE-05; test chéo tenant làm cùng task đó',
+    file: 'students.e2e-spec.ts',
+    test: 'ứng viên trùng tối đa 5 và chỉ trong tenant: hồ sơ cùng tên + ngày sinh ở tenant khác không lộ',
   },
   'PATCH /v1/students/{id}': {
-    notApplicable:
-      'hợp đồng S1-CT-02, thân hàm trả 501 tới S2-BE-05; test chéo tenant làm cùng task đó',
+    file: 'students.e2e-spec.ts',
+    test: 'tenant B không sửa học viên của A (404) và không thấy trong danh sách/tìm kiếm',
   },
   'PUT /v1/classes/{id}/schedule-rules': {
-    notApplicable:
-      'hợp đồng S1-CT-02, thân hàm trả 501 tới S2-BE-08; test chéo tenant làm cùng task đó',
+    file: 'schedule.e2e-spec.ts',
+    test: 'tenant B không đặt lịch cho lớp của A (404), không thấy buổi của A, lọc theo classId của A cho danh sách rỗng',
   },
   'GET /v1/sessions': {
-    notApplicable:
-      'hợp đồng S1-CT-02, thân hàm trả 501 tới S2-BE-08; test chéo tenant làm cùng task đó',
+    file: 'schedule.e2e-spec.ts',
+    test: 'tenant B không đặt lịch cho lớp của A (404), không thấy buổi của A, lọc theo classId của A cho danh sách rỗng',
   },
   'GET /v1/admin/bank-transfer-orders': {
     notApplicable:
