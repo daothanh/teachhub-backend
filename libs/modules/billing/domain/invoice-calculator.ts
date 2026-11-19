@@ -104,13 +104,22 @@ function assertMoney(name: string, v: number, { signed = false } = {}): void {
   }
 }
 
-/** round_1000(num/den): làm tròn tới 1.000 đ, từ 500 đ trở lên làm tròn lên. Thuần số nguyên. */
-export function round1000Ratio(num: number, den: number): number {
-  return Math.floor((num + 500 * den) / (1000 * den)) * 1000;
+/** round_1000(a × b / den) bằng BigInt, nên tích trung gian không tràn; ném RangeError nếu kết quả vượt safe integer. */
+export function mulRound1000(a: number, b: number, den: number): number {
+  assertMoney('a', a);
+  assertMoney('b', b);
+  if (!Number.isSafeInteger(den) || den < 1)
+    throw new RangeError(`mẫu số phải ≥ 1: ${den}`);
+  const d = BigInt(den);
+  const r = ((BigInt(a) * BigInt(b) + 500n * d) / (1000n * d)) * 1000n;
+  if (r > BigInt(Number.MAX_SAFE_INTEGER))
+    throw new RangeError('số tiền vượt giới hạn số nguyên an toàn');
+  return Number(r);
 }
 
+/** Chỉ dành cho x ≥ 0 (tiền gốc); số âm ném RangeError. */
 export function round1000(x: number): number {
-  return round1000Ratio(x, 1);
+  return mulRound1000(x, 1, 1);
 }
 
 /** Chia đợt: mỗi đợt round_1000(total/n); đợt cuối = tổng − Σ đợt trước (US-7.1 AC6). */
@@ -121,7 +130,7 @@ export function splitInstallments(total: number, n: number): number[] {
   let rest = total;
   for (let i = 0; i < n - 1; i++) {
     // shortcut: chặn đợt vượt phần còn lại để không có đợt âm; nâng cấp nếu cần quy tắc khác
-    const part = Math.min(round1000Ratio(total, n), rest);
+    const part = Math.min(mulRound1000(total, 1, n), rest);
     parts.push(part);
     rest -= part;
   }
@@ -134,8 +143,8 @@ export function calculateInvoice(input: InvoiceInput): InvoiceResult {
   const o = input.override ?? {};
   const rules: FeeRules = {
     ...DEFAULT_FEE_RULES,
-    ...input.classRules,
-    ...stripUndefined(o),
+    ...stripNullish(input.classRules ?? {}),
+    ...stripNullish(o),
   };
   const fee = o.feeAmount ?? input.feeAmount;
   assertMoney('fee', fee);
@@ -176,7 +185,7 @@ export function calculateInvoice(input: InvoiceInput): InvoiceResult {
         (s) => s.status === 'cancelled' && !s.madeUp,
       ).length;
       // shortcut: trần khấu trừ = học phí tháng để không âm dòng gốc
-      deduction = Math.min(fee, round1000Ratio(fee * cancelled, planned));
+      deduction = Math.min(fee, mulRound1000(fee, cancelled, planned));
     }
     lines.push({
       kind: 'monthly',
@@ -197,7 +206,7 @@ export function calculateInvoice(input: InvoiceInput): InvoiceResult {
         'totalSessions ≥ 1 và 0 ≤ remainingSessions ≤ totalSessions',
       );
     }
-    const prorated = round1000Ratio(fee * remaining, total);
+    const prorated = mulRound1000(fee, remaining, total);
     const parts = splitInstallments(prorated, rules.installments);
     const no = input.installmentNo ?? 1;
     if (!Number.isInteger(no) || no < 1 || no > parts.length)
@@ -212,14 +221,17 @@ export function calculateInvoice(input: InvoiceInput): InvoiceResult {
   let room = lines.reduce((sum, l) => sum + l.amount, 0); // phần gốc còn có thể giảm
   const base = room;
   for (const d of input.discounts ?? []) {
-    if (d.kind === 'percent' && (d.value < 0 || d.value > 100))
-      throw new RangeError('percent 0..100');
+    if (
+      d.kind === 'percent' &&
+      !(Number.isInteger(d.value) && d.value >= 0 && d.value <= 100)
+    )
+      throw new RangeError('percent phải là số nguyên 0..100');
     // miễn giảm 100% lấy đúng phần gốc (US-1.3 AC3); phần trăm khác làm tròn 1.000 đ
     const raw =
       d.kind === 'percent'
         ? d.value === 100
           ? base
-          : round1000Ratio(base * d.value, 100)
+          : mulRound1000(base, d.value, 100)
         : d.value;
     assertMoney('discount', raw);
     const amount = Math.min(raw, room); // giảm không vượt phần gốc để hóa đơn không âm vì giảm giá
@@ -230,8 +242,10 @@ export function calculateInvoice(input: InvoiceInput): InvoiceResult {
       description: d.description,
     });
   }
-  if (input.carryOver) {
+  if (input.carryOver !== undefined) {
     assertMoney('carryOver', input.carryOver, { signed: true });
+  }
+  if (input.carryOver) {
     lines.push({
       kind: 'carry_over',
       amount: input.carryOver,
@@ -257,6 +271,7 @@ export function calculateInvoice(input: InvoiceInput): InvoiceResult {
   }
 
   const sum = lines.reduce((acc, l) => acc + l.amount, 0);
+  assertMoney('sum', sum, { signed: true });
   return {
     lines,
     total: Math.max(0, sum),
@@ -264,9 +279,9 @@ export function calculateInvoice(input: InvoiceInput): InvoiceResult {
   };
 }
 
-function stripUndefined(o: FeeOverride): Partial<FeeRules> {
+function stripNullish(o: FeeOverride): Partial<FeeRules> {
   const { feeAmount: _f, ...r } = o;
   return Object.fromEntries(
-    Object.entries(r).filter(([, v]) => v !== undefined),
+    Object.entries(r).filter(([, v]) => v !== undefined && v !== null),
   );
 }
