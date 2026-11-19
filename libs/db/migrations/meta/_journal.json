@@ -78,6 +78,20 @@
       "when": 1795013785041,
       "tag": "0010_create_workspace_fn",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1795071669513,
+      "tag": "0011_outbox_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1795071674313,
+      "tag": "0012_outbox_rls",
+      "breakpoints": true
     }
   ]
 }

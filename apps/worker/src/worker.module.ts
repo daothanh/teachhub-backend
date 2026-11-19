@@ -4,8 +4,9 @@ import { ConfigService } from '@nestjs/config';
 import { CoreModule, type Env } from '@teachhub/core';
 import { DbModule } from '@teachhub/db';
 import { RedisModule } from '@teachhub/infra';
+import { OutboxModule } from './outbox/outbox.module.js';
 
-// Processor (outbox relay, notify, billing…) và job scheduler (schedulers.ts) thêm theo từng module từ Sprint 3.
+// Processor (notify, billing…) và job scheduler (schedulers.ts) thêm theo từng module từ Sprint 3.
 @Module({
   imports: [
     CoreModule,
@@ -20,6 +21,7 @@ import { RedisModule } from '@teachhub/infra';
         },
       }),
     }),
+    OutboxModule,
   ],
 })
 export class WorkerModule {}

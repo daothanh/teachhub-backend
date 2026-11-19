@@ -57,3 +57,28 @@ export const jobRuns = pgTable(
     index('job_runs_job_started_at_idx').on(t.job, t.startedAt.desc()),
   ],
 );
+
+/**
+ * Outbox sự kiện nghiệp vụ (Mục 3.6): ghi cùng giao dịch với lệnh, worker relay đẩy sang BullMQ.
+ * `attempts`/`next_attempt_at`/`last_error`/`failed_at` phục vụ retry có backoff; quá số lần thì `failed_at` đặt và relay bỏ qua.
+ */
+export const outboxEvents = pgTable(
+  'outbox_events',
+  {
+    id: uuid().primaryKey(),
+    tenantId: uuid().notNull(),
+    type: text().notNull(),
+    payload: jsonb().notNull(),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    dispatchedAt: timestamp({ withTimezone: true }),
+    attempts: integer().notNull().default(0),
+    nextAttemptAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    lastError: text(),
+    failedAt: timestamp({ withTimezone: true }),
+  },
+  (t) => [
+    index('outbox_events_pending_idx')
+      .on(t.nextAttemptAt)
+      .where(sql`${t.dispatchedAt} is null and ${t.failedAt} is null`),
+  ],
+);
