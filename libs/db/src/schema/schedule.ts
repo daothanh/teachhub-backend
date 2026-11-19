@@ -90,6 +90,8 @@ export const sessions = pgTable(
       foreignColumns: [classes.tenantId, classes.id],
     }),
     unique('sessions_rule_date_uq').on(t.ruleId, t.sessionDate),
+    // Đích của khóa ngoại kép (tenant_id, session_id) từ attendance.
+    unique('sessions_tenant_id_id_uq').on(t.tenantId, t.id),
     index('sessions_tenant_date_idx').on(t.tenantId, t.sessionDate, t.startsAt),
     index('sessions_class_date_idx').on(t.classId, t.sessionDate),
     check(

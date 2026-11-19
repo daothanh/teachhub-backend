@@ -134,6 +134,13 @@
       "when": 1795076195160,
       "tag": "0018_outbox_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1795076437082,
+      "tag": "0019_attendance",
+      "breakpoints": true
     }
   ]
 }
