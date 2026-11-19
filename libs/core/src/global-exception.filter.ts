@@ -50,32 +50,38 @@ export class GlobalExceptionFilter implements ExceptionFilter {
   }
 }
 
-/**
- * Lỗi truy vấn của Drizzle mang theo cả câu SQL lẫn `params` (họ tên, SĐT học viên…), và lỗi gốc của driver có
- * `detail` kiểu `Key (full_name)=(…)`. Log chỉ nhận bản dựng lại: tên lỗi, message đã cắt phần `params:`, các frame
- * của stack gốc (không dòng đầu, vì dòng đầu chứa message gốc), cùng `code`/`constraint` của driver.
- */
-export function loggable(exception: unknown): unknown {
-  if (
-    !(exception instanceof Error) ||
-    !('params' in exception || 'query' in exception)
-  ) {
-    return exception;
-  }
-  const src = exception.cause instanceof Error ? exception.cause : exception;
-  const { code, constraint } = src as { code?: unknown; constraint?: unknown };
-  const safe = Object.assign(new Error(src.message.split('\nparams:')[0]), {
-    name: src.name,
+const MAX_CAUSE_DEPTH = 5;
+
+/** Một cấp lỗi: tên, message cắt phần `params:`, frame `at` của stack gốc, `code`/`constraint`; không `detail`/`params`. */
+function scrub(err: Error, depth: number): Error {
+  const { code, constraint } = err as { code?: unknown; constraint?: unknown };
+  const safe = Object.assign(new Error(err.message.split('\nparams:')[0]), {
+    name: err.name,
     ...(typeof code === 'string' && { code }),
     ...(typeof constraint === 'string' && { constraint }),
   });
   safe.stack =
     `${safe.name}: ${safe.message}\n` +
-    (src.stack ?? '')
+    (err.stack ?? '')
       .split('\n')
       .filter((l) => /^\s+at /.test(l))
       .join('\n');
+  if (err.cause instanceof Error && depth < MAX_CAUSE_DEPTH) {
+    safe.cause = scrub(err.cause, depth + 1);
+  }
   return safe;
+}
+
+/**
+ * Lỗi truy vấn của Drizzle mang theo cả câu SQL lẫn `params` (họ tên, SĐT học viên…), và lỗi gốc của driver có
+ * `detail` kiểu `Key (full_name)=(…)`. Lỗi truy vấn được dựng lại theo cả chuỗi `cause` (mỗi cấp chỉ giữ message
+ * rút gọn và frame `at`, vì dòng đầu của stack chứa message gốc); lỗi khác giữ nguyên.
+ */
+export function loggable(exception: unknown): unknown {
+  return exception instanceof Error &&
+    ('params' in exception || 'query' in exception)
+    ? scrub(exception, 0)
+    : exception;
 }
 
 export function toErrorBody(exception: unknown): {
