@@ -3,3 +3,4 @@ export * from './infra.js';
 export * from './identity.js';
 export * from './tenancy.js';
 export * from './classes.js';
+export * from './students.js';
