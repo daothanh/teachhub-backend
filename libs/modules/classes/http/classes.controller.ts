@@ -7,6 +7,7 @@ import {
   Patch,
   Post,
   Query,
+  Req,
   Res,
 } from '@nestjs/common';
 import {
@@ -16,15 +17,20 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
-import type { FastifyReply } from 'fastify';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
   ApiErrors,
   ApiIdempotencyKey,
   ApiPlanLimitExceeded,
   AppException,
+  Ctx,
+  type RequestContext,
 } from '@teachhub/core';
+import { TxService } from '@teachhub/db';
+import { Idempotency } from '@teachhub/infra';
 import { RequiresRole } from '@teachhub/modules/identity';
+import { ClassesService } from '../application/classes.service.js';
 import {
   type Class,
   type ClassCreated,
@@ -48,13 +54,19 @@ import {
 
 const idParam = z.uuid();
 
-// Hợp đồng Sprint 2 (S1-CT-02); thân hàm ở S2-BE-03, S2-BE-06, S2-BE-06b.
+// Hợp đồng Sprint 2 (S1-CT-02); S2-BE-03 (lớp), S2-BE-06 (ghi danh), S2-BE-06b (roster).
 @ApiTags('classes')
 @ApiBearerAuth('bearer')
 @RequiresRole('tenant_owner')
 @ApiErrors('UNAUTHENTICATED', 'TOKEN_EXPIRED', 'FORBIDDEN')
 @Controller('classes')
 export class ClassesController {
+  constructor(
+    private readonly tx: TxService,
+    private readonly idem: Idempotency,
+    private readonly classes: ClassesService,
+  ) {}
+
   @Get()
   @ApiOperation({
     summary: 'Danh sách lớp (US-1.1)',
@@ -64,17 +76,21 @@ export class ClassesController {
   @ApiOkResponse({ standardSchema: classPageSchema })
   @ApiErrors('VALIDATION_FAILED')
   list(
-    @Query({ schema: classListQuerySchema }) _query: ClassListQuery,
-  ): ClassPage {
-    throw new AppException('NOT_IMPLEMENTED');
+    @Ctx() ctx: RequestContext,
+    @Query({ schema: classListQuerySchema }) query: ClassListQuery,
+  ): Promise<ClassPage> {
+    return this.tx.run(ctx, (t) => this.classes.list(t, ctx.tenantId!, query));
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Chi tiết lớp kèm quy tắc lặp (US-1.1, US-2.1)' })
   @ApiOkResponse({ standardSchema: classSchema })
   @ApiErrors('NOT_FOUND')
-  get(@Param('id', { schema: idParam }) _id: string): Class {
-    throw new AppException('NOT_IMPLEMENTED');
+  get(
+    @Ctx() ctx: RequestContext,
+    @Param('id', { schema: idParam }) id: string,
+  ): Promise<Class> {
+    return this.tx.run(ctx, (t) => this.classes.get(t, ctx.tenantId!, id));
   }
 
   @Post()
@@ -90,9 +106,19 @@ export class ClassesController {
   @ApiErrors('VALIDATION_FAILED')
   @ApiPlanLimitExceeded()
   create(
-    @Body({ schema: createClassRequestSchema }) _body: CreateClassRequest,
-  ): ClassCreated {
-    throw new AppException('NOT_IMPLEMENTED');
+    @Ctx() ctx: RequestContext,
+    @Req() req: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @Body({ schema: createClassRequestSchema }) body: CreateClassRequest,
+  ): Promise<ClassCreated> {
+    return this.idem.run(req, reply, ctx, async (t) => ({
+      status: 201,
+      body: await this.classes.create(
+        t,
+        { tenantId: ctx.tenantId!, userId: ctx.userId! },
+        body,
+      ),
+    }));
   }
 
   @Patch(':id')
@@ -101,10 +127,16 @@ export class ClassesController {
   @ApiIdempotencyKey()
   @ApiErrors('VALIDATION_FAILED', 'NOT_FOUND')
   update(
-    @Param('id', { schema: idParam }) _id: string,
-    @Body({ schema: updateClassRequestSchema }) _body: UpdateClassRequest,
-  ): Class {
-    throw new AppException('NOT_IMPLEMENTED');
+    @Ctx() ctx: RequestContext,
+    @Req() req: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @Param('id', { schema: idParam }) id: string,
+    @Body({ schema: updateClassRequestSchema }) body: UpdateClassRequest,
+  ): Promise<Class> {
+    return this.idem.run(req, reply, ctx, async (t) => ({
+      status: 200,
+      body: await this.classes.update(t, ctx.tenantId!, id, body),
+    }));
   }
 
   @Post(':id/archive')
@@ -116,8 +148,16 @@ export class ClassesController {
   @ApiOkResponse({ standardSchema: classSchema })
   @ApiIdempotencyKey()
   @ApiErrors('NOT_FOUND')
-  archive(@Param('id', { schema: idParam }) _id: string): Class {
-    throw new AppException('NOT_IMPLEMENTED');
+  archive(
+    @Ctx() ctx: RequestContext,
+    @Req() req: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @Param('id', { schema: idParam }) id: string,
+  ): Promise<Class> {
+    return this.idem.run(req, reply, ctx, async (t) => ({
+      status: 200,
+      body: await this.classes.archive(t, ctx.tenantId!, id),
+    }));
   }
 
   @Get(':id/roster')

@@ -66,24 +66,24 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
       'hợp đồng S1-CT-02, thân hàm trả 501 tới S2-BE-01; test chéo tenant làm cùng task đó',
   },
   'GET /v1/classes': {
-    notApplicable:
-      'hợp đồng S1-CT-02, thân hàm trả 501 tới S2-BE-03; test chéo tenant làm cùng task đó',
+    file: 'classes.e2e-spec.ts',
+    test: 'tenant B không xem/sửa/lưu trữ lớp của A → 404, lớp A không đổi; danh sách B trống',
   },
   'POST /v1/classes': {
-    notApplicable:
-      'hợp đồng S1-CT-02, thân hàm trả 501 tới S2-BE-03; test chéo tenant làm cùng task đó',
+    file: 'classes.e2e-spec.ts',
+    test: 'id client gửi trùng id lớp của tenant khác → 409, không lộ và không ghi đè',
   },
   'GET /v1/classes/{id}': {
-    notApplicable:
-      'hợp đồng S1-CT-02, thân hàm trả 501 tới S2-BE-03; test chéo tenant làm cùng task đó',
+    file: 'classes.e2e-spec.ts',
+    test: 'tenant B không xem/sửa/lưu trữ lớp của A → 404, lớp A không đổi; danh sách B trống',
   },
   'PATCH /v1/classes/{id}': {
-    notApplicable:
-      'hợp đồng S1-CT-02, thân hàm trả 501 tới S2-BE-03; test chéo tenant làm cùng task đó',
+    file: 'classes.e2e-spec.ts',
+    test: 'tenant B không xem/sửa/lưu trữ lớp của A → 404, lớp A không đổi; danh sách B trống',
   },
   'POST /v1/classes/{id}/archive': {
-    notApplicable:
-      'hợp đồng S1-CT-02, thân hàm trả 501 tới S2-BE-03; test chéo tenant làm cùng task đó',
+    file: 'classes.e2e-spec.ts',
+    test: 'tenant B không xem/sửa/lưu trữ lớp của A → 404, lớp A không đổi; danh sách B trống',
   },
   'GET /v1/classes/{id}/roster': {
     notApplicable:
