@@ -112,7 +112,8 @@ export class StudentsController {
   @ApiOperation({
     summary: 'Sửa học viên (US-1.4)',
     description:
-      'Có `guardians` thì thay toàn bộ danh sách: phụ huynh có `id` được cập nhật, không có `id` được tạo mới, phụ huynh không còn trong danh sách bị gỡ liên kết.',
+      'Có `guardians` thì thay toàn bộ danh sách: phụ huynh có `id` được cập nhật, không có `id` được tạo mới, phụ huynh không còn trong danh sách bị gỡ liên kết (lời mời còn hiệu lực của người đó bị thu hồi). ' +
+      'Tối đa 2 phụ huynh: thêm người thứ 3 → 422 `VALIDATION_FAILED` (US-1.6 AC1). Gửi lời mời đi qua `POST /students/{id}/invites`, không đi qua endpoint này.',
   })
   @ApiOkResponse({ standardSchema: studentSchema })
   @ApiIdempotencyKey()

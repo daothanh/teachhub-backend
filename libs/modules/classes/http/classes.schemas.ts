@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import { pageQuerySchema, paginatedSchema } from '@teachhub/core';
+import {
+  guardianInviteStatusSchema,
+  latestInviteSchema,
+  pageQuerySchema,
+  paginatedSchema,
+} from '@teachhub/core';
 import { scheduleRuleSchema } from '@teachhub/modules/schedule';
 
 // Sprint 2 chưa có học phí (US-1.2) và cảnh báo TT29 (US-9.3): thêm sau dưới dạng trường tùy chọn.
@@ -157,6 +162,16 @@ export const classPageSchema = paginatedSchema(classSchema).meta({
 });
 export type ClassPage = z.infer<typeof classPageSchema>;
 
+const rosterGuardianSchema = z
+  .object({
+    id: z.uuid(),
+    fullName: z.string(),
+    relation: z.enum(['father', 'mother', 'guardian']),
+    inviteStatus: guardianInviteStatusSchema,
+    latestInvite: latestInviteSchema,
+  })
+  .meta({ id: 'RosterGuardian' });
+
 export const rosterSchema = z
   .object({
     items: z.array(
@@ -166,6 +181,11 @@ export const rosterSchema = z
         fullName: z.string(),
         studentStatus: z.enum(['active', 'paused']),
         joinedOn: z.iso.date(),
+        inviteStatus: guardianInviteStatusSchema.meta({
+          description:
+            'Gộp theo các phụ huynh của học viên: `activated` nếu có ai đã nhận lời mời, không thì `invited` nếu có lời mời còn hạn, không thì `expired` nếu có lời mời hết hạn, còn lại `not_invited` (kể cả học viên chưa có phụ huynh)',
+        }),
+        guardians: z.array(rosterGuardianSchema).max(2),
       }),
     ),
   })
@@ -179,6 +199,19 @@ export const rosterSchema = z
           fullName: 'Nguyễn Minh Anh',
           studentStatus: 'active',
           joinedOn: '2026-12-14',
+          inviteStatus: 'invited',
+          guardians: [
+            {
+              id: '019b2c4f-0002-7b30-8c01-000000000001',
+              fullName: 'Nguyễn Văn Hải',
+              relation: 'father',
+              inviteStatus: 'invited',
+              latestInvite: {
+                id: '019b2c80-0001-7a10-8a01-000000000001',
+                expiresAt: '2026-12-21T09:00:00+07:00',
+              },
+            },
+          ],
         },
         {
           enrollmentId: '019b2c50-0001-7b30-8c01-000000000002',
@@ -186,6 +219,8 @@ export const rosterSchema = z
           fullName: 'Trần Gia Bảo',
           studentStatus: 'active',
           joinedOn: '2026-12-14',
+          inviteStatus: 'not_invited',
+          guardians: [],
         },
       ],
     },

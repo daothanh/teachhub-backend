@@ -82,13 +82,9 @@
         "auth_identities_user_id_users_id_fk": {
           "name": "auth_identities_user_id_users_id_fk",
           "tableFrom": "auth_identities",
-          "columnsFrom": [
-            "user_id"
-          ],
+          "columnsFrom": ["user_id"],
           "tableTo": "users",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         }
@@ -241,41 +237,27 @@
         "memberships_user_id_users_id_fk": {
           "name": "memberships_user_id_users_id_fk",
           "tableFrom": "memberships",
-          "columnsFrom": [
-            "user_id"
-          ],
+          "columnsFrom": ["user_id"],
           "tableTo": "users",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "memberships_tenant_id_tenants_id_fk": {
           "name": "memberships_tenant_id_tenants_id_fk",
           "tableFrom": "memberships",
-          "columnsFrom": [
-            "tenant_id"
-          ],
+          "columnsFrom": ["tenant_id"],
           "tableTo": "tenants",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "memberships_tenant_branch_fk": {
           "name": "memberships_tenant_branch_fk",
           "tableFrom": "memberships",
-          "columnsFrom": [
-            "tenant_id",
-            "branch_id"
-          ],
+          "columnsFrom": ["tenant_id", "branch_id"],
           "tableTo": "branches",
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
+          "columnsTo": ["tenant_id", "id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -405,13 +387,9 @@
         "refresh_tokens_user_id_users_id_fk": {
           "name": "refresh_tokens_user_id_users_id_fk",
           "tableFrom": "refresh_tokens",
-          "columnsFrom": [
-            "user_id"
-          ],
+          "columnsFrom": ["user_id"],
           "tableTo": "users",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         }
@@ -420,9 +398,7 @@
       "uniqueConstraints": {
         "refresh_tokens_tokenHash_unique": {
           "name": "refresh_tokens_tokenHash_unique",
-          "columns": [
-            "token_hash"
-          ],
+          "columns": ["token_hash"],
           "nullsNotDistinct": false
         }
       },
@@ -497,13 +473,9 @@
         "users_last_membership_id_memberships_id_fk": {
           "name": "users_last_membership_id_memberships_id_fk",
           "tableFrom": "users",
-          "columnsFrom": [
-            "last_membership_id"
-          ],
+          "columnsFrom": ["last_membership_id"],
           "tableTo": "memberships",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "set null"
         }
@@ -512,9 +484,7 @@
       "uniqueConstraints": {
         "users_email_unique": {
           "name": "users_email_unique",
-          "columns": [
-            "email"
-          ],
+          "columns": ["email"],
           "nullsNotDistinct": false
         }
       },
@@ -803,13 +773,9 @@
         "branches_tenant_id_tenants_id_fk": {
           "name": "branches_tenant_id_tenants_id_fk",
           "tableFrom": "branches",
-          "columnsFrom": [
-            "tenant_id"
-          ],
+          "columnsFrom": ["tenant_id"],
           "tableTo": "tenants",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -818,10 +784,7 @@
       "uniqueConstraints": {
         "branches_tenant_id_id_uq": {
           "name": "branches_tenant_id_id_uq",
-          "columns": [
-            "tenant_id",
-            "id"
-          ],
+          "columns": ["tenant_id", "id"],
           "nullsNotDistinct": false
         }
       },
@@ -934,26 +897,18 @@
         "subscriptions_tenant_id_tenants_id_fk": {
           "name": "subscriptions_tenant_id_tenants_id_fk",
           "tableFrom": "subscriptions",
-          "columnsFrom": [
-            "tenant_id"
-          ],
+          "columnsFrom": ["tenant_id"],
           "tableTo": "tenants",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "subscriptions_plan_code_plans_code_fk": {
           "name": "subscriptions_plan_code_plans_code_fk",
           "tableFrom": "subscriptions",
-          "columnsFrom": [
-            "plan_code"
-          ],
+          "columnsFrom": ["plan_code"],
           "tableTo": "plans",
-          "columnsTo": [
-            "code"
-          ],
+          "columnsTo": ["code"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -962,9 +917,7 @@
       "uniqueConstraints": {
         "subscriptions_tenantId_unique": {
           "name": "subscriptions_tenantId_unique",
-          "columns": [
-            "tenant_id"
-          ],
+          "columns": ["tenant_id"],
           "nullsNotDistinct": false
         }
       },

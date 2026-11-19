@@ -50,20 +50,20 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
     test: 'app không tự gọi được hàm tạo không gian cho user khác (lấy user từ app.user_id)',
   },
   'GET /v1/onboarding': {
-    notApplicable:
-      'hợp đồng S1-CT-02, thân hàm trả 501 tới S2-BE-10; test chéo tenant làm cùng task đó',
+    file: 'onboarding.e2e-spec.ts',
+    test: 'chéo tenant: trạng thái của A không lộ sang B và PATCH của B không đổi A',
   },
   'PATCH /v1/onboarding/steps/{step}': {
-    notApplicable:
-      'hợp đồng S1-CT-02, thân hàm trả 501 tới S2-BE-10; test chéo tenant làm cùng task đó',
+    file: 'onboarding.e2e-spec.ts',
+    test: 'chéo tenant: trạng thái của A không lộ sang B và PATCH của B không đổi A',
   },
   'POST /v1/center-waitlist': {
     file: 'center-waitlist.e2e-spec.ts',
     test: 'user khác dùng cùng Idempotency-Key vẫn tạo bản ghi riêng; RLS chặn đọc/sửa/xóa bản của người khác',
   },
   'POST /v1/auth/sso/apple': {
-    notApplicable:
-      'hợp đồng S1-CT-02, thân hàm trả 501 tới S2-BE-01; test chéo tenant làm cùng task đó',
+    file: 'auth-apple.e2e-spec.ts',
+    test: 'email chưa xác minh trùng user có sẵn → không gộp, không tạo, yêu cầu OTP',
   },
   'GET /v1/classes': {
     file: 'classes.e2e-spec.ts',
@@ -136,5 +136,101 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
   'GET /v1/admin/support/tenants/{id}': {
     notApplicable:
       'hợp đồng S1-CT-02, thân hàm trả 501 tới task admin; test chéo tenant làm cùng task đó',
+  },
+  'GET /v1/sessions/{id}/attendance': {
+    notApplicable:
+      'hợp đồng S2-FL-10, thân hàm trả 501 tới S3-BE-02; test chéo tenant làm cùng task đó',
+  },
+  'POST /v1/attendance/sync': {
+    notApplicable:
+      'hợp đồng S2-FL-10, thân hàm trả 501 tới S3-BE-02; test chéo tenant làm cùng task đó',
+  },
+  'GET /v1/sessions/{id}/attendance/history': {
+    notApplicable:
+      'hợp đồng S2-FL-10, thân hàm trả 501 tới S3-BE-03; test chéo tenant làm cùng task đó',
+  },
+  'POST /v1/push/register': {
+    notApplicable:
+      'hợp đồng S2-FL-10, thân hàm trả 501 tới S3-BE-05; test chéo tenant làm cùng task đó',
+  },
+  'POST /v1/push/unregister': {
+    notApplicable:
+      'hợp đồng S2-FL-10, thân hàm trả 501 tới S3-BE-05; test chéo tenant làm cùng task đó',
+  },
+  'GET /v1/notifications': {
+    notApplicable:
+      'hợp đồng S2-FL-10, thân hàm trả 501 tới S3-BE-06; test chéo tenant làm cùng task đó',
+  },
+  'POST /v1/notifications/read': {
+    notApplicable:
+      'hợp đồng S2-FL-10, thân hàm trả 501 tới S3-BE-06; test chéo tenant làm cùng task đó',
+  },
+  'POST /v1/students/{id}/invites': {
+    notApplicable:
+      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-03; test chéo tenant/học viên làm cùng task đó',
+  },
+  'GET /v1/students/{id}/invites': {
+    notApplicable:
+      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-03; test chéo tenant/học viên làm cùng task đó',
+  },
+  'POST /v1/invites/{id}/revoke': {
+    notApplicable:
+      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-03; test chéo tenant/học viên làm cùng task đó',
+  },
+  'POST /v1/invites/{id}/resend': {
+    notApplicable:
+      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-03; test chéo tenant/học viên làm cùng task đó',
+  },
+  'POST /v1/invites/redeem-code': {
+    notApplicable:
+      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-04; test chéo tenant/học viên làm cùng task đó',
+  },
+  'POST /v1/consents': {
+    notApplicable:
+      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-05; test chéo tenant/học viên làm cùng task đó',
+  },
+  'GET /v1/consents/status': {
+    notApplicable:
+      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-05; test chéo tenant/học viên làm cùng task đó',
+  },
+  'GET /v1/family/students': {
+    notApplicable:
+      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-06; test chéo tenant/học viên làm cùng task đó',
+  },
+  'GET /v1/family/students/{id}/attendance': {
+    notApplicable:
+      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-06; test chéo tenant/học viên làm cùng task đó',
+  },
+  'POST /v1/web-push/subscriptions': {
+    notApplicable:
+      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-08b; test chéo tenant/học viên làm cùng task đó',
+  },
+  'POST /v1/web-push/unsubscribe': {
+    notApplicable:
+      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-08b; test chéo tenant/học viên làm cùng task đó',
+  },
+  'POST /v1/invites/preview': {
+    notApplicable:
+      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-04; test chéo tenant/học viên làm cùng task đó',
+  },
+  'POST /v1/invites/accept': {
+    notApplicable:
+      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-04; test chéo tenant/học viên làm cùng task đó',
+  },
+  'POST /v1/sessions/{id}/reschedule': {
+    notApplicable:
+      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-07; test chéo tenant/học viên làm cùng task đó',
+  },
+  'POST /v1/sessions/{id}/cancel': {
+    notApplicable:
+      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-07; test chéo tenant/học viên làm cùng task đó',
+  },
+  'POST /v1/sessions/{id}/makeup': {
+    notApplicable:
+      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-07; test chéo tenant/học viên làm cùng task đó',
+  },
+  'DELETE /v1/me': {
+    notApplicable:
+      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-09; test chéo tenant/học viên làm cùng task đó',
   },
 };

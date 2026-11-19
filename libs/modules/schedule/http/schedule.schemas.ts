@@ -112,6 +112,12 @@ export const sessionSchema = z
     endsAt: z.iso.datetime({ offset: true }),
     status: sessionStatusSchema,
     isMakeup: z.boolean(),
+    cancelReason: z.string().max(300).nullable().meta({
+      description: 'Lý do hủy; null nếu buổi chưa hủy hoặc không nhập lý do',
+    }),
+    makeupOf: z.uuid().nullable().meta({
+      description: 'Id buổi gốc nếu đây là buổi bù; null nếu không phải',
+    }),
   })
   .meta({ id: 'Session' });
 
@@ -154,6 +160,8 @@ export const sessionsResponseSchema = z
           endsAt: '2026-12-15T19:30:00+07:00',
           status: 'planned',
           isMakeup: false,
+          cancelReason: null,
+          makeupOf: null,
         },
         {
           id: '019b2c41-0001-7a10-8a01-000000000002',
@@ -164,8 +172,53 @@ export const sessionsResponseSchema = z
           endsAt: '2026-12-17T19:30:00+07:00',
           status: 'planned',
           isMakeup: false,
+          cancelReason: null,
+          makeupOf: null,
         },
       ],
     },
   });
 export type SessionsResponse = z.infer<typeof sessionsResponseSchema>;
+
+const reasonSchema = z.string().trim().max(300).optional().meta({
+  description: 'Lý do, hiện cho phụ huynh trong thông báo; tùy chọn',
+  example: 'Cô bận việc đột xuất',
+});
+
+const sessionTimeFields = z.object({
+  startsAt: z.iso.datetime({ offset: true }).meta({
+    description: 'Giờ bắt đầu mới, phải ở tương lai',
+    example: '2026-12-18T18:00:00+07:00',
+  }),
+  durationMin: z.int().min(15).max(480).optional().meta({
+    description: 'Thời lượng mới; bỏ trống = giữ thời lượng buổi gốc',
+  }),
+});
+
+export const rescheduleSessionRequestSchema = sessionTimeFields
+  .extend({ reason: reasonSchema })
+  .meta({
+    id: 'RescheduleSessionRequest',
+    example: {
+      startsAt: '2026-12-18T18:00:00+07:00',
+      reason: 'Cô bận việc đột xuất',
+    },
+  });
+export type RescheduleSessionRequest = z.infer<
+  typeof rescheduleSessionRequestSchema
+>;
+
+export const cancelSessionRequestSchema = z
+  .object({ reason: reasonSchema })
+  .meta({
+    id: 'CancelSessionRequest',
+    example: { reason: 'Cô bận việc đột xuất' },
+  });
+export type CancelSessionRequest = z.infer<typeof cancelSessionRequestSchema>;
+
+export const makeupSessionRequestSchema = sessionTimeFields.meta({
+  id: 'MakeupSessionRequest',
+  example: { startsAt: '2026-12-20T18:00:00+07:00' },
+});
+export type MakeupSessionRequest = z.infer<typeof makeupSessionRequestSchema>;
+export type Session = z.infer<typeof sessionSchema>;

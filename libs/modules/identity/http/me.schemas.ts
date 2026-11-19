@@ -69,3 +69,17 @@ export const membershipCreatedSchema = z
     example: { membershipId: '019a8f3e-ac32-7a77-8e3f-4d5e6f7a8b92' },
   });
 export type MembershipCreated = z.infer<typeof membershipCreatedSchema>;
+
+export const deleteAccountRequestSchema = z
+  .object({
+    otp: z
+      .string()
+      .regex(/^\d{6}$/)
+      .meta({
+        description:
+          'Mã OTP 6 số gửi tới email của user qua `POST /auth/otp/send` với `purpose = delete_account`',
+        example: '482913',
+      }),
+  })
+  .meta({ id: 'DeleteAccountRequest' });
+export type DeleteAccountRequest = z.infer<typeof deleteAccountRequestSchema>;

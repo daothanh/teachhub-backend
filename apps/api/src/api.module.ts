@@ -14,9 +14,13 @@ import {
   ThrottleModule,
 } from '@teachhub/infra';
 import { AdminModule } from '@teachhub/modules/admin';
+import { AttendanceModule } from '@teachhub/modules/attendance';
 import { AuthModule } from '@teachhub/modules/auth';
 import { ClassesModule } from '@teachhub/modules/classes';
+import { FamilyModule } from '@teachhub/modules/family';
 import { IdentityModule } from '@teachhub/modules/identity';
+import { InvitesModule } from '@teachhub/modules/invites';
+import { NotificationsModule } from '@teachhub/modules/notifications';
 import { ScheduleModule } from '@teachhub/modules/schedule';
 import { StudentsModule } from '@teachhub/modules/students';
 import { TenancyModule } from '@teachhub/modules/tenancy';
@@ -39,6 +43,10 @@ import { HealthController } from './health/health.controller.js';
     StudentsModule,
     ScheduleModule,
     AdminModule,
+    AttendanceModule,
+    NotificationsModule,
+    InvitesModule,
+    FamilyModule,
   ],
   controllers: [AppConfigController, HealthController],
   providers: [
