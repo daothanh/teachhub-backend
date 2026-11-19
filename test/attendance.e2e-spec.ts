@@ -583,4 +583,42 @@ describe('điểm danh API', () => {
     );
     expect(res.statusCode).toBe(403);
   });
+  it('học viên chỉ đọc (vượt gói): mutation → rejected READONLY_PLAN_LIMIT và không bị tạo dòng "Có mặt" ngầm', async () => {
+    const w = await world(A);
+    const ro = w.studentIds[2]!;
+    await t.worker.query(
+      `update students set is_readonly = true where id = $1`,
+      [ro],
+    );
+    const res = await call(
+      A,
+      'POST',
+      '/attendance/sync',
+      batch(
+        w.sessionId,
+        [mut(ro, 'unexcused'), mut(w.studentIds[0]!, 'late')],
+        {
+          markSessionTaught: true,
+        },
+      ),
+    );
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json().results[0]).toMatchObject({
+      result: 'rejected',
+      errorCode: 'READONLY_PLAN_LIMIT',
+    });
+    expect(res.json().sessionStatus).toBe('taught');
+    const { rows } = await t.worker.query(
+      `select student_id from attendance where session_id = $1`,
+      [w.sessionId],
+    );
+    const got = rows.map((r) => r.student_id as string).sort();
+    expect(got).toEqual([w.studentIds[0]!, w.studentIds[1]!].sort()); // không có dòng của học viên chỉ đọc
+    expect(res.json().summary).toEqual({
+      present: 1,
+      late: 1,
+      excused: 0,
+      unexcused: 0,
+    });
+  });
 });

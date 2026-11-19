@@ -263,7 +263,8 @@ export class AttendanceService {
         .set({ status: 'taught' })
         .where(and(eq(sessions.tenantId, tenantId), eq(sessions.id, s.id)));
       for (const st of roster) {
-        if (lines.has(st.id)) continue;
+        // Học viên chỉ đọc (vượt gói) không qua cổng READONLY_PLAN_LIMIT của mutation thì cũng không được tạo ngầm.
+        if (st.isReadonly || lines.has(st.id)) continue;
         lines.set(st.id, {
           id: uuidv7(),
           isNew: true,
