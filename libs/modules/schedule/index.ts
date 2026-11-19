@@ -16,3 +16,7 @@ export {
   GenerateSessionsJob,
   JOB_GENERATE_SESSIONS,
 } from './application/generate-sessions.job.js';
+export {
+  SCHEDULE_CHANGED,
+  type ScheduleChangedPayload,
+} from './domain/schedule-events.js';

@@ -7,6 +7,7 @@ import {
   gt,
   inArray,
   isNotNull,
+  isNull,
   type SQL,
   sql,
 } from 'drizzle-orm';
@@ -157,6 +158,8 @@ export class ScheduleService {
         endsAt: sessions.endsAt,
         status: sessions.status,
         isMakeup: sessions.isMakeup,
+        cancelReason: sessions.cancelReason,
+        makeupOf: sessions.makeupOf,
       })
       .from(sessions)
       .innerJoin(classes, eq(classes.id, sessions.classId))
@@ -172,9 +175,6 @@ export class ScheduleService {
     return {
       items: rows.map((r) => ({
         ...r,
-        // shortcut: chưa có cột cancel_reason/makeup_of (US-2.2, US-2.6); S4-BE-07 thêm cột và trả giá trị thật.
-        cancelReason: null,
-        makeupOf: null,
         status: r.status as 'planned' | 'taught' | 'cancelled',
         startsAt: formatInZone(r.startsAt, tz),
         endsAt: formatInZone(r.endsAt, tz),
@@ -194,6 +194,8 @@ export class ScheduleService {
       eq(sessions.status, 'planned'),
       eq(sessions.isMakeup, false),
       isNotNull(sessions.ruleId),
+      // Buổi đã dời là ngoại lệ của giáo viên: lịch lặp không xóa, không ghi đè.
+      isNull(sessions.rescheduledFrom),
       gt(sessions.startsAt, now),
       // shortcut: kiểm tra này và lệnh xóa không cùng khóa, nên điểm danh vừa lưu đúng lúc reconcile xóa buổi vẫn có thể đua; FK sẽ chặn xóa (lỗi, không mất dữ liệu). Cần khóa buổi khi tải tăng.
       // Buổi đã có điểm danh (lưu mà chưa chuyển "đã dạy") không bị xóa theo lịch.
@@ -279,9 +281,21 @@ export class ScheduleService {
             ),
           ),
         );
-      const haveKeys = new Set(
-        have.map((s) => `${s.date}|${s.startsAt.getTime()}`),
-      );
+      // Khung giờ gốc của buổi đã dời vẫn "có chủ": không sinh lại buổi cũ sau khi giáo viên dời đi.
+      const moved = await tx
+        .select({ from: sessions.rescheduledFrom })
+        .from(sessions)
+        .where(
+          and(
+            eq(sessions.tenantId, tenantId),
+            eq(sessions.classId, cls.id),
+            isNotNull(sessions.rescheduledFrom),
+          ),
+        );
+      const haveKeys = new Set([
+        ...have.map((s) => `${s.date}|${s.startsAt.getTime()}`),
+        ...moved.map((s) => `${localDate(s.from!, tz)}|${s.from!.getTime()}`),
+      ]);
       const missing = desired.filter(
         (s) => !haveKeys.has(`${s.sessionDate}|${s.startsAt.getTime()}`),
       );
