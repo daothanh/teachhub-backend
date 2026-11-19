@@ -51,6 +51,7 @@ describe('outbox', () => {
     const connection = {
       url: redis.getConnectionUrl(),
       maxRetriesPerRequest: null,
+      enableOfflineQueue: false, // như cấu hình producer ở OutboxModule
     };
     urgent = new Queue('urgent', { connection });
     events = new Queue('events', { connection });

@@ -10,5 +10,5 @@ create policy outbox_events_staff_insert on outbox_events for insert to teachhub
 --> statement-breakpoint
 revoke select, update, delete on outbox_events from teachhub_app;
 --> statement-breakpoint
--- Bảng nhiều UPDATE/DELETE (lease, đánh dấu gửi, dọn): chừa chỗ cho HOT update và vacuum sớm.
-alter table outbox_events set (fillfactor = 80, autovacuum_vacuum_scale_factor = 0.02);
+-- Bảng nhiều UPDATE/DELETE: vacuum sớm. Không đặt fillfactor vì các update đổi cột nằm trong index partial nên không HOT được.
+alter table outbox_events set (autovacuum_vacuum_scale_factor = 0.02);

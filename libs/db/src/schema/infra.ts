@@ -78,7 +78,7 @@ export const outboxEvents = pgTable(
   },
   (t) => [
     index('outbox_events_pending_idx')
-      .on(t.nextAttemptAt)
+      .on(t.nextAttemptAt, t.id)
       .where(sql`${t.dispatchedAt} is null and ${t.failedAt} is null`),
     // Phục vụ job dọn sự kiện đã gửi quá hạn giữ.
     index('outbox_events_dispatched_idx')

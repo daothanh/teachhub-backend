@@ -59,6 +59,7 @@ export class OutboxRelayService
   private stopped = false;
   private running: Promise<unknown> = Promise.resolve();
   private infraFailures = 0;
+  private lastBatchInfraFailed = false;
   private readonly queues: Record<OutboxQueueName, Queue>;
   /** Public để test chỉnh nhỏ lại. */
   leaseMs = OUTBOX_LEASE_MS;
@@ -90,10 +91,12 @@ export class OutboxRelayService
         })
         .then((claimed) => {
           if (this.stopped) return;
-          // Lô đầy → còn việc, chạy tiếp ngay; ngược lại chờ chu kỳ quét.
+          // Lô đầy và Redis ổn → còn việc, chạy tiếp ngay; có lỗi hạ tầng thì chờ chu kỳ quét, không quay vòng sát.
           this.timer = setTimeout(
             tick,
-            claimed >= OUTBOX_BATCH_SIZE ? 0 : OUTBOX_POLL_MS,
+            claimed >= OUTBOX_BATCH_SIZE && !this.lastBatchInfraFailed
+              ? 0
+              : OUTBOX_POLL_MS,
           );
         });
     };
@@ -139,6 +142,7 @@ export class OutboxRelayService
         }
       }),
     );
+    this.lastBatchInfraFailed = infraFailed.length > 0;
     if (infraFailed.length > 0) {
       this.infraFailures = sent.length > 0 ? 0 : this.infraFailures + 1;
       this.log.warn(
@@ -154,7 +158,7 @@ export class OutboxRelayService
       if (infraFailed.length > 0)
         await tx.execute(
           sql`update outbox_events set next_attempt_at = now() + ${infraBackoffMs(this.infraFailures)} * interval '1 millisecond'
-              where id in (${idList(infraFailed)})`,
+              where id in (${idList(infraFailed)}) and dispatched_at is null`,
         );
       for (const { ev, message } of eventFailed) {
         const attempts = ev.attempts + 1;
@@ -168,9 +172,9 @@ export class OutboxRelayService
         else this.log.warn(`outbox ${ev.id} lỗi lần ${attempts}: ${message}`);
         await tx.execute(
           outcome.failed
-            ? sql`update outbox_events set attempts = ${attempts}, last_error = ${message}, failed_at = now() where id = ${ev.id}`
+            ? sql`update outbox_events set attempts = ${attempts}, last_error = ${message}, failed_at = now() where id = ${ev.id} and dispatched_at is null`
             : sql`update outbox_events set attempts = ${attempts}, last_error = ${message},
-                  next_attempt_at = now() + ${outcome.retryInMs} * interval '1 millisecond' where id = ${ev.id}`,
+                  next_attempt_at = now() + ${outcome.retryInMs} * interval '1 millisecond' where id = ${ev.id} and dispatched_at is null`,
         );
       }
     });

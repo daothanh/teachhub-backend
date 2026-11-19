@@ -11,5 +11,5 @@ CREATE TABLE "outbox_events" (
 	"failed_at" timestamp with time zone
 );
 --> statement-breakpoint
-CREATE INDEX "outbox_events_pending_idx" ON "outbox_events" USING btree ("next_attempt_at") WHERE "outbox_events"."dispatched_at" is null and "outbox_events"."failed_at" is null;--> statement-breakpoint
+CREATE INDEX "outbox_events_pending_idx" ON "outbox_events" USING btree ("next_attempt_at","id") WHERE "outbox_events"."dispatched_at" is null and "outbox_events"."failed_at" is null;--> statement-breakpoint
 CREATE INDEX "outbox_events_dispatched_idx" ON "outbox_events" USING btree ("dispatched_at") WHERE "outbox_events"."dispatched_at" is not null;
