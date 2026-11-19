@@ -6,3 +6,4 @@ export * from './classes.js';
 export * from './students.js';
 export * from './schedule.js';
 export * from './attendance.js';
+export * from './notifications.js';

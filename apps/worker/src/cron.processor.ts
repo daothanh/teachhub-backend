@@ -6,6 +6,10 @@ import {
   PurgeIdempotencyKeysJob,
 } from '@teachhub/infra';
 import {
+  JOB_PURGE_STALE_DEVICES,
+  PurgeStaleDevicesJob,
+} from '@teachhub/modules/notifications';
+import {
   GenerateSessionsJob,
   JOB_GENERATE_SESSIONS,
 } from '@teachhub/modules/schedule';
@@ -24,6 +28,7 @@ export class CronProcessor
     @InjectQueue(CRON_QUEUE) private readonly queue: Queue,
     private readonly generate: GenerateSessionsJob,
     private readonly purge: PurgeIdempotencyKeysJob,
+    private readonly purgeDevices: PurgeStaleDevicesJob,
   ) {
     super();
   }
@@ -44,6 +49,11 @@ export class CronProcessor
       { pattern: '30 1 * * *', tz: TZ },
       { name: JOB_PURGE_IDEMPOTENCY, opts },
     );
+    await this.queue.upsertJobScheduler(
+      JOB_PURGE_STALE_DEVICES,
+      { pattern: '45 1 * * *', tz: TZ },
+      { name: JOB_PURGE_STALE_DEVICES, opts },
+    );
   }
 
   async process(job: Job): Promise<number> {
@@ -52,6 +62,8 @@ export class CronProcessor
         return this.generate.run();
       case JOB_PURGE_IDEMPOTENCY:
         return this.purge.run();
+      case JOB_PURGE_STALE_DEVICES:
+        return this.purgeDevices.run();
       default:
         throw new Error(`Job không biết: ${job.name}`);
     }

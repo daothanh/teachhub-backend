@@ -150,12 +150,12 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
     test: 'nhật ký chéo tenant: B không xem được buổi của A (404); chỉ tenant_owner xem được (giáo viên thường 403)',
   },
   'POST /v1/push/register': {
-    notApplicable:
-      'hợp đồng S2-FL-10, thân hàm trả 501 tới S3-BE-05; test chéo tenant làm cùng task đó',
+    file: 'push.e2e-spec.ts',
+    test: 'chéo tenant: userId trong body khác token → 403 FORBIDDEN, không ghi gì',
   },
   'POST /v1/push/unregister': {
-    notApplicable:
-      'hợp đồng S2-FL-10, thân hàm trả 501 tới S3-BE-05; test chéo tenant làm cùng task đó',
+    file: 'push.e2e-spec.ts',
+    test: 'chéo tenant: userId trong body khác token → 403 FORBIDDEN, không ghi gì',
   },
   'GET /v1/notifications': {
     notApplicable:

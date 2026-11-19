@@ -59,6 +59,8 @@ export const envSchema = z
     /** Khóa cũ khi xoay vòng: PEM SPKI + kid, giữ tới khi access token cũ hết hạn (15 phút). */
     JWT_PREVIOUS_PUBLIC_KEY: z.string().optional(),
     JWT_PREVIOUS_KID: z.string().optional(),
+    /** Service account Firebase (JSON một dòng) để worker gửi FCM. Trống = tắt gửi push, worker vẫn chạy và log cảnh báo. */
+    FCM_SERVICE_ACCOUNT_JSON: z.string().optional(),
   })
   .refine((e) => e.JWT_PRIVATE_KEY || ['local', 'test'].includes(e.NODE_ENV), {
     path: ['JWT_PRIVATE_KEY'],

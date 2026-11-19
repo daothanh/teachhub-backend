@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { CoreModule, type Env } from '@teachhub/core';
 import { DbModule } from '@teachhub/db';
 import { JobsModule, RedisModule } from '@teachhub/infra';
+import { NotificationsJobsModule } from '@teachhub/modules/notifications';
 import { ScheduleRulesModule } from '@teachhub/modules/schedule';
 import { CRON_QUEUE, CronProcessor } from './cron.processor.js';
 import { OutboxModule } from './outbox/outbox.module.js';
@@ -16,6 +17,7 @@ import { OutboxModule } from './outbox/outbox.module.js';
     RedisModule,
     JobsModule,
     ScheduleRulesModule,
+    NotificationsJobsModule,
     BullModule.registerQueue({ name: CRON_QUEUE }),
     BullModule.forRootAsync({
       inject: [ConfigService],
