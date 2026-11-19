@@ -8,6 +8,7 @@ import {
   inArray,
   isNotNull,
   type SQL,
+  sql,
 } from 'drizzle-orm';
 import { AppException, uuidv7 } from '@teachhub/core';
 import {
@@ -191,6 +192,8 @@ export class ScheduleService {
       eq(sessions.isMakeup, false),
       isNotNull(sessions.ruleId),
       gt(sessions.startsAt, now),
+      // Buổi đã có điểm danh (lưu mà chưa chuyển "đã dạy") không bị xóa theo lịch.
+      sql`not exists (select 1 from attendance a where a.session_id = ${sessions.id})`,
       extra,
     );
   }

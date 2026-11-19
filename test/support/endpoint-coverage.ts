@@ -138,12 +138,12 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
       'hợp đồng S1-CT-02, thân hàm trả 501 tới task admin; test chéo tenant làm cùng task đó',
   },
   'GET /v1/sessions/{id}/attendance': {
-    notApplicable:
-      'hợp đồng S2-FL-10, thân hàm trả 501 tới S3-BE-02; test chéo tenant làm cùng task đó',
+    file: 'attendance.e2e-spec.ts',
+    test: 'chéo tenant: B không đọc/ghi buổi của A (404); học viên tenant khác và học viên ngoài lớp cho cùng kết quả',
   },
   'POST /v1/attendance/sync': {
-    notApplicable:
-      'hợp đồng S2-FL-10, thân hàm trả 501 tới S3-BE-02; test chéo tenant làm cùng task đó',
+    file: 'attendance.e2e-spec.ts',
+    test: 'chéo tenant: B không đọc/ghi buổi của A (404); học viên tenant khác và học viên ngoài lớp cho cùng kết quả',
   },
   'GET /v1/sessions/{id}/attendance/history': {
     notApplicable:

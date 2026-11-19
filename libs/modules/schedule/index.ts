@@ -7,7 +7,11 @@ export {
   sessionStatusSchema,
   type ScheduleRule,
 } from './http/schedule.schemas.js';
-export { localDate } from './domain/zoned-time.js';
+export {
+  formatInZone,
+  localDate,
+  zonedToInstant,
+} from './domain/zoned-time.js';
 export {
   GenerateSessionsJob,
   JOB_GENERATE_SESSIONS,
