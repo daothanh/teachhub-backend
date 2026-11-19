@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { Redis } from 'ioredis';
+import pg from 'pg';
 import { GenericContainer, type StartedTestContainer } from 'testcontainers';
 import { startTestApp, type TestApp } from './support/app.js';
-import { seedTenant } from './support/seed.js';
+import { seedMember, seedTenant } from './support/seed.js';
 
 type OtpService = InstanceType<
   typeof import('../libs/modules/auth/otp/otp.service.js').OtpService
@@ -175,7 +176,6 @@ describe('xóa tài khoản: DELETE /v1/me', () => {
     ]);
     expect(blocked.json().details).toMatchObject({
       reason: 'TENANT_HAS_ACTIVE_CLASSES',
-      activeClasses: 1,
     });
     expect(
       (
@@ -242,18 +242,16 @@ describe('xóa tài khoản: DELETE /v1/me', () => {
       ),
     ).toBeGreaterThan(0);
 
-    // Token cũ mất quyền chủ không gian; gửi lại cùng khóa → phát lại 204.
+    // Token cũ bị từ chối 401 ở mọi route.
     const old = await t.app.inject({
       method: 'GET',
       url: '/v1/classes',
       headers: bearer(token),
     });
-    expect(old.statusCode).toBe(403);
+    expect(old.statusCode).toBe(401);
     const replay = await del(token, code, key);
-    expect([replay.statusCode, replay.headers['idempotent-replayed']]).toEqual([
-      204,
-      'true',
-    ]);
+    // Token cũ bị guard chặn kể cả khi gửi lại cùng khóa.
+    expect(replay.statusCode).toBe(401);
     // refresh token cũ không còn dùng được.
     expect(
       (
@@ -344,5 +342,115 @@ describe('xóa tài khoản: DELETE /v1/me', () => {
         await q(`select deleted_at from tenants where id = $1`, [a.tenantId])
       )[0],
     ).toEqual({ deleted_at: null });
+  });
+
+  it('sau khi xóa, token cũ không sống lại tài khoản: POST /me/roles, đăng ký thiết bị → 401; CSDL cũng từ chối', async () => {
+    const parent = randomUUID();
+    const email = `${parent}@example.com`;
+    await t.worker.query(`insert into users (id, email) values ($1, $2)`, [
+      parent,
+      email,
+    ]);
+    const token = await t.tokenFor(parent);
+    expect(
+      (await del(token, await otp.issue(email, 'delete_account'))).statusCode,
+    ).toBe(204);
+
+    const roles = await t.app.inject({
+      method: 'POST',
+      url: '/v1/me/roles',
+      payload: { role: 'parent' },
+      headers: { ...bearer(token), 'idempotency-key': randomUUID() },
+    });
+    expect(roles.statusCode).toBe(401);
+    const push = await t.app.inject({
+      method: 'POST',
+      url: '/v1/push/register',
+      payload: { userId: parent, platform: 'android', deviceToken: 'tok-x' },
+      headers: { ...bearer(token), 'idempotency-key': randomUUID() },
+    });
+    expect(push.statusCode).toBe(401);
+
+    // Chốt thứ hai ở CSDL (khi guard bị lách, vd. Redis mất khóa): chạy bằng vai trò api.
+    const appDb = new pg.Pool({ connectionString: t.db.url('teachhub_app') });
+    const asUser = async (sql: string, params: unknown[]) => {
+      const c = await appDb.connect();
+      try {
+        await c.query('begin');
+        await c.query(`select set_config('app.user_id', $1, true)`, [parent]);
+        await c.query(sql, params);
+      } finally {
+        await c.query('rollback');
+        c.release();
+      }
+    };
+    await expect(
+      asUser(
+        `insert into memberships (id, user_id, role) values ($1, $2, 'parent')`,
+        [randomUUID(), parent],
+      ),
+    ).rejects.toThrow();
+    await expect(
+      asUser(`select app_private.register_device($1, 'tok-y', 'ios')`, [
+        randomUUID(),
+      ]),
+    ).rejects.toThrow();
+    await expect(
+      asUser(`select app_private.delete_account()`, []),
+    ).rejects.toThrow();
+    await appDb.end();
+    expect(
+      (await q(`select 1 from memberships where user_id = $1`, [parent]))
+        .length,
+    ).toBe(0);
+  });
+
+  it('chủ còn nhân sự khác → 409 OWNER_HAS_STAFF; nhân sự duy nhất (vai teacher) còn lớp active → 409, hết lớp → 204', async () => {
+    const owner = await seedTenant(t.worker);
+    await seedMember(t.worker, owner.tenantId, 'teacher');
+    const ownerToken = await t.tokenFor(owner.userId);
+    const staff = await del(ownerToken, '123456');
+    expect([staff.statusCode, staff.json().details]).toEqual([
+      409,
+      { reason: 'OWNER_HAS_STAFF' },
+    ]);
+
+    // Nhân sự duy nhất, vai teacher.
+    const solo = await seedTenant(t.worker);
+    const soloEmail = await emailOf(solo.userId);
+    const soloToken = await t.tokenFor(solo.userId);
+    const made = await t.app.inject({
+      method: 'POST',
+      url: '/v1/classes',
+      payload: {
+        name: 'Toán 9A',
+        subject: 'Toán',
+        grade: 9,
+        mode: 'online',
+        startDate: '2030-01-07',
+      },
+      headers: { ...bearer(soloToken), 'idempotency-key': randomUUID() },
+    });
+    expect(made.statusCode, made.body).toBe(201);
+    await t.worker.query(
+      `update memberships set role = 'teacher' where user_id = $1`,
+      [solo.userId],
+    );
+    const code = await otp.issue(soloEmail, 'delete_account');
+    const blocked = await del(soloToken, code);
+    expect([blocked.statusCode, blocked.json().details]).toEqual([
+      409,
+      { reason: 'TENANT_HAS_ACTIVE_CLASSES' },
+    ]);
+    await t.worker.query(
+      `update classes set status = 'archived' where id = $1`,
+      [made.json().id],
+    );
+    expect((await del(soloToken, code)).statusCode).toBe(204);
+    expect(
+      (
+        await q(`select deleted_at from tenants where id = $1`, [solo.tenantId])
+      )[0].deleted_at,
+    ).not.toBeNull();
   });
 });

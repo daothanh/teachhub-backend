@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, ne } from 'drizzle-orm';
 import { AppException, uuidv7 } from '@teachhub/core';
 import {
   attendance,
@@ -113,7 +113,14 @@ export class SessionChangesService {
     const [taken] = await tx
       .select({ id: sessions.id })
       .from(sessions)
-      .where(and(eq(sessions.tenantId, tenantId), eq(sessions.makeupOf, id)));
+      .where(
+        and(
+          eq(sessions.tenantId, tenantId),
+          eq(sessions.makeupOf, id),
+          // Buổi bù đã hủy thì cho tạo buổi bù mới.
+          ne(sessions.status, 'cancelled'),
+        ),
+      );
     if (taken) throw new AppException('CONFLICT_STALE');
     const startsAt = this.future(body.startsAt, now);
     const length = body.durationMin

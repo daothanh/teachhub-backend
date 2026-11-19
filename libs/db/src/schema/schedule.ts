@@ -83,7 +83,7 @@ export const sessions = pgTable(
     isMakeup: boolean().notNull().default(false),
     /** Lý do hủy (US-2.2); null nếu chưa hủy hoặc không nhập. */
     cancelReason: text(),
-    /** Buổi gốc đã hủy mà buổi bù này thay thế; mỗi buổi gốc tối đa một buổi bù. */
+    /** Buổi gốc đã hủy mà buổi bù này thay thế; mỗi buổi gốc tối đa một buổi bù còn hiệu lực (buổi bù đã hủy thì cho tạo buổi bù khác). */
     makeupOf: uuid(),
     /** Giờ bắt đầu gốc khi buổi đã bị dời (US-2.2): reconcile coi khung giờ đó đã có chủ, không sinh lại và không xóa buổi đã dời. */
     rescheduledFrom: timestamp({ withTimezone: true }),
@@ -103,7 +103,7 @@ export const sessions = pgTable(
     }),
     uniqueIndex('sessions_makeup_of_uq')
       .on(t.makeupOf)
-      .where(sql`${t.makeupOf} is not null`),
+      .where(sql`${t.makeupOf} is not null and ${t.status} <> 'cancelled'`),
     check(
       'sessions_cancel_reason_check',
       sql`char_length(${t.cancelReason}) <= 300`,

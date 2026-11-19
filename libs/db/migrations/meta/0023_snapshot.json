@@ -1,5 +1,5 @@
 {
-  "id": "c15b1b24-f8a7-42a8-87d3-8f6b97ccc4e0",
+  "id": "659ee302-e2d3-4549-b776-c467227a3fde",
   "prevId": "ac799deb-ab28-4b5a-9fee-f2d87b150b00",
   "version": "7",
   "dialect": "postgresql",
@@ -118,8 +118,12 @@
           "name": "attendance_tenant_id_tenants_id_fk",
           "tableFrom": "attendance",
           "tableTo": "tenants",
-          "columnsFrom": ["tenant_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -127,8 +131,14 @@
           "name": "attendance_tenant_session_fk",
           "tableFrom": "attendance",
           "tableTo": "sessions",
-          "columnsFrom": ["tenant_id", "session_id"],
-          "columnsTo": ["tenant_id", "id"],
+          "columnsFrom": [
+            "tenant_id",
+            "session_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -136,8 +146,14 @@
           "name": "attendance_tenant_student_fk",
           "tableFrom": "attendance",
           "tableTo": "students",
-          "columnsFrom": ["tenant_id", "student_id"],
-          "columnsTo": ["tenant_id", "id"],
+          "columnsFrom": [
+            "tenant_id",
+            "student_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -147,12 +163,18 @@
         "attendance_session_student_uq": {
           "name": "attendance_session_student_uq",
           "nullsNotDistinct": false,
-          "columns": ["session_id", "student_id"]
+          "columns": [
+            "session_id",
+            "student_id"
+          ]
         },
         "attendance_tenant_mutation_uq": {
           "name": "attendance_tenant_mutation_uq",
           "nullsNotDistinct": false,
-          "columns": ["tenant_id", "client_mutation_id"]
+          "columns": [
+            "tenant_id",
+            "client_mutation_id"
+          ]
         }
       },
       "policies": {},
@@ -296,8 +318,12 @@
           "name": "classes_tenant_id_tenants_id_fk",
           "tableFrom": "classes",
           "tableTo": "tenants",
-          "columnsFrom": ["tenant_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -305,8 +331,14 @@
           "name": "classes_tenant_branch_fk",
           "tableFrom": "classes",
           "tableTo": "branches",
-          "columnsFrom": ["tenant_id", "branch_id"],
-          "columnsTo": ["tenant_id", "id"],
+          "columnsFrom": [
+            "tenant_id",
+            "branch_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -316,7 +348,10 @@
         "classes_tenant_id_id_uq": {
           "name": "classes_tenant_id_id_uq",
           "nullsNotDistinct": false,
-          "columns": ["tenant_id", "id"]
+          "columns": [
+            "tenant_id",
+            "id"
+          ]
         }
       },
       "policies": {},
@@ -427,8 +462,12 @@
           "name": "auth_identities_user_id_users_id_fk",
           "tableFrom": "auth_identities",
           "tableTo": "users",
-          "columnsFrom": ["user_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -502,8 +541,12 @@
           "name": "center_waitlist_user_id_users_id_fk",
           "tableFrom": "center_waitlist",
           "tableTo": "users",
-          "columnsFrom": ["user_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -657,8 +700,12 @@
           "name": "memberships_user_id_users_id_fk",
           "tableFrom": "memberships",
           "tableTo": "users",
-          "columnsFrom": ["user_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -666,8 +713,12 @@
           "name": "memberships_tenant_id_tenants_id_fk",
           "tableFrom": "memberships",
           "tableTo": "tenants",
-          "columnsFrom": ["tenant_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -675,8 +726,14 @@
           "name": "memberships_tenant_branch_fk",
           "tableFrom": "memberships",
           "tableTo": "branches",
-          "columnsFrom": ["tenant_id", "branch_id"],
-          "columnsTo": ["tenant_id", "id"],
+          "columnsFrom": [
+            "tenant_id",
+            "branch_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -807,8 +864,12 @@
           "name": "refresh_tokens_user_id_users_id_fk",
           "tableFrom": "refresh_tokens",
           "tableTo": "users",
-          "columnsFrom": ["user_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -818,7 +879,9 @@
         "refresh_tokens_tokenHash_unique": {
           "name": "refresh_tokens_tokenHash_unique",
           "nullsNotDistinct": false,
-          "columns": ["token_hash"]
+          "columns": [
+            "token_hash"
+          ]
         }
       },
       "policies": {},
@@ -893,8 +956,12 @@
           "name": "users_last_membership_id_memberships_id_fk",
           "tableFrom": "users",
           "tableTo": "memberships",
-          "columnsFrom": ["last_membership_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "last_membership_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -904,7 +971,9 @@
         "users_email_unique": {
           "name": "users_email_unique",
           "nullsNotDistinct": false,
-          "columns": ["email"]
+          "columns": [
+            "email"
+          ]
         }
       },
       "policies": {},
@@ -1308,8 +1377,12 @@
           "name": "branches_tenant_id_tenants_id_fk",
           "tableFrom": "branches",
           "tableTo": "tenants",
-          "columnsFrom": ["tenant_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1319,7 +1392,10 @@
         "branches_tenant_id_id_uq": {
           "name": "branches_tenant_id_id_uq",
           "nullsNotDistinct": false,
-          "columns": ["tenant_id", "id"]
+          "columns": [
+            "tenant_id",
+            "id"
+          ]
         }
       },
       "policies": {},
@@ -1432,8 +1508,12 @@
           "name": "subscriptions_tenant_id_tenants_id_fk",
           "tableFrom": "subscriptions",
           "tableTo": "tenants",
-          "columnsFrom": ["tenant_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -1441,8 +1521,12 @@
           "name": "subscriptions_plan_code_plans_code_fk",
           "tableFrom": "subscriptions",
           "tableTo": "plans",
-          "columnsFrom": ["plan_code"],
-          "columnsTo": ["code"],
+          "columnsFrom": [
+            "plan_code"
+          ],
+          "columnsTo": [
+            "code"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1452,7 +1536,9 @@
         "subscriptions_tenantId_unique": {
           "name": "subscriptions_tenantId_unique",
           "nullsNotDistinct": false,
-          "columns": ["tenant_id"]
+          "columns": [
+            "tenant_id"
+          ]
         }
       },
       "policies": {},
@@ -1656,8 +1742,12 @@
           "name": "enrollments_tenant_id_tenants_id_fk",
           "tableFrom": "enrollments",
           "tableTo": "tenants",
-          "columnsFrom": ["tenant_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -1665,8 +1755,14 @@
           "name": "enrollments_tenant_class_fk",
           "tableFrom": "enrollments",
           "tableTo": "classes",
-          "columnsFrom": ["tenant_id", "class_id"],
-          "columnsTo": ["tenant_id", "id"],
+          "columnsFrom": [
+            "tenant_id",
+            "class_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -1674,8 +1770,14 @@
           "name": "enrollments_tenant_student_fk",
           "tableFrom": "enrollments",
           "tableTo": "students",
-          "columnsFrom": ["tenant_id", "student_id"],
-          "columnsTo": ["tenant_id", "id"],
+          "columnsFrom": [
+            "tenant_id",
+            "student_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1803,8 +1905,12 @@
           "name": "guardians_tenant_id_tenants_id_fk",
           "tableFrom": "guardians",
           "tableTo": "tenants",
-          "columnsFrom": ["tenant_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -1812,8 +1918,12 @@
           "name": "guardians_user_id_users_id_fk",
           "tableFrom": "guardians",
           "tableTo": "users",
-          "columnsFrom": ["user_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -1821,8 +1931,14 @@
           "name": "guardians_tenant_student_fk",
           "tableFrom": "guardians",
           "tableTo": "students",
-          "columnsFrom": ["tenant_id", "student_id"],
-          "columnsTo": ["tenant_id", "id"],
+          "columnsFrom": [
+            "tenant_id",
+            "student_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1969,8 +2085,12 @@
           "name": "students_tenant_id_tenants_id_fk",
           "tableFrom": "students",
           "tableTo": "tenants",
-          "columnsFrom": ["tenant_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1980,7 +2100,10 @@
         "students_tenant_id_id_uq": {
           "name": "students_tenant_id_id_uq",
           "nullsNotDistinct": false,
-          "columns": ["tenant_id", "id"]
+          "columns": [
+            "tenant_id",
+            "id"
+          ]
         }
       },
       "policies": {},
@@ -2053,8 +2176,12 @@
           "name": "schedule_rules_tenant_id_tenants_id_fk",
           "tableFrom": "schedule_rules",
           "tableTo": "tenants",
-          "columnsFrom": ["tenant_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -2062,8 +2189,14 @@
           "name": "schedule_rules_tenant_class_fk",
           "tableFrom": "schedule_rules",
           "tableTo": "classes",
-          "columnsFrom": ["tenant_id", "class_id"],
-          "columnsTo": ["tenant_id", "id"],
+          "columnsFrom": [
+            "tenant_id",
+            "class_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -2073,7 +2206,11 @@
         "schedule_rules_class_weekday_start_uq": {
           "name": "schedule_rules_class_weekday_start_uq",
           "nullsNotDistinct": false,
-          "columns": ["class_id", "weekday", "start_time"]
+          "columns": [
+            "class_id",
+            "weekday",
+            "start_time"
+          ]
         }
       },
       "policies": {},
@@ -2198,7 +2335,7 @@
             }
           ],
           "isUnique": true,
-          "where": "\"sessions\".\"makeup_of\" is not null",
+          "where": "\"sessions\".\"makeup_of\" is not null and \"sessions\".\"status\" <> 'cancelled'",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -2257,8 +2394,12 @@
           "name": "sessions_tenant_id_tenants_id_fk",
           "tableFrom": "sessions",
           "tableTo": "tenants",
-          "columnsFrom": ["tenant_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -2266,8 +2407,12 @@
           "name": "sessions_rule_id_schedule_rules_id_fk",
           "tableFrom": "sessions",
           "tableTo": "schedule_rules",
-          "columnsFrom": ["rule_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "rule_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "set null",
           "onUpdate": "no action"
         },
@@ -2275,8 +2420,14 @@
           "name": "sessions_tenant_class_fk",
           "tableFrom": "sessions",
           "tableTo": "classes",
-          "columnsFrom": ["tenant_id", "class_id"],
-          "columnsTo": ["tenant_id", "id"],
+          "columnsFrom": [
+            "tenant_id",
+            "class_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -2284,8 +2435,14 @@
           "name": "sessions_tenant_makeup_of_fk",
           "tableFrom": "sessions",
           "tableTo": "sessions",
-          "columnsFrom": ["tenant_id", "makeup_of"],
-          "columnsTo": ["tenant_id", "id"],
+          "columnsFrom": [
+            "tenant_id",
+            "makeup_of"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -2295,12 +2452,18 @@
         "sessions_rule_date_uq": {
           "name": "sessions_rule_date_uq",
           "nullsNotDistinct": false,
-          "columns": ["rule_id", "session_date"]
+          "columns": [
+            "rule_id",
+            "session_date"
+          ]
         },
         "sessions_tenant_id_id_uq": {
           "name": "sessions_tenant_id_id_uq",
           "nullsNotDistinct": false,
-          "columns": ["tenant_id", "id"]
+          "columns": [
+            "tenant_id",
+            "id"
+          ]
         }
       },
       "policies": {},
@@ -2400,8 +2563,12 @@
           "name": "devices_user_id_users_id_fk",
           "tableFrom": "devices",
           "tableTo": "users",
-          "columnsFrom": ["user_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -2411,7 +2578,9 @@
         "devices_token_unique": {
           "name": "devices_token_unique",
           "nullsNotDistinct": false,
-          "columns": ["token"]
+          "columns": [
+            "token"
+          ]
         }
       },
       "policies": {},
@@ -2510,8 +2679,12 @@
           "name": "notification_deliveries_notification_fk",
           "tableFrom": "notification_deliveries",
           "tableTo": "notifications",
-          "columnsFrom": ["notification_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "notification_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -2587,7 +2760,11 @@
         "notification_templates_type_channel_version_uq": {
           "name": "notification_templates_type_channel_version_uq",
           "nullsNotDistinct": false,
-          "columns": ["type", "channel", "version"]
+          "columns": [
+            "type",
+            "channel",
+            "version"
+          ]
         }
       },
       "policies": {},
@@ -2763,8 +2940,12 @@
           "name": "notifications_tenant_id_tenants_id_fk",
           "tableFrom": "notifications",
           "tableTo": "tenants",
-          "columnsFrom": ["tenant_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -2772,8 +2953,12 @@
           "name": "notifications_recipient_user_id_users_id_fk",
           "tableFrom": "notifications",
           "tableTo": "users",
-          "columnsFrom": ["recipient_user_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "recipient_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -2781,8 +2966,12 @@
           "name": "notifications_membership_id_memberships_id_fk",
           "tableFrom": "notifications",
           "tableTo": "memberships",
-          "columnsFrom": ["membership_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "membership_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -2792,7 +2981,10 @@
         "notifications_recipient_dedupe_uq": {
           "name": "notifications_recipient_dedupe_uq",
           "nullsNotDistinct": false,
-          "columns": ["recipient_user_id", "dedupe_key"]
+          "columns": [
+            "recipient_user_id",
+            "dedupe_key"
+          ]
         }
       },
       "policies": {},

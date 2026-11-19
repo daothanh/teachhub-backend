@@ -28,7 +28,6 @@ import {
   uuidv7,
 } from '@teachhub/core';
 import {
-  classes,
   idempotencyKeys,
   memberships,
   tenants,
@@ -36,7 +35,7 @@ import {
   users,
 } from '@teachhub/db';
 import { Idempotency } from '@teachhub/infra';
-import { OtpService } from '@teachhub/modules/auth';
+import { OtpService, SessionService } from '@teachhub/modules/auth';
 import { MembershipCache } from '../membership-cache.service.js';
 import {
   type ActiveMembershipRequest,
@@ -73,6 +72,7 @@ export class MeController {
     private readonly idem: Idempotency,
     private readonly cache: MembershipCache,
     private readonly otp: OtpService,
+    private readonly session: SessionService,
   ) {}
 
   @Get('memberships')
@@ -213,8 +213,8 @@ export class MeController {
       'Theo Spec §4.8: thu hồi mọi refresh token và membership, xóa tệp và dữ liệu cá nhân, ẩn danh hóa (vd. `students.full_name` → "Học viên đã xóa #xxxx") trong 30 ngày; ' +
       'giữ `invoices`, `payments`, `revenue_ledger`, `audit_logs` tài chính 5 năm rồi xóa hẳn bằng job. Sau khi xóa, đăng nhập lại bằng email cũ tạo tài khoản mới, không thấy dữ liệu cũ. ' +
       'Thời hạn giữ chứng từ còn chờ kế toán và luật sư rà. ' +
-      'Chủ không gian còn lớp đang hoạt động → 409 `CONFLICT_STALE` (`details.reason = TENANT_HAS_ACTIVE_CLASSES`): lưu trữ hết lớp rồi xóa lại; không xóa dở. ' +
-      'Chủ duy nhất không còn lớp hoạt động: không gian được đánh dấu xóa và học viên, phụ huynh trong đó bị ẩn danh ngay.',
+      'Chủ không gian còn nhân sự khác → 409 `CONFLICT_STALE` (`details.reason = OWNER_HAS_STAFF`, phải chuyển quyền trước). Nhân sự duy nhất của không gian còn lớp đang hoạt động → 409 (`TENANT_HAS_ACTIVE_CLASSES`): lưu trữ hết lớp rồi xóa lại. ' +
+      'Nhân sự duy nhất không còn lớp hoạt động: không gian được đánh dấu xóa và học viên, phụ huynh trong đó bị ẩn danh ngay. Access token cũ bị từ chối 401 sau khi xóa.',
   })
   @ApiNoContentResponse()
   @ApiIdempotencyKey()
@@ -234,31 +234,29 @@ export class MeController {
       // Không có email thì không có hộp thư nhận OTP.
       if (!u?.email) throw new AppException('OTP_INVALID');
 
-      // Kiểm lớp trước khi tiêu OTP: bị chặn thì mã còn dùng lại được.
-      const [{ n } = { n: 0 }] = await t
-        .select({ n: sql<number>`count(*)::int` })
-        .from(classes)
-        .where(
-          and(
-            eq(classes.status, 'active'),
-            sql`${classes.tenantId} in (select m.tenant_id from ${memberships} m
-                 where m.user_id = ${userId} and m.role = 'tenant_owner' and m.status = 'active')`,
-          ),
-        );
-      if (n > 0) {
-        throw new AppException('CONFLICT_STALE', {
-          reason: 'TENANT_HAS_ACTIVE_CLASSES',
-          activeClasses: n,
-        });
+      // Khóa user + tenant và kiểm điều kiện chặn trước khi tiêu OTP: bị chặn thì mã còn dùng lại được.
+      const check = async (checkOnly: boolean) =>
+        (
+          await t.execute<{ r: string | null }>(
+            sql`select app_private.delete_account(${checkOnly}) as r`,
+          )
+        ).rows[0]!.r;
+      const blocked = await check(true);
+      if (blocked) {
+        throw new AppException('CONFLICT_STALE', { reason: blocked });
       }
 
+      // OTP đã tiêu ở Redis: giao dịch DB rollback sau đó thì người dùng phải xin mã mới.
       await this.otp.verify(u.email, body.otp, 'delete_account');
       // Khóa idempotency cũ giữ phản hồi (có thể chứa dữ liệu cá nhân); khóa của chính lệnh này được ghi sau.
       await t.delete(idempotencyKeys).where(eq(idempotencyKeys.userId, userId));
-      await t.execute(sql`select app_private.delete_account()`);
+      // Khóa giữ từ lần kiểm trên (cùng giao dịch) nên điều kiện không đổi giữa hai lần gọi.
+      const again = await check(false);
+      if (again) throw new AppException('CONFLICT_STALE', { reason: again });
       return { status: 204, body: undefined };
     });
-    // Mọi token cũ mất vai trò ngay, không chờ hết TTL cache.
+    // Mọi token cũ mất vai trò ngay và bị guard từ chối 401 cho tới khi hết hạn.
     await this.cache.invalidate(userId);
+    await this.session.markDeleted(userId);
   }
 }

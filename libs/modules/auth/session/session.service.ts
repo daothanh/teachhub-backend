@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
+import type { Redis } from 'ioredis';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { AppException, uuidv7 } from '@teachhub/core';
 import {
@@ -9,6 +10,7 @@ import {
   TxService,
   users,
 } from '@teachhub/db';
+import { REDIS } from '@teachhub/infra';
 import type {
   LoginResponse,
   RefreshResponse,
@@ -17,6 +19,8 @@ import type {
 import { JwtKeysService } from '../jwt/jwt-keys.service.js';
 
 const ACCESS_TTL_SEC = 15 * 60;
+/** Khóa Redis đánh dấu tài khoản đã xóa; guard từ chối mọi access token của user này tới khi token hết hạn. */
+export const deletedKey = (userId: string) => `deleted:${userId}`;
 /** Hạn trượt 30 ngày; tối đa 90 ngày kiểm trong app_private.rotate_refresh_token (D20). */
 export const REFRESH_TTL_DAYS = 30;
 
@@ -30,7 +34,13 @@ export class SessionService {
   constructor(
     private readonly tx: TxService,
     private readonly jwt: JwtKeysService,
+    @Inject(REDIS) private readonly redis: Redis,
   ) {}
+
+  /** Sau DELETE /me: token cũ (≤ 15 phút) không dùng được nữa. */
+  async markDeleted(userId: string): Promise<void> {
+    await this.redis.set(deletedKey(userId), '1', 'EX', ACCESS_TTL_SEC + 60);
+  }
 
   async open(userId: string): Promise<LoginResponse> {
     const refreshToken = newRefreshToken();

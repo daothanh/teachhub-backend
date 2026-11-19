@@ -327,6 +327,19 @@ describe('session changes: reschedule / cancel / makeup', () => {
     expect(custom.statusCode).toBe(409); // gốc đã có buổi bù
   });
 
+  it('buổi bù đã hủy thì cho tạo buổi bù mới cho buổi gốc', async () => {
+    const classId = await newClass(A);
+    const [s] = await list(A, classId);
+    await cancel(A, s!.id);
+    const first = await makeup(A, s!.id, { startsAt: at(20) });
+    expect(first.statusCode, first.body).toBe(201);
+    expect((await cancel(A, first.json().id)).statusCode).toBe(200);
+    const next = await makeup(A, s!.id, { startsAt: at(21) });
+    expect(next.statusCode, next.body).toBe(201);
+    expect(next.json()).toMatchObject({ makeupOf: s!.id, isMakeup: true });
+    expect((await makeup(A, s!.id, { startsAt: at(22) })).statusCode).toBe(409);
+  });
+
   it('buổi bù nhận thời lượng mới nếu gửi durationMin', async () => {
     const classId = await newClass(A);
     const [s] = await list(A, classId);
