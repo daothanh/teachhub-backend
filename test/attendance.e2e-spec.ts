@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { startTestApp, type TestApp } from './support/app.js';
-import { seedTenant, type SeededTenant } from './support/seed.js';
+import { seedMember, seedTenant, type SeededTenant } from './support/seed.js';
 
 type Who = SeededTenant & { token: string };
 type Status = 'present' | 'late' | 'excused' | 'unexcused';
@@ -485,5 +485,102 @@ describe('điểm danh API', () => {
       ),
     );
     expect(big.statusCode).toBe(422);
+  });
+  it('nhật ký sửa (US-3.3 AC2): mới nhất trước, trước/sau, chỉ tên người sửa, phân trang con trỏ', async () => {
+    await t.worker.query(
+      `update users set display_name = 'Cô Lan' where id = $1`,
+      [A.userId],
+    );
+    const w = await world(A);
+    const s = w.studentIds[0]!;
+    const t0 = Date.now();
+    for (const [status, ms, note] of [
+      ['unexcused', -60_000, null],
+      ['present', -1_000, 'Nhầm trạng thái'],
+    ] as const) {
+      await call(
+        A,
+        'POST',
+        '/attendance/sync',
+        batch(w.sessionId, [
+          mut(s, status, {
+            clientUpdatedAt: new Date(t0 + ms).toISOString(),
+            note,
+          }),
+        ]),
+      );
+    }
+    const res = await call(
+      A,
+      'GET',
+      `/sessions/${w.sessionId}/attendance/history`,
+    );
+    expect(res.statusCode, res.body).toBe(200);
+    const { items, nextCursor } = res.json();
+    expect(nextCursor).toBeNull();
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatchObject({
+      studentId: s,
+      studentName: 'Học viên 00',
+      changedByName: 'Cô Lan',
+      before: { status: 'unexcused', note: null },
+      after: { status: 'present', note: 'Nhầm trạng thái' },
+    });
+    expect(items[1]).toMatchObject({
+      before: null,
+      after: { status: 'unexcused' },
+    });
+    // Không lộ email hay user id của người sửa.
+    expect(res.body).not.toContain(A.userId);
+    expect(res.body).not.toContain('@example.com');
+
+    const p1 = await call(
+      A,
+      'GET',
+      `/sessions/${w.sessionId}/attendance/history?limit=1`,
+    );
+    expect(p1.json().items).toHaveLength(1);
+    expect(p1.json().nextCursor).toBeTruthy();
+    const p2 = await call(
+      A,
+      'GET',
+      `/sessions/${w.sessionId}/attendance/history?limit=1&cursor=${p1.json().nextCursor}`,
+    );
+    expect(p2.json().items[0].id).toBe(items[1].id);
+    expect(p2.json().nextCursor).toBeNull();
+    const bad = await call(
+      A,
+      'GET',
+      `/sessions/${w.sessionId}/attendance/history?cursor=bay-ro`,
+    );
+    expect(bad.statusCode).toBe(422);
+  });
+
+  it('nhật ký chéo tenant: B không xem được buổi của A (404); chỉ tenant_owner xem được (giáo viên thường 403)', async () => {
+    const wa = await world(A);
+    await call(
+      A,
+      'POST',
+      '/attendance/sync',
+      batch(wa.sessionId, [mut(wa.studentIds[0]!, 'late')]),
+    );
+    const cross = await call(
+      B,
+      'GET',
+      `/sessions/${wa.sessionId}/attendance/history`,
+    );
+    expect(cross.statusCode).toBe(404);
+    const teacher = await seedMember(t.worker, A.tenantId, 'teacher');
+    const asTeacher = {
+      ...A,
+      userId: teacher,
+      token: await t.tokenFor(teacher),
+    };
+    const res = await call(
+      asTeacher,
+      'GET',
+      `/sessions/${wa.sessionId}/attendance/history`,
+    );
+    expect(res.statusCode).toBe(403);
   });
 });

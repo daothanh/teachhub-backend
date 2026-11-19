@@ -146,8 +146,8 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
     test: 'chéo tenant: B không đọc/ghi buổi của A (404); học viên tenant khác và học viên ngoài lớp cho cùng kết quả',
   },
   'GET /v1/sessions/{id}/attendance/history': {
-    notApplicable:
-      'hợp đồng S2-FL-10, thân hàm trả 501 tới S3-BE-03; test chéo tenant làm cùng task đó',
+    file: 'attendance.e2e-spec.ts',
+    test: 'nhật ký chéo tenant: B không xem được buổi của A (404); chỉ tenant_owner xem được (giáo viên thường 403)',
   },
   'POST /v1/push/register': {
     notApplicable:

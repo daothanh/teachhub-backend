@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { and, asc, eq, gt, inArray, isNull, lte, or } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import { AppException, uuidv7 } from '@teachhub/core';
 import {
   attendance,
@@ -32,6 +32,8 @@ import {
   winsLww,
 } from '../domain/attendance-policy.js';
 import type {
+  AttendanceHistory,
+  AttendanceHistoryQuery,
   AttendanceSyncRequest,
   AttendanceSyncResult,
   SessionAttendance,
@@ -334,6 +336,73 @@ export class AttendanceService {
     };
   }
 
+  /**
+   * Nhật ký sửa của một buổi (S3-BE-03), mới nhất trước, con trỏ = id audit. Kiểm buổi thuộc tenant trước khi đọc
+   * audit_logs (qua hàm `app_private.attendance_history`, lọc lại tenant + buổi và quyền nhân sự); chỉ trả tên hiển
+   * thị người sửa, không trả userId hay email.
+   */
+  async history(
+    tx: Tx,
+    tenantId: string,
+    sessionId: string,
+    query: AttendanceHistoryQuery,
+  ): Promise<AttendanceHistory> {
+    await this.loadSession(tx, tenantId, sessionId, false);
+    const before = decodeCursor(query.cursor);
+    const { rows } = await tx.execute<{
+      id: string;
+      student_id: string;
+      changed_by_name: string | null;
+      changed_at: Date;
+      before_status: AttendanceStatus | null;
+      before_note: string | null;
+      after_status: AttendanceStatus | null;
+      after_note: string | null;
+    }>(
+      sql`select * from app_private.attendance_history(${tenantId}::uuid, ${sessionId}::uuid, ${before}::bigint, ${query.limit + 1})`,
+    );
+    const page = rows.slice(0, query.limit);
+    const names = page.length
+      ? new Map(
+          (
+            await tx
+              .select({ id: students.id, name: students.fullName })
+              .from(students)
+              .where(
+                and(
+                  eq(students.tenantId, tenantId),
+                  inArray(
+                    students.id,
+                    page.map((r) => r.student_id),
+                  ),
+                ),
+              )
+          ).map((x) => [x.id, x.name]),
+        )
+      : new Map<string, string>();
+    const tz = await this.schedule.timezone(tx, tenantId);
+    return {
+      items: page.map((r) => ({
+        id: historyItemId(r.id),
+        studentId: r.student_id,
+        studentName: names.get(r.student_id) ?? '',
+        changedByName: r.changed_by_name,
+        changedAt: formatInZone(new Date(r.changed_at), tz),
+        before: r.before_status
+          ? { status: r.before_status, note: r.before_note }
+          : null,
+        after: {
+          status: (r.after_status ?? r.before_status) as AttendanceStatus,
+          note: r.after_status ? r.after_note : r.before_note,
+        },
+      })),
+      nextCursor:
+        rows.length > query.limit
+          ? encodeCursor(page[page.length - 1]!.id)
+          : null,
+    };
+  }
+
   /** Ghi các dòng đã đổi: dòng mới một lệnh nhiều dòng, dòng cũ cập nhật theo id. */
   private async persist(
     tx: Tx,
@@ -464,3 +533,21 @@ function editableUntil(sessionDate: string, tz: string): string {
   );
   return formatInZone(new Date(nextDayStart.getTime() - 1000), tz);
 }
+
+const encodeCursor = (id: string) => Buffer.from(id).toString('base64url');
+
+/** Con trỏ mờ = id audit (số nguyên dương) mã base64url; sai dạng → 422 (không lộ cấu trúc nội bộ). */
+function decodeCursor(cursor: string | undefined): string | null {
+  if (cursor === undefined) return null;
+  const id = Buffer.from(cursor, 'base64url').toString();
+  if (!/^[1-9]\d{0,17}$/.test(id) || encodeCursor(id) !== cursor) {
+    throw new AppException('VALIDATION_FAILED', undefined, {
+      cursor: ['Con trỏ không hợp lệ'],
+    });
+  }
+  return id;
+}
+
+/** Id audit (bigint) → UUID ổn định cho hợp đồng; chỉ để phân biệt các dòng nhật ký, không phải khóa nội bộ nào. */
+const historyItemId = (auditId: string) =>
+  `00000000-0000-7000-8000-${BigInt(auditId).toString(16).padStart(12, '0')}`;

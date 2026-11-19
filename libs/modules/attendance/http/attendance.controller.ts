@@ -21,7 +21,6 @@ import { z } from 'zod';
 import {
   ApiErrors,
   ApiIdempotencyKey,
-  AppException,
   Ctx,
   type RequestContext,
 } from '@teachhub/core';
@@ -44,7 +43,7 @@ import {
 
 const idParam = z.uuid();
 
-// Hợp đồng Sprint 3 (S2-FL-10); thân hàm ở S3-BE-02 (đọc, sync), nhật ký ở S3-BE-03 (còn 501).
+// Hợp đồng Sprint 3 (S2-FL-10); thân hàm ở S3-BE-02 (đọc, sync) và S3-BE-03 (nhật ký).
 @ApiTags('attendance')
 @ApiBearerAuth('bearer')
 @RequiresRole('tenant_owner')
@@ -116,10 +115,13 @@ export class AttendanceController {
   @ApiOkResponse({ standardSchema: attendanceHistorySchema })
   @ApiErrors('VALIDATION_FAILED', 'NOT_FOUND')
   history(
-    @Param('id', { schema: idParam }) _id: string,
+    @Ctx() ctx: RequestContext,
+    @Param('id', { schema: idParam }) id: string,
     @Query({ schema: attendanceHistoryQuerySchema })
-    _query: AttendanceHistoryQuery,
-  ): AttendanceHistory {
-    throw new AppException('NOT_IMPLEMENTED');
+    query: AttendanceHistoryQuery,
+  ): Promise<AttendanceHistory> {
+    return this.tx.run(ctx, (t) =>
+      this.attendance.history(t, ctx.tenantId!, id, query),
+    );
   }
 }
