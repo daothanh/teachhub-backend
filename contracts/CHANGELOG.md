@@ -43,7 +43,7 @@ Tài khoản nhận tiền:
 Kỳ thu và hóa đơn:
 
 - Trạng thái hóa đơn khai đủ enum Spec §4.3 (`draft`, `issued`, `pending_confirmation`, `partially_paid`, `paid`, `void`) để Sprint 6 không thêm giá trị vào phản hồi; Sprint 5 chỉ phát sinh `draft`, `issued`, `void`. Loại dòng cũng khai đủ (`carry_over`, `prev_adjustment`, `surcharge` chưa dùng).
-- `GET /invoices/{id}`: `lines` là nguồn duy nhất và là snapshot lúc tính, không có mảng `sessions` riêng. Mỗi dòng có `charged`, `notChargedReason` (4 giá trị không tính), `sessionId`, `sessionDate`, `className`, `adjustmentReason` (chỉ dòng điều chỉnh). Đối chiếu `invoice-calculator.ts` trên main: kiểu theo buổi sinh mỗi buổi một dòng `session`, kể cả buổi hủy và buổi bù 0 đ; kiểu theo tháng và trọn khóa không sinh dòng buổi mà sinh MỘT dòng gốc (`monthly` đã trừ phần buổi hủy khi bật `deductCancelled`, hoặc `course_installment`), rồi các dòng `discount` và `manual_adjustment`. Không có dòng trừ buổi hủy riêng như yêu cầu vòng 1; nếu cần tách dòng thì phải sửa calculator. Dòng không đổi sau phát hành. Một hóa đơn gộp mọi lớp của học viên trong kỳ.
+- `GET /invoices/{id}`: `lines` là nguồn duy nhất và là snapshot lúc tính, không có mảng `sessions` riêng. Mỗi dòng có `charged`, `notChargedReason` (4 giá trị không tính), `sessionId`, `sessionDate`, `className`, `adjustmentReason` (chỉ dòng điều chỉnh). Đối chiếu `invoice-calculator.ts` trên main: kiểu theo buổi sinh mỗi buổi một dòng `session`, kể cả buổi hủy và buổi bù 0 đ; kiểu theo tháng và trọn khóa không sinh dòng buổi mà sinh MỘT dòng gốc (`monthly` đã trừ phần buổi hủy khi bật `deductCancelled`, hoặc `course_installment`), rồi các dòng `discount` và `manual_adjustment`. Muốn tách phần trừ buổi hủy thành dòng riêng thì phải sửa calculator. Dòng không đổi sau phát hành. Một hóa đơn gộp mọi lớp của học viên trong kỳ.
 - Kỳ `closed` khi không còn bản nháp nào có số tiền > 0 (bản nháp 0 đ không gửi nên còn lại). `GET /billing-periods/{id}` kèm `invoices` phân trang offset.
 - `POST /invoices/{id}/adjustments`: `amount` ≠ 0 có dấu, bắt buộc `description` và `adjustmentReason`, chỉ khi còn `draft`, ngược lại 409 `INVOICE_IMMUTABLE`. Tối đa 20 dòng điều chỉnh mỗi hóa đơn (vượt → 422). Tổng âm bị cắt về 0, phản hồi có `clampedAmount` (phần âm chuyển kỳ khi có US-7.6). Chưa có endpoint xóa dòng điều chỉnh: sửa nhầm thì thêm dòng ngược dấu.
 
@@ -52,7 +52,7 @@ Phát hành và hủy:
 - `issue` nhận `{ invoiceIds }` (`null` là tất cả, đúng ví dụ Spec §5.4) và trả `issuedCount`, `skipped` (`ZERO_AMOUNT`, `NOT_DRAFT`), `totalAmount`, `invoices` (mã, `transferNote`, `qrPayload`, hạn). Trả 200, không phải 201. Thiếu tài khoản nhận tiền → 422 `PAYOUT_ACCOUNT_MISSING` và không phát hành hóa đơn nào. `Idempotency-Key` bắt buộc; sự kiện outbox `invoice_issued` sinh thông báo và email.
 - Mã hóa đơn `TH-xxxxxx` (6 ký tự Crockford, theo ví dụ `TH-25K7Q9` của Spec §4.3); nội dung chuyển khoản `TH xxxxxx` (thay gạch bằng khoảng trắng), `[A-Z0-9 ]`, ≤ 25 ký tự. Kế hoạch ghi "`TH <mã>`": lấy `<mã>` là phần sau `TH-`.
 - `void` nhận `reason` bắt buộc và `createReplacementDraft` (mặc định false; **chờ TL xác nhận**). Spec §5.4 ghi "tùy chọn phát hành hóa đơn thay thế" còn Plan §2.6 ghi Sprint 5 chỉ hủy, thay thế là "tạo lại bản nháp rồi chốt"; không có endpoint nào tạo lại bản nháp, nên cờ này tạo bản nháp thay thế (`replacesInvoiceId`, và hóa đơn hủy có `replacementInvoiceId`) trong cùng giao dịch; kỳ chuyển lại `drafting` nếu đang `closed`. Bỏ cờ nếu TL muốn đúng Plan và chấp nhận thiếu đường tạo lại. Chỉ hủy `issued`; hủy lại hóa đơn đã `void` trả 200; `draft` hoặc hóa đơn đã có thanh toán → 409 `CONFLICT_STALE`.
-- `qrPayload` do `buildVietQrPayload` (spike #63, S2-BE-VQR) sinh; hàm này chưa có trong repo tại thời điểm soạn hợp đồng.
+- `qrPayload` do `buildVietQrPayload` (spike #63, S2-BE-VQR) sinh; hàm này chưa có trong repo.
 
 Phụ huynh (`/family/invoices`):
 
@@ -60,7 +60,7 @@ Phụ huynh (`/family/invoices`):
 - Dữ liệu phụ huynh đã lọc: không có lý do hủy, lý do điều chỉnh, `sessionId`, hay điểm danh chi tiết; dòng có `className`. `payout` (kèm `bankName`) đủ để chép số tài khoản nếu quét QR không được (rủi ro R16), và là null khi hóa đơn `void`. `/family/invoices` lọc thêm theo `status`.
 - Hợp đồng chưa có "thanh toán", "biên nhận", `receivables` (Sprint 6, FL2 soạn ở S5-FL-09).
 
-Trọn khóa, tiền và giới hạn (vòng sửa 1):
+Trọn khóa, thông báo và giới hạn:
 
 - `PATCH` với `feeType = course` mà lớp không xác định được tổng số buổi (thiếu `endDate` hoặc không có quy tắc lịch) → 422 `VALIDATION_FAILED` ở `feeType`. `Invoice` có `installmentNo` và `installmentCount` (null với kiểu khác). Đợt n là kỳ thứ n kể từ kỳ đầu tiên học viên vào lớp; hết số đợt thì không sinh thêm hóa đơn trọn khóa cho ghi danh đó. Trần số đợt 1 đến 36, khớp calculator.
 - Thông báo `billing_ready`, `invoice_issued`: push chỉ data-only (`notificationId`, `type`), text khay cố định, không tên con, không số tiền; email `invoice_issued` có tiêu đề cố định, không chứa tên con.
