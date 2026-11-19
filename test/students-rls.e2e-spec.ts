@@ -87,12 +87,12 @@ describe('students/guardians/enrollments: RLS và ràng buộc', () => {
     );
   });
 
-  it('full_name_unaccent: bỏ dấu tiếng Việt (kể cả đ), chữ thường; tìm "duc thang" dùng được index', async () => {
+  it('full_name_unaccent: bỏ dấu tiếng Việt (kể cả đ), chữ thường; tìm "duc thang" lọc theo tenant bằng index btree', async () => {
     const r = await asA(
       sql`select full_name_unaccent as v from students where id = ${ids.studentA}`,
     );
     expect(r.rows[0]).toEqual({ v: 'nguyen duc thang' });
-    // Bảng nhỏ thì planner chọn quét tuần tự; tắt seqscan để chứng minh index dùng được.
+    // Tắt seqscan để thấy index mà planner có thể chọn.
     const explain = (userId: string | null, pool?: pg.Pool) => {
       const q = `explain select id from students where ${pool ? '' : `tenant_id = '${A.tenantId}' and `}full_name_unaccent like '%duc thang%'`;
       if (pool)
@@ -104,20 +104,12 @@ describe('students/guardians/enrollments: RLS và ràng buộc', () => {
     };
     const text = (r: { rows: Record<string, string>[] }) =>
       r.rows.map((x) => x['QUERY PLAN']).join('\n');
-    // Vai trò không bị RLS: GIN trigram được chọn cho LIKE '%…%'.
-    const one = new pg.Pool({
-      connectionString: db.url('teachhub_worker'),
-      max: 1,
-    });
-    expect(text(await explain(null, one))).toContain(
-      'students_full_name_unaccent_trgm_idx',
-    );
-    await one.end();
     // teachhub_app: `textlike` không leakproof nên Postgres không cho dùng làm điều kiện index dưới RLS;
     // lọc `tenant_id = …` tường minh vẫn đi index btree, phần tên lọc trên tập của riêng tenant.
-    expect(text(await explain(A.userId))).toContain(
-      'students_tenant_status_idx',
-    );
+    const plan = text(await explain(A.userId));
+    expect(plan).toContain('students_tenant_status_idx');
+    // Index GIN trigram đã bỏ (migration 0016): dưới RLS nó không bao giờ được dùng, kể cả khi tắt seqscan.
+    expect(plan).not.toContain('trgm');
   });
 
   it('một học viên ở 2 lớp: 1 dòng students, 2 dòng enrollments; ghi danh mở trùng lớp bị chặn, ghi danh đã đóng thì mở lại được', async () => {

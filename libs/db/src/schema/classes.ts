@@ -13,7 +13,8 @@ import {
 import { sql } from 'drizzle-orm';
 import { branches, tenants } from './tenancy.js';
 
-// Lớp (Technical Spec §4.4). RLS, trigger updated_at/audit viết tay cuối file migration classes.
+// Lớp (Technical Spec §4.4). RLS của các bảng Sprint 2 cho mọi vai trò nhân sự của tenant (`staff_tenant_ids()`);
+// quyền theo vai trò (hiện chỉ `tenant_owner`) nằm ở guard, không ở RLS. RLS, trigger updated_at/audit viết tay cuối file migration classes.
 // Chưa có học phí, subject_kind, notification_settings: thêm cột tùy chọn ở sprint sau (US-1.2, US-9.3).
 
 export const classes = pgTable(

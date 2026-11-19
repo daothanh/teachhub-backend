@@ -52,10 +52,9 @@ export const students = pgTable(
   (t) => [
     unique('students_tenant_id_id_uq').on(t.tenantId, t.id),
     index('students_tenant_status_idx').on(t.tenantId, t.status),
-    index('students_full_name_unaccent_trgm_idx').using(
-      'gin',
-      t.fullNameUnaccent.op('gin_trgm_ops'),
-    ),
+    // Không có index GIN trigram cho tìm tên: dưới RLS (teachhub_app) planner không dùng được vì `~~` không leakproof
+    // (EXPLAIN, kể cả enable_seqscan = off, S2 vòng sửa). shortcut: tìm tên quét theo `tenant_id`; khi một tenant
+    // vượt vài chục nghìn học viên, thêm hàm leakproof hoặc cột tìm kiếm riêng.
     check(
       'students_status_check',
       sql`${t.status} in ('active', 'paused', 'left')`,
@@ -63,7 +62,10 @@ export const students = pgTable(
   ],
 );
 
-/** Phụ huynh của học viên, tối đa 2 dòng chưa gỡ (trigger). `deletedAt` = đã gỡ liên kết. */
+/**
+ * Phụ huynh của học viên, tối đa 2 dòng chưa gỡ (trigger). `deletedAt` = đã gỡ liên kết. Không bật trigger audit
+ * cho bảng này: `before_data`/`after_data` sẽ chép họ tên, SĐT, email vào `audit_logs` (PII).
+ */
 export const guardians = pgTable(
   'guardians',
   {

@@ -1,0 +1,1 @@
+DROP INDEX "students_full_name_unaccent_trgm_idx";

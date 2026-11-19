@@ -106,6 +106,20 @@
       "when": 1795074410101,
       "tag": "0014_center_waitlist",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1795075249563,
+      "tag": "0015_guardians_limit_lock",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1795075666521,
+      "tag": "0016_drop_students_trgm_idx",
+      "breakpoints": true
     }
   ]
 }

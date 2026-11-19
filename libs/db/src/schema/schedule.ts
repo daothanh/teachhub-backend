@@ -74,6 +74,7 @@ export const sessions = pgTable(
     /** null = buổi bù/lẻ không từ quy tắc, hoặc quy tắc đã bị thay (buổi đã dạy giữ nguyên). */
     ruleId: uuid().references(() => scheduleRules.id, { onDelete: 'set null' }),
     /** Ngày học theo múi giờ tenant. */
+    // Ngày theo múi giờ tenant tại lúc sinh buổi; đổi múi giờ tenant về sau không dịch lại các buổi đã sinh.
     sessionDate: date({ mode: 'string' }).notNull(),
     startsAt: timestamp({ withTimezone: true }).notNull(),
     endsAt: timestamp({ withTimezone: true }).notNull(),
