@@ -1,6 +1,12 @@
 // Hàm thuần tính học phí (Technical Spec 4.7, US-7.1, US-7.6). Không phụ thuộc Nest/Drizzle/Redis.
 // Tiền là số nguyên đồng (bigint trong CSDL map sang number). Ngày là chuỗi 'YYYY-MM-DD' (so sánh theo chữ).
 
+// Điểm chờ Owner chốt:
+// 1) Kiểu theo buổi: buổi hủy rồi dạy bù đều 0 đ (buổi gốc hủy, buổi bù không tính).
+// 2) Miễn giảm 100% chỉ đưa dòng gốc về 0; total vẫn có thể > 0 do carryOver/phụ thu.
+// 3) Trọn khóa chia đợt: giảm giá áp ở mỗi đợt (tính trên phần gốc của đợt đó).
+const MAX_INSTALLMENTS = 36;
+
 export type FeeType = 'per_session' | 'monthly' | 'course';
 export type AttendanceStatus = 'present' | 'excused' | 'unexcused';
 
@@ -81,10 +87,21 @@ export type LineKind =
   | 'discount'
   | 'surcharge';
 
+/** Lý do một buổi được tính hoặc không tính tiền (dòng kind='session'). */
+export type SessionReason =
+  | 'taught'
+  | 'excused_not_charged'
+  | 'unexcused_not_charged'
+  | 'cancelled'
+  | 'makeup';
+
 export interface InvoiceLine {
   kind: LineKind;
   amount: number;
   sessionId?: string;
+  /** Chỉ có ở dòng buổi: buổi có tính tiền không và vì sao. */
+  charged?: boolean;
+  reason?: SessionReason;
   description: string;
 }
 
@@ -124,8 +141,11 @@ export function round1000(x: number): number {
 
 /** Chia đợt: mỗi đợt round_1000(total/n); đợt cuối = tổng − Σ đợt trước (US-7.1 AC6). */
 export function splitInstallments(total: number, n: number): number[] {
-  if (!Number.isInteger(n) || n < 1)
-    throw new RangeError(`installments phải ≥ 1: ${n}`);
+  assertMoney('total', total);
+  if (!Number.isInteger(n) || n < 1 || n > MAX_INSTALLMENTS)
+    throw new RangeError(
+      `installments phải là số nguyên 1..${MAX_INSTALLMENTS}: ${n}`,
+    );
   const parts: number[] = [];
   let rest = total;
   for (let i = 0; i < n - 1; i++) {
@@ -160,18 +180,21 @@ export function calculateInvoice(input: InvoiceInput): InvoiceResult {
 
   if (input.feeType === 'per_session') {
     for (const s of inRange) {
-      const taught = s.status === 'taught' && !s.isMakeup;
-      const charged =
-        taught &&
-        (s.attendance === 'excused'
-          ? rules.chargeExcused
-          : s.attendance === 'unexcused'
-            ? rules.chargeUnexcused
-            : true); // shortcut: chưa điểm danh coi như có mặt (tính tiền), Owner chốt
+      let reason: SessionReason = 'taught';
+      if (s.status === 'cancelled') reason = 'cancelled';
+      else if (s.isMakeup) reason = 'makeup';
+      else if (s.attendance === 'excused' && !rules.chargeExcused)
+        reason = 'excused_not_charged';
+      else if (s.attendance === 'unexcused' && !rules.chargeUnexcused)
+        reason = 'unexcused_not_charged';
+      // chưa điểm danh coi như có mặt (tính tiền); shortcut: Owner chốt
+      const charged = reason === 'taught';
       lines.push({
         kind: 'session',
         amount: charged ? fee : 0,
         sessionId: s.id,
+        charged,
+        reason,
         description: charged ? `Buổi ${s.date}` : `Buổi ${s.date} (không tính)`,
       });
     }
