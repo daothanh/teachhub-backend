@@ -420,13 +420,18 @@ describe('thông báo báo vắng', () => {
     ).toHaveLength(1);
   });
 
-  it('M1: job urgent cấu hình attempts + backoff lũy thừa, và BullMQ thật chạy lại sau lỗi tạm: delivery sent đúng 1 lần', async () => {
-    const { OUTBOX_JOB_OPTIONS } =
-      await import('../apps/worker/src/outbox/outbox-policy.js');
+  it('M1: queue urgent dựng qua OutboxModule thật (attempts + backoff thật), BullMQ chạy lại sau lỗi tạm: delivery sent đúng 1 lần', async () => {
+    const { Test } = await import('@nestjs/testing');
+    const { ConfigModule } = await import('@nestjs/config');
+    const { getQueueToken } = await import('@nestjs/bullmq');
+    const { OutboxModule } =
+      await import('../apps/worker/src/outbox/outbox.module.js');
+    const { OutboxRelayService } =
+      await import('../apps/worker/src/outbox/outbox-relay.service.js');
+    const { OutboxCleanupService } =
+      await import('../apps/worker/src/outbox/outbox-cleanup.service.js');
     const { UrgentProcessor } =
       await import('../apps/worker/src/notify/urgent.processor.js');
-    expect(OUTBOX_JOB_OPTIONS.attempts).toBeGreaterThan(1);
-    expect(OUTBOX_JOB_OPTIONS.backoff.type).toBe('exponential');
 
     use();
     const s = await student('Em Mười Một');
@@ -448,25 +453,39 @@ describe('thông báo báo vắng', () => {
         );
       },
     };
+    // Relay/cleanup không cần ở đây (chỉ lấy hàng đợi và tuỳ chọn job do module thật cấu hình).
+    const mod = await Test.createTestingModule({
+      imports: [
+        ConfigModule.forRoot({
+          isGlobal: true,
+          ignoreEnvFile: true,
+          load: [() => ({ REDIS_URL: t.redis.getConnectionUrl() })],
+        }),
+        OutboxModule,
+      ],
+    })
+      .overrideProvider(OutboxRelayService)
+      .useValue({})
+      .overrideProvider(OutboxCleanupService)
+      .useValue({})
+      .compile();
+    const queue = mod.get<Queue>(getQueueToken('urgent'));
     const connection = new IORedis(t.redis.getConnectionUrl(), {
       maxRetriesPerRequest: null,
     });
-    const name = `urgent-${randomUUID()}`;
-    // Giữ attempts của cấu hình thật, chỉ rút backoff để test chạy nhanh.
-    const queue = new Queue(name, {
+    const proc = new UrgentProcessor(notifier, notifier.tx);
+    const worker = new Worker('urgent', (job) => proc.process(job), {
       connection,
-      defaultJobOptions: {
-        attempts: OUTBOX_JOB_OPTIONS.attempts,
-        backoff: { type: 'fixed', delay: 100 },
-      },
     });
-    const proc = new UrgentProcessor(notifier);
-    const worker = new Worker(name, (job) => proc.process(job), { connection });
     try {
-      await queue.add('attendance_recorded', ev, { jobId: ev.eventId });
-      const deadline = Date.now() + 20_000;
+      const job = await queue.add('attendance_recorded', ev, {
+        jobId: ev.eventId,
+      });
+      expect(job.opts.attempts).toBeGreaterThan(1);
+      expect(job.opts.backoff).toMatchObject({ type: 'exponential' });
+      const deadline = Date.now() + 40_000;
       while (Date.now() < deadline && (await deliveryStatus(s))[0] !== 'sent')
-        await new Promise((r) => setTimeout(r, 100));
+        await new Promise((r) => setTimeout(r, 200));
       expect(await deliveryStatus(s)).toEqual(['sent']);
       expect(calls).toBe(2);
       expect(
@@ -477,9 +496,79 @@ describe('thông báo báo vắng', () => {
       ).toHaveLength(1);
     } finally {
       await worker.close();
-      await queue.close();
+      await mod.close();
       connection.disconnect();
     }
+  }, 60_000);
+
+  it('đính chính: FCM sập lúc báo vắng (delivery chưa sent) → cô sửa trong 10 phút cũng không có đính chính', async () => {
+    use();
+    const s = await student('Em Mười Hai');
+    behaviour = (m) =>
+      m.map(() => ({
+        ok: false,
+        error: 'messaging/unavailable',
+        invalidToken: false,
+      }));
+    await expect(
+      notifier.handle(event([await change(s, 'unexcused', null)])),
+    ).rejects.toThrow();
+    behaviour = ok;
+    await notifier.handle(event([await change(s, 'present', 'unexcused')]));
+    expect(
+      await rows(
+        `select 1 from notifications where type = 'student_absent_correction' and payload->>'studentId' = $1`,
+        [s],
+      ),
+    ).toHaveLength(0);
+  });
+
+  it('đính chính: dòng báo vắng cũ có event_at NULL dùng created_at dự phòng', async () => {
+    use();
+    const s = await student('Em Mười Ba');
+    await notifier.handle(event([await change(s, 'unexcused', null)]));
+    await t.worker.query(
+      `update notifications set event_at = null where type = 'student_absent' and payload->>'studentId' = $1`,
+      [s],
+    );
+    await notifier.handle(event([await change(s, 'present', 'unexcused')]));
+    expect(
+      await rows(
+        `select 1 from notifications where type = 'student_absent_correction' and payload->>'studentId' = $1`,
+        [s],
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('job hết lượt thử: log error và đánh dấu outbox failed_at; lỗi giữa chừng thì không', async () => {
+    const { UrgentProcessor } =
+      await import('../apps/worker/src/notify/urgent.processor.js');
+    const proc = new UrgentProcessor(notifier, notifier.tx);
+    const id = randomUUID();
+    await t.worker.query(
+      `insert into outbox_events (id, tenant_id, type, payload, dispatched_at) values ($1, $2, 'attendance_recorded', '{}', now())`,
+      [id, A.tenantId],
+    );
+    const job = (made: number) =>
+      ({
+        name: 'attendance_recorded',
+        data: { eventId: id },
+        attemptsMade: made,
+        opts: { attempts: 3 },
+      }) as never;
+    await proc.onFailed(job(2), new Error('x'));
+    const state = async () =>
+      (
+        await rows(
+          `select failed_at, last_error from outbox_events where id = $1`,
+          [id],
+        )
+      )[0];
+    expect((await state()).failed_at).toBeNull();
+    await proc.onFailed(job(3), new Error('x'));
+    const after = await state();
+    expect(after.failed_at).not.toBeNull();
+    expect(after.last_error).toContain('consumer_exhausted');
   });
 
   it('S3: con trỏ phải đúng dạng chặt, không chỉ "có |"', async () => {
