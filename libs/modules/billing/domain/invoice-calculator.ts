@@ -81,10 +81,21 @@ export type LineKind =
   | 'discount'
   | 'surcharge';
 
+/** Lý do một buổi được tính hoặc không tính tiền (dòng kind='session'). */
+export type SessionReason =
+  | 'taught'
+  | 'excused_not_charged'
+  | 'unexcused_not_charged'
+  | 'cancelled'
+  | 'makeup';
+
 export interface InvoiceLine {
   kind: LineKind;
   amount: number;
   sessionId?: string;
+  /** Chỉ có ở dòng buổi: buổi có tính tiền không và vì sao. */
+  charged?: boolean;
+  reason?: SessionReason;
   description: string;
 }
 
@@ -160,18 +171,21 @@ export function calculateInvoice(input: InvoiceInput): InvoiceResult {
 
   if (input.feeType === 'per_session') {
     for (const s of inRange) {
-      const taught = s.status === 'taught' && !s.isMakeup;
-      const charged =
-        taught &&
-        (s.attendance === 'excused'
-          ? rules.chargeExcused
-          : s.attendance === 'unexcused'
-            ? rules.chargeUnexcused
-            : true); // shortcut: chưa điểm danh coi như có mặt (tính tiền), Owner chốt
+      let reason: SessionReason = 'taught';
+      if (s.status === 'cancelled') reason = 'cancelled';
+      else if (s.isMakeup) reason = 'makeup';
+      else if (s.attendance === 'excused' && !rules.chargeExcused)
+        reason = 'excused_not_charged';
+      else if (s.attendance === 'unexcused' && !rules.chargeUnexcused)
+        reason = 'unexcused_not_charged';
+      // chưa điểm danh coi như có mặt (tính tiền); shortcut: Owner chốt
+      const charged = reason === 'taught';
       lines.push({
         kind: 'session',
         amount: charged ? fee : 0,
         sessionId: s.id,
+        charged,
+        reason,
         description: charged ? `Buổi ${s.date}` : `Buổi ${s.date} (không tính)`,
       });
     }

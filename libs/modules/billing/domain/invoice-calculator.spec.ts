@@ -635,3 +635,42 @@ describe('vòng sửa review: biên, tràn số, validate', () => {
     expect(calculateInvoice(course({ sessions })).total).toBe(2_400_000);
   });
 });
+
+describe('lý do tính / không tính của từng buổi (US-7.2 AC2)', () => {
+  it('mỗi dòng buổi có charged + reason', () => {
+    const sessions: SessionInput[] = [
+      taught(1),
+      taught(2, 'excused'),
+      taught(3, 'unexcused'),
+      { ...taught(4), status: 'cancelled', attendance: null },
+      { ...taught(5), isMakeup: true },
+    ];
+    const r = calculateInvoice(
+      perSession({
+        sessions,
+        classRules: { chargeExcused: false, chargeUnexcused: false },
+      }),
+    );
+    expect(r.lines.map((l) => [l.sessionId, l.charged, l.reason])).toEqual([
+      ['s1', true, 'taught'],
+      ['s2', false, 'excused_not_charged'],
+      ['s3', false, 'unexcused_not_charged'],
+      ['s4', false, 'cancelled'],
+      ['s5', false, 'makeup'],
+    ]);
+  });
+  it('tất cả buổi hủy → 0 đ', () => {
+    const sessions = [1, 2, 3].map((n) => ({
+      ...taught(n),
+      status: 'cancelled' as const,
+      attendance: null,
+    }));
+    expect(calculateInvoice(perSession({ sessions })).total).toBe(0);
+  });
+  it('override giá riêng 0 → 0 đ', () => {
+    expect(
+      calculateInvoice(perSession({ override: { feeAmount: 0 } })).total,
+    ).toBe(0);
+  });
+});
+
