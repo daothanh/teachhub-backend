@@ -165,4 +165,56 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
     notApplicable:
       'hợp đồng S2-FL-10, thân hàm trả 501 tới S3-BE-06; test chéo tenant làm cùng task đó',
   },
+  'POST /v1/students/{id}/invites': {
+    notApplicable:
+      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-03; test chéo tenant/học viên làm cùng task đó',
+  },
+  'GET /v1/students/{id}/invites': {
+    notApplicable:
+      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-03; test chéo tenant/học viên làm cùng task đó',
+  },
+  'POST /v1/invites/{id}/revoke': {
+    notApplicable:
+      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-03; test chéo tenant/học viên làm cùng task đó',
+  },
+  'POST /v1/invites/{id}/resend': {
+    notApplicable:
+      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-03; test chéo tenant/học viên làm cùng task đó',
+  },
+  'GET /v1/invites/{token}/preview': {
+    notApplicable:
+      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-04; test chéo tenant/học viên làm cùng task đó',
+  },
+  'POST /v1/invites/{token}/accept': {
+    notApplicable:
+      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-04; test chéo tenant/học viên làm cùng task đó',
+  },
+  'POST /v1/invites/redeem-code': {
+    notApplicable:
+      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-04; test chéo tenant/học viên làm cùng task đó',
+  },
+  'POST /v1/consents': {
+    notApplicable:
+      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-05; test chéo tenant/học viên làm cùng task đó',
+  },
+  'GET /v1/consents/status': {
+    notApplicable:
+      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-05; test chéo tenant/học viên làm cùng task đó',
+  },
+  'GET /v1/family/students': {
+    notApplicable:
+      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-06; test chéo tenant/học viên làm cùng task đó',
+  },
+  'GET /v1/family/students/{id}/attendance': {
+    notApplicable:
+      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-06; test chéo tenant/học viên làm cùng task đó',
+  },
+  'POST /v1/web-push/subscriptions': {
+    notApplicable:
+      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-08b; test chéo tenant/học viên làm cùng task đó',
+  },
+  'POST /v1/web-push/unsubscribe': {
+    notApplicable:
+      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-08b; test chéo tenant/học viên làm cùng task đó',
+  },
 };

@@ -124,7 +124,7 @@ export class ClassesController {
   @ApiOperation({
     summary: 'Học viên đang ghi danh của lớp (bản tối thiểu)',
     description:
-      'Chỉ ghi danh chưa rời lớp (học viên `active` hoặc `paused`). Không phân trang. Nhãn "Giá riêng" và trạng thái phụ huynh thêm ở sprint sau.',
+      'Chỉ ghi danh chưa rời lớp (học viên `active` hoặc `paused`). Không phân trang. Mỗi học viên kèm `inviteStatus` (chưa mời / đã mời / đã kích hoạt / hết hạn, US-1.6 AC4) và danh sách phụ huynh với trạng thái từng người, để màn "Mời tất cả phụ huynh chưa kích hoạt" biết gọi mời cho ai. Nhãn "Giá riêng" thêm ở sprint sau.',
   })
   @ApiOkResponse({ standardSchema: rosterSchema })
   @ApiErrors('NOT_FOUND')
