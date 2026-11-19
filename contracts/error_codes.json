@@ -2,6 +2,7 @@
   "BAD_REQUEST": { "http": 400, "message": "Yêu cầu không hợp lệ." },
   "VALIDATION_FAILED": { "http": 422, "message": "Dữ liệu chưa hợp lệ." },
   "IDEMPOTENCY_KEY_REUSED": { "http": 422, "message": "Idempotency-Key đã dùng cho yêu cầu khác." },
+  "ATTENDANCE_EDIT_WINDOW_CLOSED": { "http": 422, "message": "Buổi học đã quá 7 ngày, chỉ xem được." },
   "UNAUTHENTICATED": { "http": 401, "message": "Bạn cần đăng nhập." },
   "TOKEN_EXPIRED": { "http": 401, "message": "Phiên đăng nhập đã hết hạn." },
   "OTP_INVALID": { "http": 401, "message": "Mã xác thực không đúng." },

@@ -2,6 +2,31 @@
 
 `contracts/openapi.json` sinh từ schema zod bằng `pnpm openapi:gen`; file này ghi endpoint thêm mới theo sprint. Chỉ thêm, không đổi endpoint cũ (CI chặn bằng `oasdiff`).
 
+## Sprint 3 (S2-FL-10)
+
+Thân hàm trả 501 `NOT_IMPLEMENTED` tới khi làm task backend tương ứng; schema đã validate thật.
+
+| Endpoint | Task backend |
+| --- | --- |
+| `GET /v1/sessions/{id}/attendance`, `POST /v1/attendance/sync` | S3-BE-02 |
+| `GET /v1/sessions/{id}/attendance/history` | S3-BE-03 |
+| `POST /v1/push/register`, `POST /v1/push/unregister` | S3-BE-05 |
+| `GET /v1/notifications`, `POST /v1/notifications/read` | S3-BE-06 |
+
+Mã lỗi mới: `ATTENDANCE_EDIT_WINDOW_CLOSED` (422). Chỉ xuất hiện trong `errorCode` của phần tử `rejected` ở kết quả sync, không phải lỗi HTTP của cả lô.
+
+Quyết định khi soạn (cần TL chốt nếu muốn khác):
+
+- `POST /attendance/sync` trả HTTP 200 kể cả khi có phần tử bị từ chối; kết quả mỗi phần tử là `applied`, `duplicate`, `stale` hoặc `rejected` (kèm `errorCode`). Dùng `stale` theo Spec §5.4 và Plan, không dùng `conflict`.
+- Một lô cho một buổi (`sessionId` ở cấp lô), tối đa 500 mutation, `clientMutationId` không được lặp trong lô. Sửa sau cũng đi qua sync, không có PATCH riêng.
+- Bỏ `billingRecalculated` khỏi kết quả sync vì `billing` chưa có tới Sprint 5. `parentsToNotify` giữ nguyên theo Spec.
+- `GET /sessions/{id}/attendance` chưa có báo vắng trước của phụ huynh (US-3.4 ngoài Sprint 3); thêm `canEdit` (cửa sổ 7 ngày) và `serverTime` (hiệu chỉnh lệch đồng hồ).
+- Nhật ký sửa không phân trang, tối đa 500 dòng mới nhất.
+- Đăng ký token FCM giữ đường dẫn `/push/register` và `/push/unregister` theo Spec G10 (nhóm tag `devices`). Body có `userId` để khớp gói `tasco_notifications`; khác user của token → 403.
+- Hộp thông báo dùng con trỏ (`cursor`, `limit` tối đa 50). `POST /notifications/read` nhận danh sách `ids` (tối đa 100); chưa có "đọc tất cả".
+- Payload thông báo chỉ có tên con, lớp, giờ buổi và id để mở đúng màn.
+- Cả bốn POST ghi bắt buộc `Idempotency-Key` theo Spec §5.1, kể cả `push/*` và `notifications/read` vốn đã idempotent.
+
 ## Sprint 2 (S1-CT-02)
 
 Thân hàm trả 501 `NOT_IMPLEMENTED` tới khi làm task backend tương ứng; schema đã validate thật.

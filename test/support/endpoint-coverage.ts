@@ -137,4 +137,32 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
     notApplicable:
       'hợp đồng S1-CT-02, thân hàm trả 501 tới task admin; test chéo tenant làm cùng task đó',
   },
+  'GET /v1/sessions/{id}/attendance': {
+    notApplicable:
+      'hợp đồng S2-FL-10, thân hàm trả 501 tới S3-BE-02; test chéo tenant làm cùng task đó',
+  },
+  'POST /v1/attendance/sync': {
+    notApplicable:
+      'hợp đồng S2-FL-10, thân hàm trả 501 tới S3-BE-02; test chéo tenant làm cùng task đó',
+  },
+  'GET /v1/sessions/{id}/attendance/history': {
+    notApplicable:
+      'hợp đồng S2-FL-10, thân hàm trả 501 tới S3-BE-03; test chéo tenant làm cùng task đó',
+  },
+  'POST /v1/push/register': {
+    notApplicable:
+      'hợp đồng S2-FL-10, thân hàm trả 501 tới S3-BE-05; test chéo tenant làm cùng task đó',
+  },
+  'POST /v1/push/unregister': {
+    notApplicable:
+      'hợp đồng S2-FL-10, thân hàm trả 501 tới S3-BE-05; test chéo tenant làm cùng task đó',
+  },
+  'GET /v1/notifications': {
+    notApplicable:
+      'hợp đồng S2-FL-10, thân hàm trả 501 tới S3-BE-06; test chéo tenant làm cùng task đó',
+  },
+  'POST /v1/notifications/read': {
+    notApplicable:
+      'hợp đồng S2-FL-10, thân hàm trả 501 tới S3-BE-06; test chéo tenant làm cùng task đó',
+  },
 };
