@@ -1,4 +1,4 @@
-import { Body, Controller, HttpCode, Post } from '@nestjs/common';
+import { Body, Controller, HttpCode, Post, Req, Res } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import {
   ApiBearerAuth,
@@ -6,12 +6,16 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import {
   ApiErrors,
   ApiIdempotencyKey,
-  AppException,
+  Ctx,
   Public,
+  type RequestContext,
 } from '@teachhub/core';
+import { Idempotency } from '@teachhub/infra';
+import { InviteAcceptanceService } from '../application/invite-acceptance.service.js';
 import {
   type InviteAccepted,
   inviteAcceptedSchema,
@@ -23,11 +27,21 @@ import {
   redeemCodeRequestSchema,
 } from './invites.schemas.js';
 
-// Hợp đồng Sprint 4 (S3-FL-12); thân hàm ở S4-BE-04. Không log token, mã mời hay body các route này.
+const header = (req: FastifyRequest) => {
+  const v = req.headers['idempotency-key'];
+  return typeof v === 'string' ? v : undefined;
+};
+
+// Hợp đồng Sprint 4 (S3-FL-12); S4-BE-04. Header `Cache-Control: no-store` và `Referrer-Policy: no-referrer` đặt ở hook `onSend` của app.ts cho cả ba route (kể cả lỗi). Không log token, mã mời hay body các route này.
 // `@Throttle` chỉ đếm theo IP. Bộ đếm theo user, khóa 5 lần và bộ đếm toàn cục là bộ đếm riêng trong service (Redis).
 @ApiTags('invites')
 @Controller('invites')
 export class InviteAcceptanceController {
+  constructor(
+    private readonly idem: Idempotency,
+    private readonly acceptance: InviteAcceptanceService,
+  ) {}
+
   @Public()
   @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @Post('preview')
@@ -42,9 +56,10 @@ export class InviteAcceptanceController {
   @ApiOkResponse({ standardSchema: invitePreviewSchema })
   @ApiErrors('VALIDATION_FAILED', 'INVITE_INVALID', 'RATE_LIMITED')
   preview(
-    @Body({ schema: inviteTokenRequestSchema }) _body: InviteTokenRequest,
-  ): InvitePreview {
-    throw new AppException('NOT_IMPLEMENTED');
+    @Req() req: FastifyRequest,
+    @Body({ schema: inviteTokenRequestSchema }) body: InviteTokenRequest,
+  ): Promise<InvitePreview> {
+    return this.acceptance.preview(body.token, req.ip);
   }
 
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
@@ -71,9 +86,25 @@ export class InviteAcceptanceController {
     'RATE_LIMITED',
   )
   accept(
-    @Body({ schema: inviteTokenRequestSchema }) _body: InviteTokenRequest,
-  ): InviteAccepted {
-    throw new AppException('NOT_IMPLEMENTED');
+    @Ctx() ctx: RequestContext,
+    @Req() req: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @Body({ schema: inviteTokenRequestSchema }) body: InviteTokenRequest,
+  ): Promise<InviteAccepted> {
+    return this.acceptance.accept(
+      {
+        kind: 'token',
+        secret: body.token,
+        ctx,
+        ip: req.ip,
+        idempotencyKey: header(req),
+      },
+      (exec) =>
+        this.idem.run(req, reply, ctx, async (t) => ({
+          status: 200,
+          body: await exec(t),
+        })),
+    );
   }
 
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
@@ -100,8 +131,24 @@ export class InviteAcceptanceController {
     'RATE_LIMITED',
   )
   redeemCode(
-    @Body({ schema: redeemCodeRequestSchema }) _body: RedeemCodeRequest,
-  ): InviteAccepted {
-    throw new AppException('NOT_IMPLEMENTED');
+    @Ctx() ctx: RequestContext,
+    @Req() req: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @Body({ schema: redeemCodeRequestSchema }) body: RedeemCodeRequest,
+  ): Promise<InviteAccepted> {
+    return this.acceptance.accept(
+      {
+        kind: 'code',
+        secret: body.code,
+        ctx,
+        ip: req.ip,
+        idempotencyKey: header(req),
+      },
+      (exec) =>
+        this.idem.run(req, reply, ctx, async (t) => ({
+          status: 200,
+          body: await exec(t),
+        })),
+    );
   }
 }
