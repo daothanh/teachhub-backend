@@ -75,4 +75,5 @@ Dùng colima: đặt `DOCKER_HOST=unix://$HOME/.colima/default/docker.sock` và 
 - Lệnh ghi chạy trong `txService.run(ctx, async (tx) => …)` để RLS có `app.user_id`; `ctx` lấy bằng `@Ctx() ctx: RequestContext`.
 - Danh sách có tổng: query `pageQuerySchema` → `toLimitOffset` → trả `paginated(items, total, query)` = `{ items, total, page, pageSize }` (Mục 5.5).
 - Bảng nghiệp vụ mới: `enable` + `force row level security` và policy cho `teachhub_app` (mẫu ở `test/rls.e2e-spec.ts`). Bảng mới cần test chéo tenant bằng `test/support/isolation.ts` (`makeActors`, `expectRowIsolated`, `expectInsertRejected`; mẫu ở `test/tenant-isolation.e2e-spec.ts`); `test/rls-coverage.e2e-spec.ts` fail nếu bảng `public` thiếu `enable`/`force` RLS. Quy ước migration đầy đủ: [ADR-TH-BE-001](docs/adr/ADR-TH-BE-001-migration-va-csdl-lon-dan.md).
+- Outbox: `recordOutboxEvent(tx, …)` (`@teachhub/db`) trong cùng `txService.run` với lệnh nghiệp vụ; relay ở `apps/worker/src/outbox`. Giao ít nhất một lần, không bảo đảm thứ tự giữa các sự kiện: consumer phải idempotent theo `eventId`.
 - File `kebab-case.<loại>.ts`, route `/v1/<tài-nguyên-số-nhiều>`, JSON `camelCase`, SQL `snake_case` (Mục 8.5).

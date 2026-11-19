@@ -3,14 +3,17 @@ import {
   Injectable,
   Logger,
   type OnApplicationBootstrap,
-  type OnApplicationShutdown,
+  type OnModuleDestroy,
 } from '@nestjs/common';
 import type { Queue } from 'bullmq';
-import { sql } from 'drizzle-orm';
+import { type SQL, sql } from 'drizzle-orm';
 import { TxService } from '@teachhub/db';
 import {
   OUTBOX_QUEUE_DEFAULT,
   OUTBOX_QUEUE_URGENT,
+  type OutboxQueueName,
+  infraBackoffMs,
+  isEventError,
   outcomeAfterFailure,
   queueFor,
 } from './outbox-policy.js';
@@ -18,6 +21,9 @@ import {
 export const OUTBOX_BATCH_SIZE = 100;
 /** Quét định kỳ (Mục 6.2: dự phòng 1 giây). shortcut: chưa có LISTEN/NOTIFY, thêm khi p95 báo vắng cần dưới 1 giây. */
 export const OUTBOX_POLL_MS = 1_000;
+/** Thời gian giữ chỗ một lô đã claim; phải lớn hơn timeout đẩy sang Redis. Worker chết thì sau lease lô được lấy lại. */
+export const OUTBOX_LEASE_MS = 60_000;
+export const OUTBOX_ADD_TIMEOUT_MS = 5_000;
 
 interface PendingRow extends Record<string, unknown> {
   id: string;
@@ -27,21 +33,36 @@ interface PendingRow extends Record<string, unknown> {
   attempts: number;
 }
 
+const idList = (ids: string[]): SQL =>
+  sql.join(
+    ids.map((i) => sql`${i}::uuid`),
+    sql`, `,
+  );
+
 /**
- * Relay: khóa lô sự kiện chưa gửi (`FOR UPDATE SKIP LOCKED` nên nhiều bản sao worker không giẫm nhau),
- * đẩy sang BullMQ rồi đánh dấu `dispatched_at` trong cùng giao dịch. `jobId = id sự kiện` khiến BullMQ
- * bỏ qua job trùng nếu worker chết giữa lúc `add` và `commit` → tối đa một job cho mỗi sự kiện
- * (consumer vẫn cần idempotent vì BullMQ giao ít nhất một lần).
+ * Relay outbox → BullMQ, ba bước để không giữ khóa dòng trong lúc gọi Redis:
+ * 1. claim (tx ngắn): `FOR UPDATE SKIP LOCKED` rồi đẩy `next_attempt_at` ra sau một lease, nên nhiều bản sao worker không lấy trùng;
+ * 2. `add` sang BullMQ ngoài giao dịch, có timeout; `jobId = id sự kiện` nên BullMQ bỏ qua job trùng khi lô được lấy lại;
+ * 3. đánh dấu kết quả (tx ngắn): thành công → `dispatched_at`; lỗi → lùi `next_attempt_at`.
+ *
+ * Lỗi hạ tầng (Redis đứt, timeout) là lỗi chung của lô: chỉ lùi lịch có jitter, KHÔNG tăng `attempts`.
+ * Chỉ lỗi riêng của sự kiện mới tăng `attempts`; quá giới hạn thì `failed_at` (trừ hàng urgent: chỉ backoff trần).
+ *
+ * Bảo đảm: giao ít nhất một lần, KHÔNG bảo đảm thứ tự giữa các sự kiện. Consumer phải idempotent theo `eventId`.
  */
 @Injectable()
 export class OutboxRelayService
-  implements OnApplicationBootstrap, OnApplicationShutdown
+  implements OnApplicationBootstrap, OnModuleDestroy
 {
   private readonly log = new Logger(OutboxRelayService.name);
   private timer: NodeJS.Timeout | undefined;
   private stopped = false;
   private running: Promise<unknown> = Promise.resolve();
-  private readonly queues: Record<string, Queue>;
+  private infraFailures = 0;
+  private readonly queues: Record<OutboxQueueName, Queue>;
+  /** Public để test chỉnh nhỏ lại. */
+  leaseMs = OUTBOX_LEASE_MS;
+  addTimeoutMs = OUTBOX_ADD_TIMEOUT_MS;
 
   constructor(
     private readonly tx: TxService,
@@ -55,63 +76,148 @@ export class OutboxRelayService
   }
 
   onApplicationBootstrap(): void {
-    const tick = () => {
+    for (const name of [OUTBOX_QUEUE_URGENT, OUTBOX_QUEUE_DEFAULT] as const)
+      if (!this.queues[name])
+        throw new Error(`Thiếu hàng đợi outbox "${name}"`);
+    const tick = (): void => {
       if (this.stopped) return;
       this.running = this.relayBatch()
-        .catch((e: unknown) =>
+        .catch((e: unknown) => {
           this.log.error(
             `relay lỗi: ${e instanceof Error ? e.message : String(e)}`,
-          ),
-        )
-        .then(() => {
-          this.timer = setTimeout(tick, OUTBOX_POLL_MS);
+          );
+          return 0;
+        })
+        .then((claimed) => {
+          if (this.stopped) return;
+          // Lô đầy → còn việc, chạy tiếp ngay; ngược lại chờ chu kỳ quét.
+          this.timer = setTimeout(
+            tick,
+            claimed >= OUTBOX_BATCH_SIZE ? 0 : OUTBOX_POLL_MS,
+          );
         });
     };
     tick();
   }
 
-  async onApplicationShutdown(): Promise<void> {
+  /** Chạy trước khi BullMQ đóng queue: dừng vòng lặp rồi chờ lô đang xử lý xong. */
+  async onModuleDestroy(): Promise<void> {
     this.stopped = true;
     clearTimeout(this.timer);
     await this.running;
   }
 
-  /** Xử lý một lô; trả số sự kiện đã lấy (kể cả lần thử lỗi). */
-  relayBatch(limit = OUTBOX_BATCH_SIZE): Promise<number> {
+  /** Đưa lại sự kiện đã `failed_at` về hàng chờ (tất cả, hoặc theo danh sách id). Trả số dòng. */
+  requeueFailed(eventIds?: string[]): Promise<number> {
+    const only = eventIds ? sql`and id in (${idList(eventIds)})` : sql``;
     return this.tx.run({ userId: null }, async (tx) => {
-      const { rows } = await tx.execute<PendingRow>(sql`
-        select id, tenant_id, type, payload, attempts from outbox_events
-        where dispatched_at is null and failed_at is null and next_attempt_at <= now()
-        order by next_attempt_at, id
-        limit ${limit}
-        for update skip locked`);
-      for (const ev of rows) {
-        try {
-          await this.queues[queueFor(ev.type)]!.add(
-            ev.type,
-            { eventId: ev.id, tenantId: ev.tenant_id, payload: ev.payload },
-            { jobId: ev.id, removeOnComplete: { age: 3600 } },
-          );
-          await tx.execute(
-            sql`update outbox_events set dispatched_at = now() where id = ${ev.id}`,
-          );
-        } catch (e) {
-          const attempts = ev.attempts + 1;
-          const outcome = outcomeAfterFailure(attempts);
-          // Không ghi payload vào log; chỉ id + lý do.
-          const message = e instanceof Error ? e.message : String(e);
-          this.log.warn(
-            `đẩy outbox ${ev.id} lỗi (lần ${attempts}): ${message}`,
-          );
-          await tx.execute(
-            outcome.failed
-              ? sql`update outbox_events set attempts = ${attempts}, last_error = ${message}, failed_at = now() where id = ${ev.id}`
-              : sql`update outbox_events set attempts = ${attempts}, last_error = ${message},
-                    next_attempt_at = now() + ${outcome.retryInMs} * interval '1 millisecond' where id = ${ev.id}`,
-          );
-        }
-      }
-      return rows.length;
+      const r = await tx.execute(
+        sql`update outbox_events set failed_at = null, attempts = 0, next_attempt_at = now()
+            where failed_at is not null ${only}`,
+      );
+      return r.rowCount ?? 0;
     });
+  }
+
+  /** Xử lý một lô; trả số sự kiện đã claim. */
+  async relayBatch(limit = OUTBOX_BATCH_SIZE): Promise<number> {
+    const rows = await this.claim(limit);
+    if (rows.length === 0) return 0;
+
+    const sent: string[] = [];
+    const infraFailed: string[] = [];
+    const eventFailed: { ev: PendingRow; message: string }[] = [];
+    await Promise.all(
+      rows.map(async (ev) => {
+        try {
+          await this.add(ev);
+          sent.push(ev.id);
+        } catch (e) {
+          const message = e instanceof Error ? e.message : String(e);
+          if (isEventError(e)) eventFailed.push({ ev, message });
+          else infraFailed.push(ev.id);
+        }
+      }),
+    );
+    if (infraFailed.length > 0) {
+      this.infraFailures = sent.length > 0 ? 0 : this.infraFailures + 1;
+      this.log.warn(
+        `Redis lỗi, lùi ${infraFailed.length} sự kiện (lần liên tiếp ${this.infraFailures})`,
+      );
+    } else if (sent.length > 0) this.infraFailures = 0;
+
+    await this.tx.run({ userId: null }, async (tx) => {
+      if (sent.length > 0)
+        await tx.execute(
+          sql`update outbox_events set dispatched_at = now() where id in (${idList(sent)})`,
+        );
+      if (infraFailed.length > 0)
+        await tx.execute(
+          sql`update outbox_events set next_attempt_at = now() + ${infraBackoffMs(this.infraFailures)} * interval '1 millisecond'
+              where id in (${idList(infraFailed)})`,
+        );
+      for (const { ev, message } of eventFailed) {
+        const attempts = ev.attempts + 1;
+        const outcome = outcomeAfterFailure(
+          attempts,
+          queueFor(ev.type) === OUTBOX_QUEUE_URGENT,
+        );
+        // Không ghi payload vào log; chỉ id + lý do.
+        if (outcome.failed)
+          this.log.error(`outbox ${ev.id} quá ${attempts} lần: ${message}`);
+        else this.log.warn(`outbox ${ev.id} lỗi lần ${attempts}: ${message}`);
+        await tx.execute(
+          outcome.failed
+            ? sql`update outbox_events set attempts = ${attempts}, last_error = ${message}, failed_at = now() where id = ${ev.id}`
+            : sql`update outbox_events set attempts = ${attempts}, last_error = ${message},
+                  next_attempt_at = now() + ${outcome.retryInMs} * interval '1 millisecond' where id = ${ev.id}`,
+        );
+      }
+    });
+    return rows.length;
+  }
+
+  private async claim(limit: number): Promise<PendingRow[]> {
+    return this.tx.run({ userId: null }, async (tx) => {
+      const r = await tx.execute<PendingRow>(sql`
+        with c as (
+          select id from outbox_events
+          where dispatched_at is null and failed_at is null and next_attempt_at <= now()
+          order by next_attempt_at, id
+          limit ${limit}
+          for update skip locked)
+        update outbox_events o
+           set next_attempt_at = now() + ${this.leaseMs} * interval '1 millisecond'
+          from c where o.id = c.id
+        returning o.id, o.tenant_id, o.type, o.payload, o.attempts`);
+      return r.rows;
+    });
+  }
+
+  private async add(ev: PendingRow): Promise<void> {
+    const data = {
+      eventId: ev.id,
+      tenantId: ev.tenant_id,
+      payload: ev.payload,
+    };
+    JSON.stringify(data); // TypeError nếu không serialize được → lỗi riêng của sự kiện
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error('timeout đẩy sang Redis')),
+        this.addTimeoutMs,
+      );
+    });
+    try {
+      await Promise.race([
+        this.queues[queueFor(ev.type)].add(ev.type, data, {
+          jobId: ev.id,
+          removeOnComplete: { age: 3600 },
+        }),
+        timeout,
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 }

@@ -1,6 +1,6 @@
 {
-  "id": "01182cf9-eb36-43cd-93e9-227b49f78d4e",
-  "prevId": "ab9652d7-b36a-43c7-b94a-ac631e5a72a8",
+  "id": "d210a921-fdfb-4215-9e80-2ec9c0166b20",
+  "prevId": "516921a0-f1ba-4060-b6c3-03b6fca355e4",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -793,6 +793,22 @@
           "with": {},
           "method": "btree",
           "where": "\"outbox_events\".\"dispatched_at\" is null and \"outbox_events\".\"failed_at\" is null",
+          "concurrently": false
+        },
+        "outbox_events_dispatched_idx": {
+          "name": "outbox_events_dispatched_idx",
+          "columns": [
+            {
+              "expression": "dispatched_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "where": "\"outbox_events\".\"dispatched_at\" is not null",
           "concurrently": false
         }
       },
