@@ -1,14 +1,36 @@
-import { createHash } from 'node:crypto';
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  randomBytes,
+} from 'node:crypto';
 import { Global, Inject, Injectable, Module } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { and, eq } from 'drizzle-orm';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Redis } from 'ioredis';
-import { AppException, type RequestContext, uuidv7 } from '@teachhub/core';
+import {
+  AppException,
+  type Env,
+  type RequestContext,
+  secretKey,
+  uuidv7,
+} from '@teachhub/core';
 import { idempotencyKeys, type Tx, TxService } from '@teachhub/db';
 import { REDIS } from './redis.module.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const LOCK_SEC = 60;
+/** Phản hồi chứa bí mật (token/mã mời) chỉ phát lại được trong khoảng này; sau đó phải dùng khóa mới. */
+const SENSITIVE_TTL_MS = 10 * 60_000;
+
+export interface IdempotencyOptions {
+  /**
+   * Phản hồi có bí mật (token/mã mời): lưu mã hóa AES-256-GCM (khóa `IDEMPOTENCY_ENC_KEY`, gắn với user + route +
+   * khóa để không đem sang dòng khác được) và chỉ phát lại trong 10 phút; quá hạn → 409 `CONFLICT_STALE`.
+   */
+  sensitive?: boolean;
+}
 
 export interface IdempotentResult<T> {
   status: number;
@@ -40,13 +62,48 @@ export class Idempotency {
   constructor(
     private readonly tx: TxService,
     @Inject(REDIS) private readonly redis: Redis,
+    private readonly config: ConfigService<Env, true>,
   ) {}
+
+  private encKey(): Buffer {
+    return createHash('sha256')
+      .update(
+        secretKey(
+          this.config.get('IDEMPOTENCY_ENC_KEY'),
+          'IDEMPOTENCY_ENC_KEY',
+        ),
+      )
+      .digest();
+  }
+
+  private seal(body: unknown, aad: string): { enc: string } {
+    const iv = randomBytes(12);
+    const c = createCipheriv('aes-256-gcm', this.encKey(), iv);
+    c.setAAD(Buffer.from(aad));
+    const ct = Buffer.concat([c.update(JSON.stringify(body)), c.final()]);
+    return { enc: Buffer.concat([iv, c.getAuthTag(), ct]).toString('base64') };
+  }
+
+  private open<T>(sealed: { enc: string }, aad: string): T {
+    const raw = Buffer.from(sealed.enc, 'base64');
+    const d = createDecipheriv(
+      'aes-256-gcm',
+      this.encKey(),
+      raw.subarray(0, 12),
+    );
+    d.setAAD(Buffer.from(aad));
+    d.setAuthTag(raw.subarray(12, 28));
+    return JSON.parse(
+      Buffer.concat([d.update(raw.subarray(28)), d.final()]).toString('utf8'),
+    ) as T;
+  }
 
   async run<T>(
     req: FastifyRequest,
     reply: FastifyReply,
     ctx: RequestContext,
     fn: (t: Tx) => Promise<IdempotentResult<T>>,
+    opts: IdempotencyOptions = {},
   ): Promise<T> {
     const userId = ctx.userId;
     if (!userId) throw new AppException('UNAUTHENTICATED');
@@ -58,6 +115,7 @@ export class Idempotency {
       });
     }
     const endpoint = `${req.method} ${req.routeOptions.url}`;
+    const aad = `${userId}|${endpoint}|${key}`;
     const requestHash = createHash('sha256')
       // Cùng key + cùng body nhưng khác đích (id trên đường dẫn) hoặc khác tenant không phải cùng một yêu cầu.
       .update(
@@ -86,6 +144,16 @@ export class Idempotency {
       if (done.requestHash !== requestHash) {
         throw new AppException('IDEMPOTENCY_KEY_REUSED');
       }
+      if (opts.sensitive) {
+        if (Date.now() - done.createdAt.getTime() > SENSITIVE_TTL_MS) {
+          throw new AppException('CONFLICT_STALE');
+        }
+        void reply
+          .status(done.statusCode)
+          .header('Idempotent-Replayed', 'true')
+          .header('Cache-Control', 'no-store');
+        return this.open<T>(done.responseBody as { enc: string }, aad);
+      }
       void reply.status(done.statusCode).header('Idempotent-Replayed', 'true');
       return done.responseBody as T;
     };
@@ -110,11 +178,12 @@ export class Idempotency {
           key,
           requestHash,
           statusCode: r.status,
-          responseBody: r.body,
+          responseBody: opts.sensitive ? this.seal(r.body, aad) : r.body,
         });
         return r;
       });
       void reply.status(result.status);
+      if (opts.sensitive) void reply.header('Cache-Control', 'no-store');
       return result.body;
     } finally {
       await this.redis.del(lock);
