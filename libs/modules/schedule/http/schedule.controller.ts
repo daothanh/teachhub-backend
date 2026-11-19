@@ -2,7 +2,9 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
   Param,
+  Post,
   Put,
   Query,
   Req,
@@ -10,6 +12,7 @@ import {
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
+  ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
@@ -18,6 +21,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
   ApiErrors,
+  AppException,
   ApiIdempotencyKey,
   Ctx,
   type RequestContext,
@@ -27,10 +31,18 @@ import { Idempotency } from '@teachhub/infra';
 import { RequiresRole } from '@teachhub/modules/identity';
 import { ScheduleService } from '../application/schedule.service.js';
 import {
+  type CancelSessionRequest,
+  cancelSessionRequestSchema,
+  type MakeupSessionRequest,
+  makeupSessionRequestSchema,
   type PutScheduleRulesRequest,
   putScheduleRulesRequestSchema,
+  type RescheduleSessionRequest,
+  rescheduleSessionRequestSchema,
   type ScheduleRulesResult,
   scheduleRulesResultSchema,
+  type Session,
+  sessionSchema,
   type SessionsQuery,
   sessionsQuerySchema,
   type SessionsResponse,
@@ -39,7 +51,7 @@ import {
 
 const idParam = z.uuid();
 
-// Hợp đồng Sprint 2 (S1-CT-02); S2-BE-08.
+// Hợp đồng Sprint 2 (S1-CT-02); S2-BE-08. Dời/hủy/bù: bổ sung Sprint 4 (S3-FL-12), thân hàm ở S4-BE-07.
 @ApiTags('schedule')
 @ApiBearerAuth('bearer')
 @RequiresRole('tenant_owner')
@@ -91,5 +103,64 @@ export class ScheduleController {
     @Query({ schema: sessionsQuerySchema }) query: SessionsQuery,
   ): Promise<SessionsResponse> {
     return this.tx.run(ctx, (t) => this.schedule.list(t, ctx.tenantId!, query));
+  }
+
+  @Post('sessions/:id/reschedule')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'Dời buổi học (US-2.2 AC1)',
+    description:
+      'Chỉ buổi `planned`: buổi đã dạy → 409 `CONFLICT_STALE`, buổi đã hủy → 409 `SESSION_CANCELLED`. `startsAt` ở quá khứ → 422 `VALIDATION_FAILED`. ' +
+      'Ghi `schedule_changed` vào outbox, phụ huynh của lớp nhận thông báo (loại `schedule_changed`, `change = rescheduled`) trong ≤ 1 phút. Buổi của tenant khác → 404.',
+  })
+  @ApiOkResponse({ standardSchema: sessionSchema })
+  @ApiIdempotencyKey()
+  @ApiErrors(
+    'VALIDATION_FAILED',
+    'NOT_FOUND',
+    'CONFLICT_STALE',
+    'SESSION_CANCELLED',
+  )
+  reschedule(
+    @Param('id', { schema: idParam }) _id: string,
+    @Body({ schema: rescheduleSessionRequestSchema })
+    _body: RescheduleSessionRequest,
+  ): Session {
+    throw new AppException('NOT_IMPLEMENTED');
+  }
+
+  @Post('sessions/:id/cancel')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'Hủy buổi học (US-2.2 AC2)',
+    description:
+      'Buổi đã có điểm danh (kể cả buổi đã dạy) → 409 `SESSION_HAS_ATTENDANCE`: app phải hướng dẫn giáo viên sửa điểm danh trước rồi mới hủy, không tự xóa điểm danh. ' +
+      'Hủy buổi đã hủy → 200 với buổi hiện tại (idempotent, không gửi thông báo lần hai). Ghi `schedule_changed` (`change = cancelled`) vào outbox, phụ huynh của lớp nhận thông báo ≤ 1 phút. Buổi của tenant khác → 404.',
+  })
+  @ApiOkResponse({ standardSchema: sessionSchema })
+  @ApiIdempotencyKey()
+  @ApiErrors('VALIDATION_FAILED', 'NOT_FOUND', 'SESSION_HAS_ATTENDANCE')
+  cancel(
+    @Param('id', { schema: idParam }) _id: string,
+    @Body({ schema: cancelSessionRequestSchema }) _body: CancelSessionRequest,
+  ): Session {
+    throw new AppException('NOT_IMPLEMENTED');
+  }
+
+  @Post('sessions/:id/makeup')
+  @ApiOperation({
+    summary: 'Tạo buổi bù cho buổi đã hủy (US-2.2 AC4)',
+    description:
+      '`id` là buổi gốc, phải đang `cancelled` (khác → 409 `CONFLICT_STALE`); mỗi buổi gốc có tối đa một buổi bù. Trả buổi mới `isMakeup = true`, `makeupOf = id`, cùng lớp và thời lượng gốc nếu không gửi `durationMin`. ' +
+      'Ghi `schedule_changed` (`change = makeup`) vào outbox. AC3 (không tính thêm tiền) kiểm ở `billing`, Sprint 5.',
+  })
+  @ApiCreatedResponse({ standardSchema: sessionSchema })
+  @ApiIdempotencyKey()
+  @ApiErrors('VALIDATION_FAILED', 'NOT_FOUND', 'CONFLICT_STALE')
+  makeup(
+    @Param('id', { schema: idParam }) _id: string,
+    @Body({ schema: makeupSessionRequestSchema }) _body: MakeupSessionRequest,
+  ): Session {
+    throw new AppException('NOT_IMPLEMENTED');
   }
 }

@@ -185,6 +185,30 @@ describe('enrollments + roster API', () => {
       [s2, 'paused', '2026-12-14'],
     ]);
     expect(roster.items[0]).toHaveProperty('enrollmentId');
+    expect(roster.items[0]).toMatchObject({
+      inviteStatus: 'not_invited',
+      guardians: [],
+    });
+    // phụ huynh thật từ bảng guardians: chỉ chưa gỡ, đủ trường theo hợp đồng
+    const g1 = randomUUID();
+    await t.worker.query(
+      `insert into guardians (id, tenant_id, student_id, full_name, relation) values ($1, $2, $3, 'Anh Cha', 'father')`,
+      [g1, A.tenantId, s1],
+    );
+    await t.worker.query(
+      `insert into guardians (id, tenant_id, student_id, full_name, relation, deleted_at) values ($1, $2, $3, 'Đã Gỡ', 'mother', now())`,
+      [randomUUID(), A.tenantId, s1],
+    );
+    const withG = (await call(A, 'GET', `/classes/${c}/roster`)).json();
+    expect(withG.items[0].guardians).toEqual([
+      {
+        id: g1,
+        fullName: 'Anh Cha',
+        relation: 'father',
+        inviteStatus: 'not_invited',
+        latestInvite: null,
+      },
+    ]);
     expect((await call(A, 'GET', `/classes/${c}`)).json().enrolledCount).toBe(
       2,
     );

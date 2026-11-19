@@ -1,5 +1,5 @@
 import { Injectable, Module } from '@nestjs/common';
-import { eq, lt, sql } from 'drizzle-orm';
+import { and, eq, inArray, lt, sql } from 'drizzle-orm';
 import { uuidv7 } from '@teachhub/core';
 import { idempotencyKeys, jobRuns, TxService } from '@teachhub/db';
 
@@ -17,6 +17,23 @@ export class JobRuns {
   /** `fn` trả số dòng tác động. Lỗi được ghi `failed` rồi ném lại để BullMQ thử lại. */
   async track(job: string, fn: () => Promise<number>): Promise<number> {
     const id = uuidv7();
+    // Lần chạy trước bị bỏ dở (worker chết giữa chừng) vẫn `running` quá một giờ: đóng lại để dashboard không treo.
+    await this.tx.run({ userId: null }, (t) =>
+      t
+        .update(jobRuns)
+        .set({
+          status: 'failed',
+          error: 'bỏ dở: worker dừng giữa chừng',
+          finishedAt: sql`now()`,
+        })
+        .where(
+          and(
+            eq(jobRuns.job, job),
+            eq(jobRuns.status, 'running'),
+            lt(jobRuns.startedAt, sql`now() - interval '1 hour'`),
+          ),
+        ),
+    );
     await this.tx.run({ userId: null }, (t) =>
       t.insert(jobRuns).values({ id, job, status: 'running' }),
     );
@@ -45,6 +62,7 @@ export class JobRuns {
 
 export const JOB_PURGE_IDEMPOTENCY = 'infra.purge-idempotency-keys';
 const IDEMPOTENCY_TTL_HOURS = 48;
+export const PURGE_BATCH = 5000;
 
 /** Xóa kết quả `Idempotency-Key` quá 48 giờ (client không thử lại muộn hơn thế). */
 @Injectable()
@@ -56,18 +74,32 @@ export class PurgeIdempotencyKeysJob {
 
   run(): Promise<number> {
     return this.runs.track(JOB_PURGE_IDEMPOTENCY, async () => {
-      const gone = await this.tx.run({ userId: null }, (t) =>
-        t
-          .delete(idempotencyKeys)
-          .where(
-            lt(
-              idempotencyKeys.createdAt,
-              sql`now() - make_interval(hours => ${IDEMPOTENCY_TTL_HOURS})`,
-            ),
-          )
-          .returning({ id: idempotencyKeys.id }),
-      );
-      return gone.length;
+      let total = 0;
+      // Theo lô để một lần xóa không giữ khóa/WAL quá lớn khi tồn đọng nhiều.
+      for (;;) {
+        const gone = await this.tx.run({ userId: null }, (t) =>
+          t
+            .delete(idempotencyKeys)
+            .where(
+              inArray(
+                idempotencyKeys.id,
+                t
+                  .select({ id: idempotencyKeys.id })
+                  .from(idempotencyKeys)
+                  .where(
+                    lt(
+                      idempotencyKeys.createdAt,
+                      sql`now() - make_interval(hours => ${IDEMPOTENCY_TTL_HOURS})`,
+                    ),
+                  )
+                  .limit(PURGE_BATCH),
+              ),
+            )
+            .returning({ id: idempotencyKeys.id }),
+        );
+        total += gone.length;
+        if (gone.length < PURGE_BATCH) return total;
+      }
     });
   }
 }

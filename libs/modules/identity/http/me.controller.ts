@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   Post,
@@ -32,6 +33,8 @@ import { MembershipCache } from '../membership-cache.service.js';
 import {
   type ActiveMembershipRequest,
   activeMembershipRequestSchema,
+  type DeleteAccountRequest,
+  deleteAccountRequestSchema,
   type AddRoleRequest,
   addRoleRequestSchema,
   type MembershipCreated,
@@ -189,5 +192,25 @@ export class MeController {
     // Vai trò mới phải có hiệu lực ngay với token đang dùng (S1-BE-07b).
     await this.cache.invalidate(ctx.userId!);
     return result;
+  }
+
+  // Hợp đồng Sprint 4 (S3-FL-12); thân hàm ở S4-BE-09.
+  @Delete()
+  @HttpCode(204)
+  @ApiOperation({
+    summary: 'Xóa tài khoản (US-0.9, App Store 5.1.1(v))',
+    description:
+      'Xác nhận lại bằng OTP đã gửi với `purpose = delete_account`. OTP sai → 401 `OTP_INVALID`, sai nhiều lần → 429 `OTP_LOCKED` (cùng bộ đếm với đăng nhập). ' +
+      'Theo Spec §4.8: thu hồi mọi refresh token và membership, xóa tệp và dữ liệu cá nhân, ẩn danh hóa (vd. `students.full_name` → "Học viên đã xóa #xxxx") trong 30 ngày; ' +
+      'giữ `invoices`, `payments`, `revenue_ledger`, `audit_logs` tài chính 5 năm rồi xóa hẳn bằng job. Sau khi xóa, đăng nhập lại bằng email cũ tạo tài khoản mới, không thấy dữ liệu cũ. ' +
+      'Thời hạn giữ chứng từ còn chờ kế toán và luật sư rà. Giáo viên còn lớp đang hoạt động: cách xử lý chốt ở S4-BE-09 (hợp đồng không đổi).',
+  })
+  @ApiNoContentResponse()
+  @ApiIdempotencyKey()
+  @ApiErrors('VALIDATION_FAILED', 'OTP_INVALID', 'OTP_LOCKED')
+  deleteAccount(
+    @Body({ schema: deleteAccountRequestSchema }) _body: DeleteAccountRequest,
+  ): void {
+    throw new AppException('NOT_IMPLEMENTED');
   }
 }

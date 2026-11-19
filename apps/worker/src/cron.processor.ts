@@ -36,6 +36,8 @@ export class CronProcessor
   /** `upsertJobScheduler` theo id: nhiều instance worker khởi động vẫn chỉ có một lịch. */
   async onApplicationBootstrap(): Promise<void> {
     const opts = {
+      removeOnComplete: 100,
+      removeOnFail: 500,
       attempts: 3,
       backoff: { type: 'exponential', delay: 60_000 },
     };

@@ -1,5 +1,11 @@
 import { z } from 'zod';
 
+const csv = (v: string) =>
+  v
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
 export const envSchema = z
   .object({
     NODE_ENV: z
@@ -36,19 +42,15 @@ export const envSchema = z
     SMTP_URL: z.url().default('smtp://127.0.0.1:1025'),
     EMAIL_FROM: z.string().min(1).default('TeachHub <no-reply@teachhub.vn>'),
     /** Client ID OAuth Google (iOS, Android, web), ngăn cách bởi dấu phẩy — `aud` hợp lệ của id_token. Trống = từ chối mọi id_token. */
-    GOOGLE_CLIENT_IDS: z
-      .string()
-      .default('')
-      .transform((v) =>
-        v
-          .split(',')
-          .map((s) => s.trim())
-          .filter(Boolean),
-      ),
+    GOOGLE_CLIENT_IDS: z.string().default('').transform(csv),
     /** Khóa công khai của Google; test trỏ về JWKS giả. */
     GOOGLE_JWKS_URL: z
       .url()
       .default('https://www.googleapis.com/oauth2/v3/certs'),
+    /** Bundle ID (ngăn cách bởi dấu phẩy) — `aud` hợp lệ của identityToken Apple. Trống = từ chối mọi token Apple. */
+    APPLE_BUNDLE_ID: z.string().default('').transform(csv),
+    /** Khóa công khai của Apple; test trỏ về JWKS giả. */
+    APPLE_JWKS_URL: z.url().default('https://appleid.apple.com/auth/keys'),
     /** Số proxy tin cậy phía trước api (đọc lúc dựng Fastify trong app.ts). */
     TRUST_PROXY_HOPS: z.coerce.number().int().min(0).default(1),
     /** Nhân mọi giới hạn tần suất theo IP (test e2e đặt lớn để không vướng). */
@@ -61,6 +63,18 @@ export const envSchema = z
     JWT_PREVIOUS_KID: z.string().optional(),
     /** Service account Firebase (JSON một dòng) để worker gửi FCM. Trống = tắt gửi push, worker vẫn chạy và log cảnh báo. */
     FCM_SERVICE_ACCOUNT_JSON: z.string().optional(),
+  })
+  .superRefine((e, ctx) => {
+    if (!['staging', 'production'].includes(e.NODE_ENV)) return;
+    for (const k of ['GOOGLE_CLIENT_IDS', 'APPLE_BUNDLE_ID'] as const) {
+      if (e[k].length === 0) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [k],
+          message: 'Bắt buộc ở staging/production',
+        });
+      }
+    }
   })
   .refine((e) => e.JWT_PRIVATE_KEY || ['local', 'test'].includes(e.NODE_ENV), {
     path: ['JWT_PRIVATE_KEY'],

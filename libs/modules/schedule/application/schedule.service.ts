@@ -172,6 +172,9 @@ export class ScheduleService {
     return {
       items: rows.map((r) => ({
         ...r,
+        // shortcut: chưa có cột cancel_reason/makeup_of (US-2.2, US-2.6); S4-BE-07 thêm cột và trả giá trị thật.
+        cancelReason: null,
+        makeupOf: null,
         status: r.status as 'planned' | 'taught' | 'cancelled',
         startsAt: formatInZone(r.startsAt, tz),
         endsAt: formatInZone(r.endsAt, tz),

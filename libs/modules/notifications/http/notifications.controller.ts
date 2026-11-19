@@ -57,7 +57,8 @@ export class NotificationsController {
   @ApiOperation({
     summary: 'Hộp thông báo của vai trò đang mở (US-6.1)',
     description:
-      'Phân trang con trỏ (Spec §5.5), mới nhất trước. Chỉ trả thông báo gửi cho chính user và đúng vai trò `active-membership`; không bao giờ lộ thông báo của người khác.',
+      'Phân trang con trỏ (Spec §5.5), mới nhất trước. Chỉ trả thông báo gửi cho chính user và đúng vai trò `active-membership`; không bao giờ lộ thông báo của người khác. ' +
+      'Từ Sprint 4 có thêm loại `schedule_changed` (US-2.2) mà schema chưa liệt kê vì oasdiff coi thêm `oneOf` là breaking; client bỏ qua `type` lạ. Hình dạng: `payload = { classId, className, sessionId, change (rescheduled|cancelled|makeup), sessionStartsAt, previousStartsAt|null, reason|null }`, `deepLink = teachhub://sessions/{sessionId}`.',
   })
   @ApiOkResponse({ standardSchema: notificationsResponseSchema })
   @ApiErrors('VALIDATION_FAILED')

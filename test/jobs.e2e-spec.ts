@@ -197,4 +197,65 @@ describe('job nền của worker', () => {
       )[0].status,
     ).toBe('succeeded');
   });
+
+  it('dọn idempotency_keys theo lô: tồn đọng hơn một lô (5001 dòng) vẫn xóa hết', async () => {
+    const A = await seedTenant(t.worker);
+    await q(
+      `insert into idempotency_keys (id, user_id, endpoint, key, request_hash, status_code, created_at)
+       select gen_random_uuid(), $1, 'POST /x', gen_random_uuid()::text, 'h', 201, now() - interval '3 days'
+       from generate_series(1, 5001)`,
+      [A.userId],
+    );
+    expect(await purge.run()).toBe(5001);
+    expect(
+      (
+        await q(
+          `select count(*)::int n from idempotency_keys where user_id = $1`,
+          [A.userId],
+        )
+      )[0].n,
+    ).toBe(0);
+  });
+
+  it('job_runs còn running quá 1 giờ bị đóng thành failed ở lần chạy sau', async () => {
+    const id = randomUUID();
+    await q(
+      `insert into job_runs (id, job, started_at, status) values ($1, 'test.orphan', now() - interval '2 hours', 'running')`,
+      [id],
+    );
+    await runs.track('test.orphan', () => Promise.resolve(0));
+    expect(
+      (await q(`select status, error from job_runs where id = $1`, [id]))[0]
+        .status,
+    ).toBe('failed');
+  });
+
+  it('một tenant lỗi (múi giờ hỏng) không chặn tenant khác; job ghi failed', async () => {
+    const [bad, good] = [
+      await seedTenant(t.worker),
+      await seedTenant(t.worker),
+    ];
+    await q(`update tenants set timezone = 'Không/Có' where id = $1`, [
+      bad.tenantId,
+    ]);
+    const id = await addClass(good.tenantId, good.branchId);
+    await addRule(good.tenantId, id, 3, '18:00');
+    await expect(
+      generate.run(new Date('2031-01-01T00:00:00Z')),
+    ).rejects.toThrow(/không sinh được/);
+    expect(
+      (
+        await q(`select count(*)::int n from sessions where class_id = $1`, [
+          id,
+        ])
+      )[0].n,
+    ).toBe(8);
+    expect(
+      (
+        await q(
+          `select status from job_runs where job = 'schedule.generate-sessions' order by started_at desc limit 1`,
+        )
+      )[0].status,
+    ).toBe('failed');
+  });
 });

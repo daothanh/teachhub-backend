@@ -1,1 +1,1 @@
-DROP INDEX "students_full_name_unaccent_trgm_idx";
+DROP INDEX IF EXISTS "students_full_name_unaccent_trgm_idx";

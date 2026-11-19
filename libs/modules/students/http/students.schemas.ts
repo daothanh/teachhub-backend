@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import { pageQuerySchema, paginatedSchema } from '@teachhub/core';
+import {
+  guardianInviteStatusSchema,
+  latestInviteSchema,
+  pageQuerySchema,
+  paginatedSchema,
+} from '@teachhub/core';
 
 const phone = z
   .string()
@@ -41,6 +46,8 @@ export const guardianSchema = z
     relation: z.enum(['father', 'mother', 'guardian']),
     phone: z.string().nullable(),
     email: z.string().nullable(),
+    inviteStatus: guardianInviteStatusSchema,
+    latestInvite: latestInviteSchema,
   })
   .meta({ id: 'Guardian' });
 
@@ -109,6 +116,8 @@ const studentExample = {
       relation: 'father',
       phone: '0912345678',
       email: null,
+      inviteStatus: 'not_invited',
+      latestInvite: null,
     },
   ],
 };

@@ -1,7 +1,14 @@
 import { Injectable } from '@nestjs/common';
-import { and, asc, eq, isNull, ne } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, ne } from 'drizzle-orm';
 import { AppException, uuidv7 } from '@teachhub/core';
-import { classes, enrollments, students, tenants, type Tx } from '@teachhub/db';
+import {
+  classes,
+  enrollments,
+  guardians,
+  students,
+  tenants,
+  type Tx,
+} from '@teachhub/db';
 import { localDate } from '@teachhub/modules/schedule';
 import type {
   CreateEnrollmentRequest,
@@ -101,10 +108,43 @@ export class EnrollmentsService {
         ),
       )
       .orderBy(asc(students.fullNameUnaccent), asc(students.id));
+    const gs = rows.length
+      ? await tx
+          .select({
+            id: guardians.id,
+            studentId: guardians.studentId,
+            fullName: guardians.fullName,
+            relation: guardians.relation,
+          })
+          .from(guardians)
+          .where(
+            and(
+              eq(guardians.tenantId, tenantId),
+              inArray(
+                guardians.studentId,
+                rows.map((r) => r.studentId),
+              ),
+              isNull(guardians.deletedAt),
+            ),
+          )
+          .orderBy(asc(guardians.createdAt), asc(guardians.id))
+      : [];
     return {
       items: rows.map((r) => ({
         ...r,
         studentStatus: r.studentStatus as 'active' | 'paused',
+        // shortcut: chưa có bảng lời mời phụ huynh; S4-BE-03 thay bằng trạng thái gộp thật (activated > invited > expired).
+        inviteStatus: 'not_invited' as const,
+        // Trigger CSDL giữ tối đa 2 phụ huynh chưa gỡ cho mỗi học viên.
+        guardians: gs
+          .filter((g) => g.studentId === r.studentId)
+          .map((g) => ({
+            id: g.id,
+            fullName: g.fullName,
+            relation: g.relation as 'father' | 'mother' | 'guardian',
+            inviteStatus: 'not_invited' as const, // shortcut: như trên, S4-BE-03
+            latestInvite: null,
+          })),
       })),
     };
   }

@@ -58,12 +58,17 @@ describe('loggable', () => {
       { query: 'insert …', params: PII, cause: driver },
     );
     const out = loggable(drizzleErr) as Error;
-    expect(out.message).toBe(driver.message);
-    expect(out).toMatchObject({ code: '23505', constraint: 'x' });
-    expect(out).not.toHaveProperty('detail');
+    expect(out.message).toBe('Failed query: insert …');
+    const cause = out.cause as Error;
+    expect(cause.message).toBe(driver.message);
+    expect(cause).toMatchObject({ code: '23505', constraint: 'x' });
+    expect(cause).not.toHaveProperty('detail');
     expect(out).not.toHaveProperty('params');
-    expect(out.stack).toMatch(/^Error: duplicate key[^\n]*\n\s+at /);
-    for (const v of PII) expect(dump(out)).not.toContain(v);
+    expect(out.stack).toMatch(/^Error: Failed query: insert …\n\s+at /);
+    for (const v of PII) {
+      expect(dump(out)).not.toContain(v);
+      expect(dump(cause)).not.toContain(v);
+    }
   });
 
   it('lỗi truy vấn không có lỗi gốc: stack dựng lại từ message đã cắt, không dòng nào chứa params', () => {
@@ -78,6 +83,35 @@ describe('loggable', () => {
     expect(out).not.toHaveProperty('params');
     expect(out).not.toHaveProperty('query');
     for (const v of PII) expect(dump(out)).not.toContain(v);
+  });
+
+  it('đi theo chuỗi cause: cấp nào cũng chỉ giữ message rút gọn + frame at', () => {
+    const root = Object.assign(new Error('Key (phone)=(0912345678) sai'), {
+      code: '22P02',
+    });
+    const mid = new Error(`mid\nparams: ${PII.join(',')}`, { cause: root });
+    const top = Object.assign(new Error(`Failed\nparams: ${PII.join(',')}`), {
+      query: 'q',
+      params: PII,
+      cause: mid,
+    });
+    const out = loggable(top) as Error;
+    const chain = [
+      out,
+      out.cause as Error,
+      (out.cause as Error).cause as Error,
+    ];
+    expect(chain.every((e) => e instanceof Error)).toBe(true);
+    expect(chain[1]!.message).toBe('mid');
+    expect(chain[2]).toMatchObject({ code: '22P02' });
+    for (const e of chain) {
+      expect(e.stack).toMatch(/^[^\n]*\n\s+at /);
+      expect(e.stack?.split('\n')[0]).toBe(`${e.name}: ${e.message}`);
+    }
+    // message của cấp gốc không bị cắt `params:` nhưng vẫn là message driver, không detail
+    expect(JSON.stringify(out, Object.getOwnPropertyNames(out))).not.toContain(
+      'Nguyễn',
+    );
   });
 
   it('lỗi khác giữ nguyên', () => {

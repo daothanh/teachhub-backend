@@ -292,6 +292,9 @@ export class StudentsService {
           relation: g.relation as 'father' | 'mother' | 'guardian',
           phone: g.phone,
           email: g.email,
+          // shortcut: chưa có bảng lời mời phụ huynh; S4-BE-03 thay bằng trạng thái và lời mời gần nhất thật.
+          inviteStatus: 'not_invited' as const,
+          latestInvite: null,
         })),
     }));
   }
