@@ -158,6 +158,9 @@ describe('JwtKeysService (S1-BE-03)', () => {
       S3_SECRET_ACCESS_KEY: 'x',
       S3_BUCKET_PRIVATE: 'x',
       JWT_PRIVATE_KEY: 'k',
+      CONSENT_IP_HMAC_KEY: 'k'.repeat(32),
+      INVITE_CODE_HMAC_KEY: 'k'.repeat(32),
+      IDEMPOTENCY_ENC_KEY: 'k'.repeat(32),
       NODE_ENV: 'staging',
     };
     expect(() => validateEnv(base)).toThrow(/APPLE_BUNDLE_ID/);

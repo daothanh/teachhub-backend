@@ -63,11 +63,39 @@ export const envSchema = z
     JWT_PREVIOUS_KID: z.string().optional(),
     /** Service account Firebase (JSON một dòng) để worker gửi FCM. Trống = tắt gửi push, worker vẫn chạy và log cảnh báo. */
     FCM_SERVICE_ACCOUNT_JSON: z.string().optional(),
+    /** Phiên bản điều khoản/chính sách hiện hành (consents, S4-BE-05); đổi giá trị = mọi phụ huynh phải đồng ý lại. */
+    CURRENT_TERMS_VERSION: z
+      .string()
+      .trim()
+      .min(1)
+      .max(40)
+      .default('2026-12-01'),
+    /** Gốc link mời; token nằm ở fragment `#t=` nên không vào log máy chủ. */
+    INVITE_BASE_URL: z.url().default('https://dayhoc.app/i'),
+    /** Khóa HMAC băm IP của consents. Bắt buộc ở staging/production; local/test dùng khóa tạm cố định. */
+    CONSENT_IP_HMAC_KEY: z.string().min(16).optional(),
+    /** Khóa HMAC băm mã mời ngắn (không gian 2^40: băm trơn dò được nếu lộ bảng). Bắt buộc ở staging/production. */
+    INVITE_CODE_HMAC_KEY: z.string().min(16).optional(),
+    /** Khóa AES-256-GCM mã hóa phản hồi idempotency chứa token/mã mời. Bắt buộc ở staging/production. */
+    IDEMPOTENCY_ENC_KEY: z.string().min(16).optional(),
   })
   .superRefine((e, ctx) => {
     if (!['staging', 'production'].includes(e.NODE_ENV)) return;
     for (const k of ['GOOGLE_CLIENT_IDS', 'APPLE_BUNDLE_ID'] as const) {
       if (e[k].length === 0) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [k],
+          message: 'Bắt buộc ở staging/production',
+        });
+      }
+    }
+    for (const k of [
+      'CONSENT_IP_HMAC_KEY',
+      'INVITE_CODE_HMAC_KEY',
+      'IDEMPOTENCY_ENC_KEY',
+    ] as const) {
+      if (!e[k]) {
         ctx.addIssue({
           code: 'custom',
           path: [k],
@@ -82,6 +110,10 @@ export const envSchema = z
   });
 
 export type Env = z.infer<typeof envSchema>;
+
+/** Khóa bí mật của `name`; thiếu (chỉ hợp lệ ở local/test, xem `envSchema`) thì dùng khóa tạm cố định. */
+export const secretKey = (value: string | undefined, name: string): string =>
+  value ?? `dev-only-${name}-khong-dung-o-staging-production`;
 
 /** Thiếu/sai biến môi trường → không khởi động (Mục 2.4). */
 export function validateEnv(raw: Record<string, unknown>): Env {
