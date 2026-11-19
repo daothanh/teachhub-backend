@@ -1,10 +1,21 @@
 import { z } from 'zod';
 
-const endpoint = z.url().max(2048).meta({
-  description:
-    'URL của dịch vụ push do trình duyệt cấp; coi như bí mật, không bao giờ trả lại',
-  example: 'https://fcm.googleapis.com/fcm/send/mau-endpoint',
-});
+/**
+ * Chống SSRF: chỉ `https:`, không userinfo (host nằm ngay sau `https://`), không cổng (mặc định 443), host thuộc
+ * allowlist dịch vụ push của trình duyệt. Server phải kiểm lại lúc gửi, không theo redirect.
+ */
+const endpoint = z
+  .string()
+  .max(2048)
+  .regex(
+    /^https:\/\/(fcm\.googleapis\.com|updates\.push\.services\.mozilla\.com|[a-z0-9-]+(\.[a-z0-9-]+)*\.push\.apple\.com|[a-z0-9-]+(\.[a-z0-9-]+)*\.notify\.windows\.com)\/[^\s@]*$/,
+    'Endpoint push không hợp lệ.',
+  )
+  .meta({
+    description:
+      'URL của dịch vụ push do trình duyệt cấp, coi như bí mật, không bao giờ trả lại. Chỉ nhận `https` cổng 443 không userinfo, host `fcm.googleapis.com`, `*.push.apple.com`, `updates.push.services.mozilla.com`, `*.notify.windows.com`',
+    example: 'https://fcm.googleapis.com/fcm/send/mau-endpoint',
+  });
 
 /** Đúng dạng `PushSubscription.toJSON()` của trình duyệt. */
 export const webPushSubscribeRequestSchema = z

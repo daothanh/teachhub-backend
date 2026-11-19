@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Post, Query } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import {
   ApiBearerAuth,
   ApiCreatedResponse,
@@ -24,17 +25,19 @@ import {
 @ApiErrors('UNAUTHENTICATED', 'TOKEN_EXPIRED')
 @Controller('consents')
 export class ConsentsController {
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post()
   @ApiOperation({
     summary: 'Ghi đồng ý xử lý dữ liệu theo vai trò (FR-0.14, US-0.3 AC2)',
     description:
-      'Chỉ ghi thêm: mỗi lần gọi thêm một dòng (`role`, `termsVersion`, `acceptedAt` giờ server, `ip_hash` HMAC và user agent do server lấy từ request); không có sửa hay xóa, gọi lần 2 không đổi dòng cũ. ' +
+      'Chỉ ghi thêm (bằng chứng pháp lý): mỗi lần gọi thêm một dòng (`role`, `termsVersion`, `acceptedAt` giờ server, `ip_hash` HMAC và user agent do server lấy từ request); không có sửa hay xóa, dòng cũ không bao giờ đổi. ' +
+      'Chặn trùng: cùng user, `role`, `termsVersion` trong 60 giây thì không thêm dòng, trả lại dòng vừa ghi (vẫn 201) để retry và bấm đúp không nhân bản. Giới hạn 10 lần/phút theo IP → 429 `RATE_LIMITED`. ' +
       'Không cần đã có membership vai trò đó (phụ huynh mới đồng ý trước khi nhận lời mời). ' +
       '`termsVersion` khác bản hiện hành → 409 `CONFLICT_STALE`, client tải lại điều khoản qua `GET /consents/status`.',
   })
   @ApiCreatedResponse({ standardSchema: consentSchema })
   @ApiIdempotencyKey()
-  @ApiErrors('VALIDATION_FAILED', 'CONFLICT_STALE')
+  @ApiErrors('VALIDATION_FAILED', 'CONFLICT_STALE', 'RATE_LIMITED')
   create(
     @Body({ schema: createConsentRequestSchema }) _body: CreateConsentRequest,
   ): Consent {

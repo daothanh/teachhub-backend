@@ -5,7 +5,13 @@ import { z } from 'zod';
 
 const email = z.email().max(254).meta({ example: 'co.lan@example.com' });
 
-export const otpSendRequestSchema = z.object({ email });
+export const otpSendRequestSchema = z.object({
+  email,
+  purpose: z.enum(['login', 'delete_account']).default('login').meta({
+    description:
+      'Mục đích mã. `delete_account` (S4-BE-09): mã chỉ dùng được cho `DELETE /me`, mã `login` không xóa được tài khoản và ngược lại',
+  }),
+});
 export type OtpSendRequest = z.infer<typeof otpSendRequestSchema>;
 
 export const loginRequestSchema = z.object({

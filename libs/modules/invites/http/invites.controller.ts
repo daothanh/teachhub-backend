@@ -35,7 +35,7 @@ export class InvitesController {
     description:
       'Sinh `token` (lưu băm SHA-256) và `shortCode` 8 ký tự (duy nhất khi còn hiệu lực), hết hạn sau 7 ngày. ' +
       'Phụ huynh đã có lời mời còn hiệu lực → lời mời cũ bị vô hiệu (`revoked`), link cũ chết ngay. Phụ huynh đã kích hoạt → 409 `CONFLICT_STALE`. ' +
-      '`token` và `shortCode` chỉ có trong phản hồi này (phát lại cùng `Idempotency-Key` trả lại đúng phản hồi đã lưu); các endpoint đọc không bao giờ trả chúng. Học viên/phụ huynh của tenant khác → 404.',
+      '`token` và `shortCode` chỉ có trong phản hồi này; các endpoint đọc không bao giờ trả chúng. Phát lại cùng `Idempotency-Key` trả lại phản hồi đã lưu, nên với route này phản hồi lưu phải mã hóa khi nghỉ và TTL ngắn (≤ 10 phút), hết TTL thì tạo lại bằng khóa mới. Học viên/phụ huynh của tenant khác → 404.',
   })
   @ApiCreatedResponse({ standardSchema: inviteCreatedSchema })
   @ApiIdempotencyKey()
@@ -51,7 +51,8 @@ export class InvitesController {
   @ApiOperation({
     summary: 'Trạng thái lời mời của học viên (US-1.6 AC4)',
     description:
-      'Lời mời mới nhất của từng phụ huynh. Chỉ trạng thái và mốc thời gian; không có `token` hay `shortCode`. Trạng thái `expired` được tính theo `expiresAt` lúc đọc.',
+      'Lời mời mới nhất của từng phụ huynh. Chỉ trạng thái và mốc thời gian; không có `token` hay `shortCode`. Trạng thái `expired` được tính theo `expiresAt` lúc đọc. ' +
+      '`acceptedBy` cho giáo viên biết ai đã nhận. Rủi ro chấp nhận ở MVP: link bị chuyển tiếp thì người lạ có thể nhận nhầm; giáo viên phát hiện qua `acceptedBy` rồi gỡ liên kết bằng cách bỏ phụ huynh khỏi `guardians` của `PATCH /students/{id}`, và người đó mất quyền xem `/family/**` ngay lập tức (không chờ hết cache).',
   })
   @ApiOkResponse({ standardSchema: inviteListSchema })
   @ApiErrors('NOT_FOUND')
@@ -78,7 +79,7 @@ export class InvitesController {
     summary:
       'Gửi lại: cấp link và mã mới cho lời mời hết hạn hoặc bị thu hồi (US-1.6 AC4)',
     description:
-      'Tạo lời mời mới cho cùng học viên và phụ huynh (7 ngày), vô hiệu lời mời `pending` cũ nếu còn. Phản hồi như `POST /students/{id}/invites`, `token` và `shortCode` chỉ xuất hiện ở đây. ' +
+      'Tạo lời mời mới cho cùng học viên và phụ huynh (7 ngày), vô hiệu lời mời `pending` cũ nếu còn. Phản hồi như `POST /students/{id}/invites`, `token` và `shortCode` chỉ xuất hiện ở đây; phản hồi lưu cho `Idempotency-Key` phải mã hóa, TTL ≤ 10 phút. ' +
       'Phụ huynh đã kích hoạt (`used`) → 409 `CONFLICT_STALE`.',
   })
   @ApiCreatedResponse({ standardSchema: inviteCreatedSchema })

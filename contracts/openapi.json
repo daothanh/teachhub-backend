@@ -70,6 +70,15 @@
                     "format": "email",
                     "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$",
                     "example": "co.lan@example.com"
+                  },
+                  "purpose": {
+                    "default": "login",
+                    "description": "Mục đích mã. `delete_account` (S4-BE-09): mã chỉ dùng được cho `DELETE /me`, mã `login` không xóa được tài khoản và ngược lại",
+                    "type": "string",
+                    "enum": [
+                      "login",
+                      "delete_account"
+                    ]
                   }
                 },
                 "required": [
@@ -843,9 +852,91 @@
         ]
       }
     },
+    "/v1/me": {
+      "delete": {
+        "description": "Xác nhận lại bằng OTP đã gửi với `purpose = delete_account`. OTP sai → 401 `OTP_INVALID`, sai nhiều lần → 429 `OTP_LOCKED` (cùng bộ đếm với đăng nhập). Theo Spec §4.8: thu hồi mọi refresh token và membership, xóa tệp và dữ liệu cá nhân, ẩn danh hóa (vd. `students.full_name` → \"Học viên đã xóa #xxxx\") trong 30 ngày; giữ `invoices`, `payments`, `revenue_ledger`, `audit_logs` tài chính 5 năm rồi xóa hẳn bằng job. Sau khi xóa, đăng nhập lại bằng email cũ tạo tài khoản mới, không thấy dữ liệu cũ. Thời hạn giữ chứng từ còn chờ kế toán và luật sư rà. Giáo viên còn lớp đang hoạt động: cách xử lý chốt ở S4-BE-09 (hợp đồng không đổi).",
+        "operationId": "me_deleteAccount",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID, giữ nguyên khi thử lại hoặc phát lại từ outbox",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteAccountRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "401": {
+            "description": "OTP_INVALID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "IDEMPOTENCY_IN_PROGRESS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED\n\nIDEMPOTENCY_KEY_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "OTP_LOCKED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Xóa tài khoản (US-0.9, App Store 5.1.1(v))",
+        "tags": [
+          "me"
+        ]
+      }
+    },
     "/v1/consents": {
       "post": {
-        "description": "Chỉ ghi thêm: mỗi lần gọi thêm một dòng (`role`, `termsVersion`, `acceptedAt` giờ server, `ip_hash` HMAC và user agent do server lấy từ request); không có sửa hay xóa, gọi lần 2 không đổi dòng cũ. Không cần đã có membership vai trò đó (phụ huynh mới đồng ý trước khi nhận lời mời). `termsVersion` khác bản hiện hành → 409 `CONFLICT_STALE`, client tải lại điều khoản qua `GET /consents/status`.",
+        "description": "Chỉ ghi thêm (bằng chứng pháp lý): mỗi lần gọi thêm một dòng (`role`, `termsVersion`, `acceptedAt` giờ server, `ip_hash` HMAC và user agent do server lấy từ request); không có sửa hay xóa, dòng cũ không bao giờ đổi. Chặn trùng: cùng user, `role`, `termsVersion` trong 60 giây thì không thêm dòng, trả lại dòng vừa ghi (vẫn 201) để retry và bấm đúp không nhân bản. Giới hạn 10 lần/phút theo IP → 429 `RATE_LIMITED`. Không cần đã có membership vai trò đó (phụ huynh mới đồng ý trước khi nhận lời mời). `termsVersion` khác bản hiện hành → 409 `CONFLICT_STALE`, client tải lại điều khoản qua `GET /consents/status`.",
         "operationId": "consents_create",
         "parameters": [
           {
@@ -909,6 +1000,16 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -934,8 +1035,7 @@
             "schema": {
               "type": "string",
               "enum": [
-                "parent",
-                "student"
+                "parent"
               ]
             }
           }
@@ -1953,7 +2053,7 @@
     },
     "/v1/classes/{id}/roster": {
       "get": {
-        "description": "Chỉ ghi danh chưa rời lớp (học viên `active` hoặc `paused`). Không phân trang. Mỗi học viên kèm `inviteStatus` (chưa mời / đã mời / đã kích hoạt / hết hạn, US-1.6 AC4) và danh sách phụ huynh với trạng thái từng người, để màn \"Mời tất cả phụ huynh chưa kích hoạt\" biết gọi mời cho ai. Nhãn \"Giá riêng\" thêm ở sprint sau.",
+        "description": "Chỉ ghi danh chưa rời lớp (học viên `active` hoặc `paused`). Không phân trang. Mỗi học viên kèm `inviteStatus` (chưa mời / đã mời / đã kích hoạt / hết hạn, US-1.6 AC4) và danh sách phụ huynh với trạng thái từng người, kèm `latestInvite` (id, hạn). \"Mời tất cả phụ huynh chưa kích hoạt\" chỉ lặp trên phụ huynh `not_invited` (gọi tạo lời mời) và `expired` (gọi `resend` bằng `latestInvite.id`); bỏ qua `invited` (đang còn hiệu lực) và `activated`. Nhãn \"Giá riêng\" thêm ở sprint sau.",
         "operationId": "classes_roster",
         "parameters": [
           {
@@ -2948,6 +3048,333 @@
           }
         ],
         "summary": "Buổi học trong khoảng ngày (US-2.1, US-2.3)",
+        "tags": [
+          "schedule"
+        ]
+      }
+    },
+    "/v1/sessions/{id}/reschedule": {
+      "post": {
+        "description": "Chỉ buổi `planned`: buổi đã dạy → 409 `CONFLICT_STALE`, buổi đã hủy → 409 `SESSION_CANCELLED`. `startsAt` ở quá khứ → 422 `VALIDATION_FAILED`. Ghi `schedule_changed` vào outbox, phụ huynh của lớp nhận thông báo (loại `schedule_changed`, `change = rescheduled`) trong ≤ 1 phút. Buổi của tenant khác → 404.",
+        "operationId": "schedule_reschedule",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID, giữ nguyên khi thử lại hoặc phát lại từ outbox",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RescheduleSessionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CONFLICT_STALE, SESSION_CANCELLED\n\nIDEMPOTENCY_IN_PROGRESS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED\n\nIDEMPOTENCY_KEY_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Dời buổi học (US-2.2 AC1)",
+        "tags": [
+          "schedule"
+        ]
+      }
+    },
+    "/v1/sessions/{id}/cancel": {
+      "post": {
+        "description": "Buổi đã có điểm danh (kể cả buổi đã dạy) → 409 `SESSION_HAS_ATTENDANCE`: app phải hướng dẫn giáo viên sửa điểm danh trước rồi mới hủy, không tự xóa điểm danh. Hủy buổi đã hủy → 200 với buổi hiện tại (idempotent, không gửi thông báo lần hai). Ghi `schedule_changed` (`change = cancelled`) vào outbox, phụ huynh của lớp nhận thông báo ≤ 1 phút. Buổi của tenant khác → 404.",
+        "operationId": "schedule_cancel",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID, giữ nguyên khi thử lại hoặc phát lại từ outbox",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CancelSessionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "SESSION_HAS_ATTENDANCE\n\nIDEMPOTENCY_IN_PROGRESS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED\n\nIDEMPOTENCY_KEY_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Hủy buổi học (US-2.2 AC2)",
+        "tags": [
+          "schedule"
+        ]
+      }
+    },
+    "/v1/sessions/{id}/makeup": {
+      "post": {
+        "description": "`id` là buổi gốc, phải đang `cancelled` (khác → 409 `CONFLICT_STALE`); mỗi buổi gốc có tối đa một buổi bù. Trả buổi mới `isMakeup = true`, `makeupOf = id`, cùng lớp và thời lượng gốc nếu không gửi `durationMin`. Ghi `schedule_changed` (`change = makeup`) vào outbox. AC3 (không tính thêm tiền) kiểm ở `billing`, Sprint 5.",
+        "operationId": "schedule_makeup",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID, giữ nguyên khi thử lại hoặc phát lại từ outbox",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MakeupSessionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CONFLICT_STALE\n\nIDEMPOTENCY_IN_PROGRESS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED\n\nIDEMPOTENCY_KEY_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Tạo buổi bù cho buổi đã hủy (US-2.2 AC4)",
         "tags": [
           "schedule"
         ]
@@ -4246,7 +4673,7 @@
     },
     "/v1/web-push/subscriptions": {
       "post": {
-        "description": "Upsert theo `endpoint`: đăng ký lặp không tạo dòng mới; endpoint đang gắn user khác thì chuyển sang user hiện tại. Không có endpoint đọc lại. `Idempotency-Key` tùy chọn vì lệnh vốn idempotent theo `endpoint`. Nội dung push cũng data-only như FCM: chỉ `notificationId` và `type`.",
+        "description": "Upsert theo `endpoint`: đăng ký lặp không tạo dòng mới; endpoint đang gắn user khác thì chuyển sang user hiện tại. Không có endpoint đọc lại. Chống SSRF: schema đã chỉ nhận `https` cổng 443, không userinfo, host trong allowlist (`fcm.googleapis.com`, `*.push.apple.com`, `updates.push.services.mozilla.com`, `*.notify.windows.com`); server kiểm lại host lúc gửi và không theo redirect. Bảng subscription theo user, mỗi user tối đa 10 (vượt → bản cũ nhất bị thay). `Idempotency-Key` tùy chọn vì lệnh vốn idempotent theo `endpoint`. Nội dung push cũng data-only như FCM: chỉ `notificationId` và `type`.",
         "operationId": "webPush_subscribe",
         "parameters": [
           {
@@ -4410,7 +4837,7 @@
     },
     "/v1/students/{id}/invites": {
       "post": {
-        "description": "Sinh `token` (lưu băm SHA-256) và `shortCode` 8 ký tự (duy nhất khi còn hiệu lực), hết hạn sau 7 ngày. Phụ huynh đã có lời mời còn hiệu lực → lời mời cũ bị vô hiệu (`revoked`), link cũ chết ngay. Phụ huynh đã kích hoạt → 409 `CONFLICT_STALE`. `token` và `shortCode` chỉ có trong phản hồi này (phát lại cùng `Idempotency-Key` trả lại đúng phản hồi đã lưu); các endpoint đọc không bao giờ trả chúng. Học viên/phụ huynh của tenant khác → 404.",
+        "description": "Sinh `token` (lưu băm SHA-256) và `shortCode` 8 ký tự (duy nhất khi còn hiệu lực), hết hạn sau 7 ngày. Phụ huynh đã có lời mời còn hiệu lực → lời mời cũ bị vô hiệu (`revoked`), link cũ chết ngay. Phụ huynh đã kích hoạt → 409 `CONFLICT_STALE`. `token` và `shortCode` chỉ có trong phản hồi này; các endpoint đọc không bao giờ trả chúng. Phát lại cùng `Idempotency-Key` trả lại phản hồi đã lưu, nên với route này phản hồi lưu phải mã hóa khi nghỉ và TTL ngắn (≤ 10 phút), hết TTL thì tạo lại bằng khóa mới. Học viên/phụ huynh của tenant khác → 404.",
         "operationId": "invites_create",
         "parameters": [
           {
@@ -4517,7 +4944,7 @@
         ]
       },
       "get": {
-        "description": "Lời mời mới nhất của từng phụ huynh. Chỉ trạng thái và mốc thời gian; không có `token` hay `shortCode`. Trạng thái `expired` được tính theo `expiresAt` lúc đọc.",
+        "description": "Lời mời mới nhất của từng phụ huynh. Chỉ trạng thái và mốc thời gian; không có `token` hay `shortCode`. Trạng thái `expired` được tính theo `expiresAt` lúc đọc. `acceptedBy` cho giáo viên biết ai đã nhận. Rủi ro chấp nhận ở MVP: link bị chuyển tiếp thì người lạ có thể nhận nhầm; giáo viên phát hiện qua `acceptedBy` rồi gỡ liên kết bằng cách bỏ phụ huynh khỏi `guardians` của `PATCH /students/{id}`, và người đó mất quyền xem `/family/**` ngay lập tức (không chờ hết cache).",
         "operationId": "invites_list",
         "parameters": [
           {
@@ -4685,7 +5112,7 @@
     },
     "/v1/invites/{id}/resend": {
       "post": {
-        "description": "Tạo lời mời mới cho cùng học viên và phụ huynh (7 ngày), vô hiệu lời mời `pending` cũ nếu còn. Phản hồi như `POST /students/{id}/invites`, `token` và `shortCode` chỉ xuất hiện ở đây. Phụ huynh đã kích hoạt (`used`) → 409 `CONFLICT_STALE`.",
+        "description": "Tạo lời mời mới cho cùng học viên và phụ huynh (7 ngày), vô hiệu lời mời `pending` cũ nếu còn. Phản hồi như `POST /students/{id}/invites`, `token` và `shortCode` chỉ xuất hiện ở đây; phản hồi lưu cho `Idempotency-Key` phải mã hóa, TTL ≤ 10 phút. Phụ huynh đã kích hoạt (`used`) → 409 `CONFLICT_STALE`.",
         "operationId": "invites_resend",
         "parameters": [
           {
@@ -4782,22 +5209,21 @@
         ]
       }
     },
-    "/v1/invites/{token}/preview": {
-      "get": {
-        "description": "Không cần đăng nhập. Giới hạn 30 lần/phút mỗi IP → 429 `RATE_LIMITED`. Chỉ trả tên giáo viên, tên con, lớp. Token sai, sai định dạng, hết hạn, đã dùng hay bị thu hồi đều trả CÙNG 410 `INVITE_INVALID`, không phân biệt lý do (không dò được lời mời).",
+    "/v1/invites/preview": {
+      "post": {
+        "description": "Token ở body, không ở đường dẫn. Không cần đăng nhập. `@Throttle` 30 lần/phút theo IP → 429 `RATE_LIMITED`; ngoài ra service giữ bộ đếm theo IP (IPv6 gộp theo /64) và bộ đếm toàn cục. Chỉ trả tên giáo viên và tên gọi của trẻ. Token sai, sai định dạng, hết hạn, đã dùng hay bị thu hồi đều trả CÙNG 410 `INVITE_INVALID`, thân lỗi chuẩn không có thông tin giáo viên hay trẻ, nên không dò được lời mời. Response cần `Cache-Control: no-store`.",
         "operationId": "inviteAcceptance_preview",
-        "parameters": [
-          {
-            "name": "token",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 128
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InviteTokenRequest"
+              }
             }
           }
-        ],
+        },
         "responses": {
           "200": {
             "description": "",
@@ -4811,6 +5237,16 @@
           },
           "410": {
             "description": "INVITE_INVALID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED",
             "content": {
               "application/json": {
                 "schema": {
@@ -4836,21 +5272,11 @@
         ]
       }
     },
-    "/v1/invites/{token}/accept": {
+    "/v1/invites/accept": {
       "post": {
-        "description": "Cần đăng nhập (OTP/SSO). Chưa đồng ý điều khoản hiện hành → 403 `CONSENT_REQUIRED` kèm `details.termsVersion`; client gọi `POST /consents` rồi gọi lại. Kiểm tra đồng ý chạy TRƯỚC khi xét token nên người chưa đồng ý không biết token đúng hay sai. Thành công: tạo membership Phụ huynh nếu chưa có (gộp vào tài khoản có sẵn, US-0.4 AC1), ghi `guardians.user_id`, đánh dấu lời mời đã dùng. Token sai, hết hạn, đã dùng, bị thu hồi → CÙNG 410 `INVITE_INVALID`. Giới hạn 10 lần/phút mỗi IP và user → 429 `RATE_LIMITED`.",
+        "description": "Cần đăng nhập (OTP/SSO). Chưa đồng ý điều khoản hiện hành → 403 `CONSENT_REQUIRED` kèm `details.termsVersion`; client gọi `POST /consents` rồi gọi lại. Kiểm tra đồng ý chạy TRƯỚC khi xét token nên người chưa đồng ý không biết token đúng hay sai. Thành công: tạo membership Phụ huynh nếu chưa có (gộp vào tài khoản có sẵn, US-0.4 AC1), ghi `guardians.user_id`, đánh dấu lời mời đã dùng. Token sai, hết hạn, đã dùng, bị thu hồi → CÙNG 410 `INVITE_INVALID`. Giới hạn: `@Throttle` 10 lần/phút theo IP; ngoài ra service đếm riêng theo user, theo IP (IPv6 theo /64) và toàn cục → 429 `RATE_LIMITED`.",
         "operationId": "inviteAcceptance_accept",
         "parameters": [
-          {
-            "name": "token",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 128
-            }
-          },
           {
             "name": "Idempotency-Key",
             "in": "header",
@@ -4862,6 +5288,16 @@
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InviteTokenRequest"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "",
@@ -4914,7 +5350,7 @@
             }
           },
           "422": {
-            "description": "IDEMPOTENCY_KEY_REUSED",
+            "description": "VALIDATION_FAILED\n\nIDEMPOTENCY_KEY_REUSED",
             "content": {
               "application/json": {
                 "schema": {
@@ -4947,7 +5383,7 @@
     },
     "/v1/invites/redeem-code": {
       "post": {
-        "description": "Cần đăng nhập. Cùng kết quả và cùng quy tắc đồng ý như `accept` (403 `CONSENT_REQUIRED` được kiểm trước mã). Khóa theo user: 5 lần nhập sai (mã không dùng được) trong 15 phút → 429 `INVITE_CODE_LOCKED` kèm `details.retryAfterSec` và header `Retry-After`; lỗi 422 do sai định dạng không tính. Mã sai, hết hạn, đã dùng, bị thu hồi → CÙNG 410 `INVITE_INVALID`. Cũng giới hạn 10 lần/phút mỗi IP → 429 `RATE_LIMITED`.",
+        "description": "Cần đăng nhập. Cùng kết quả và cùng quy tắc đồng ý như `accept` (403 `CONSENT_REQUIRED` kiểm trước mã). Mã ngắn chỉ sống 48 giờ kể từ lúc tạo (token ở link sống 7 ngày). `@Throttle` chỉ là giới hạn thô 10 lần/phút theo IP. Khóa thật là bộ đếm riêng trong service: 5 lần nhập sai (410) trong 15 phút theo user → 429 `INVITE_CODE_LOCKED` kèm `details.retryAfterSec` và header `Retry-After`; cùng quy tắc đếm theo IP (IPv6 theo /64) và một bộ đếm toàn cục chặn dò phân tán. Lỗi 422 do sai định dạng và phát lại phản hồi 410 đã lưu (cùng `Idempotency-Key`) không tính vào bộ đếm. Mã sai, hết hạn, đã dùng, bị thu hồi → CÙNG 410 `INVITE_INVALID`. Không gian mã 32^8 (2^40) cộng TTL 48 giờ và ba lớp bộ đếm đủ cho MVP; nếu TL muốn dư an toàn thì nâng lên 10 ký tự, chỉ cần đổi `pattern` của `code` và `shortCode`.",
         "operationId": "inviteAcceptance_redeemCode",
         "parameters": [
           {
@@ -5374,14 +5810,27 @@
           "membershipId": "019a8f3e-ac32-7a77-8e3f-4d5e6f7a8b92"
         }
       },
+      "DeleteAccountRequest": {
+        "type": "object",
+        "properties": {
+          "otp": {
+            "type": "string",
+            "pattern": "^\\d{6}$",
+            "description": "Mã OTP 6 số gửi tới email của user qua `POST /auth/otp/send` với `purpose = delete_account`",
+            "example": "482913"
+          }
+        },
+        "required": [
+          "otp"
+        ]
+      },
       "CreateConsentRequest": {
         "type": "object",
         "properties": {
           "role": {
             "type": "string",
             "enum": [
-              "parent",
-              "student"
+              "parent"
             ]
           },
           "termsVersion": {
@@ -5412,8 +5861,7 @@
           "role": {
             "type": "string",
             "enum": [
-              "parent",
-              "student"
+              "parent"
             ]
           },
           "termsVersion": {
@@ -5450,8 +5898,7 @@
           "role": {
             "type": "string",
             "enum": [
-              "parent",
-              "student"
+              "parent"
             ]
           },
           "currentTermsVersion": {
@@ -6175,7 +6622,11 @@
                   "id": "019b2c4f-0002-7b30-8c01-000000000001",
                   "fullName": "Nguyễn Văn Hải",
                   "relation": "father",
-                  "inviteStatus": "invited"
+                  "inviteStatus": "invited",
+                  "latestInvite": {
+                    "id": "019b2c80-0001-7a10-8a01-000000000001",
+                    "expiresAt": "2026-12-21T09:00:00+07:00"
+                  }
                 }
               ]
             },
@@ -6222,13 +6673,41 @@
           },
           "inviteStatus": {
             "$ref": "#/components/schemas/GuardianInviteStatus"
+          },
+          "latestInvite": {
+            "$ref": "#/components/schemas/LatestInvite"
           }
         },
         "required": [
           "id",
           "fullName",
           "relation",
-          "inviteStatus"
+          "inviteStatus",
+          "latestInvite"
+        ],
+        "additionalProperties": false
+      },
+      "LatestInvite": {
+        "description": "Lời mời mới nhất (kể cả hết hạn); null nếu chưa mời. Không có token hay mã",
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          }
+        },
+        "required": [
+          "id",
+          "expiresAt"
         ],
         "additionalProperties": false
       },
@@ -6319,7 +6798,8 @@
                   "relation": "father",
                   "phone": "0912345678",
                   "email": null,
-                  "inviteStatus": "not_invited"
+                  "inviteStatus": "not_invited",
+                  "latestInvite": null
                 }
               ]
             }
@@ -6407,7 +6887,8 @@
               "relation": "father",
               "phone": "0912345678",
               "email": null,
-              "inviteStatus": "not_invited"
+              "inviteStatus": "not_invited",
+              "latestInvite": null
             }
           ]
         }
@@ -6445,6 +6926,9 @@
           },
           "inviteStatus": {
             "$ref": "#/components/schemas/GuardianInviteStatus"
+          },
+          "latestInvite": {
+            "$ref": "#/components/schemas/LatestInvite"
           }
         },
         "required": [
@@ -6453,7 +6937,8 @@
           "relation",
           "phone",
           "email",
-          "inviteStatus"
+          "inviteStatus",
+          "latestInvite"
         ],
         "additionalProperties": false
       },
@@ -6608,7 +7093,9 @@
               "startsAt": "2026-12-15T18:00:00+07:00",
               "endsAt": "2026-12-15T19:30:00+07:00",
               "status": "planned",
-              "isMakeup": false
+              "isMakeup": false,
+              "cancelReason": null,
+              "makeupOf": null
             },
             {
               "id": "019b2c41-0001-7a10-8a01-000000000002",
@@ -6618,7 +7105,9 @@
               "startsAt": "2026-12-17T18:00:00+07:00",
               "endsAt": "2026-12-17T19:30:00+07:00",
               "status": "planned",
-              "isMakeup": false
+              "isMakeup": false,
+              "cancelReason": null,
+              "makeupOf": null
             }
           ]
         }
@@ -6664,6 +7153,23 @@
           },
           "isMakeup": {
             "type": "boolean"
+          },
+          "cancelReason": {
+            "description": "Lý do hủy; null nếu buổi chưa hủy hoặc không nhập lý do",
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 300
+          },
+          "makeupOf": {
+            "description": "Id buổi gốc nếu đây là buổi bù; null nếu không phải",
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
           }
         },
         "required": [
@@ -6674,9 +7180,80 @@
           "startsAt",
           "endsAt",
           "status",
-          "isMakeup"
+          "isMakeup",
+          "cancelReason",
+          "makeupOf"
         ],
         "additionalProperties": false
+      },
+      "RescheduleSessionRequest": {
+        "type": "object",
+        "properties": {
+          "startsAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "description": "Giờ bắt đầu mới, phải ở tương lai",
+            "example": "2026-12-18T18:00:00+07:00"
+          },
+          "durationMin": {
+            "description": "Thời lượng mới; bỏ trống = giữ thời lượng buổi gốc",
+            "type": "integer",
+            "minimum": 15,
+            "maximum": 480
+          },
+          "reason": {
+            "description": "Lý do, hiện cho phụ huynh trong thông báo; tùy chọn",
+            "example": "Cô bận việc đột xuất",
+            "type": "string",
+            "maxLength": 300
+          }
+        },
+        "required": [
+          "startsAt"
+        ],
+        "example": {
+          "startsAt": "2026-12-18T18:00:00+07:00",
+          "reason": "Cô bận việc đột xuất"
+        }
+      },
+      "CancelSessionRequest": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "description": "Lý do, hiện cho phụ huynh trong thông báo; tùy chọn",
+            "example": "Cô bận việc đột xuất",
+            "type": "string",
+            "maxLength": 300
+          }
+        },
+        "example": {
+          "reason": "Cô bận việc đột xuất"
+        }
+      },
+      "MakeupSessionRequest": {
+        "type": "object",
+        "properties": {
+          "startsAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "description": "Giờ bắt đầu mới, phải ở tương lai",
+            "example": "2026-12-18T18:00:00+07:00"
+          },
+          "durationMin": {
+            "description": "Thời lượng mới; bỏ trống = giữ thời lượng buổi gốc",
+            "type": "integer",
+            "minimum": 15,
+            "maximum": 480
+          }
+        },
+        "required": [
+          "startsAt"
+        ],
+        "example": {
+          "startsAt": "2026-12-20T18:00:00+07:00"
+        }
       },
       "BankTransferOrderPage": {
         "type": "object",
@@ -8091,6 +8668,114 @@
               "payload"
             ],
             "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "urgency": {
+                "type": "string",
+                "enum": [
+                  "normal",
+                  "urgent"
+                ]
+              },
+              "deepLink": {
+                "description": "Đường dẫn mở đúng màn; thiếu thì client tự suy từ `payload`",
+                "type": "string",
+                "maxLength": 500
+              },
+              "readAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              },
+              "createdAt": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "schedule_changed"
+                ]
+              },
+              "payload": {
+                "type": "object",
+                "properties": {
+                  "classId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "className": {
+                    "type": "string"
+                  },
+                  "sessionId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "change": {
+                    "type": "string",
+                    "enum": [
+                      "rescheduled",
+                      "cancelled",
+                      "makeup"
+                    ]
+                  },
+                  "sessionStartsAt": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                  },
+                  "previousStartsAt": {
+                    "description": "Giờ cũ khi `change = rescheduled`; còn lại null",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                  },
+                  "reason": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 300
+                  }
+                },
+                "required": [
+                  "classId",
+                  "className",
+                  "sessionId",
+                  "change",
+                  "sessionStartsAt",
+                  "previousStartsAt",
+                  "reason"
+                ],
+                "additionalProperties": false,
+                "description": "Lớp, buổi, giờ mới/cũ và lý do (nếu giáo viên nhập); không có dữ liệu học viên"
+              }
+            },
+            "required": [
+              "id",
+              "urgency",
+              "readAt",
+              "createdAt",
+              "type",
+              "payload"
+            ],
+            "additionalProperties": false
           }
         ],
         "description": "`payload` theo `type`. Client bỏ qua (không lỗi) phần tử có `type` lạ để tương thích khi server thêm loại mới."
@@ -8209,8 +8894,8 @@
           "endpoint": {
             "type": "string",
             "maxLength": 2048,
-            "format": "uri",
-            "description": "URL của dịch vụ push do trình duyệt cấp; coi như bí mật, không bao giờ trả lại",
+            "pattern": "^https:\\/\\/(fcm\\.googleapis\\.com|updates\\.push\\.services\\.mozilla\\.com|[a-z0-9-]+(\\.[a-z0-9-]+)*\\.push\\.apple\\.com|[a-z0-9-]+(\\.[a-z0-9-]+)*\\.notify\\.windows\\.com)\\/[^\\s@]*$",
+            "description": "URL của dịch vụ push do trình duyệt cấp, coi như bí mật, không bao giờ trả lại. Chỉ nhận `https` cổng 443 không userinfo, host `fcm.googleapis.com`, `*.push.apple.com`, `updates.push.services.mozilla.com`, `*.notify.windows.com`",
             "example": "https://fcm.googleapis.com/fcm/send/mau-endpoint"
           },
           "expirationTime": {
@@ -8259,8 +8944,8 @@
           "endpoint": {
             "type": "string",
             "maxLength": 2048,
-            "format": "uri",
-            "description": "URL của dịch vụ push do trình duyệt cấp; coi như bí mật, không bao giờ trả lại",
+            "pattern": "^https:\\/\\/(fcm\\.googleapis\\.com|updates\\.push\\.services\\.mozilla\\.com|[a-z0-9-]+(\\.[a-z0-9-]+)*\\.push\\.apple\\.com|[a-z0-9-]+(\\.[a-z0-9-]+)*\\.notify\\.windows\\.com)\\/[^\\s@]*$",
+            "description": "URL của dịch vụ push do trình duyệt cấp, coi như bí mật, không bao giờ trả lại. Chỉ nhận `https` cổng 443 không userinfo, host `fcm.googleapis.com`, `*.push.apple.com`, `updates.push.services.mozilla.com`, `*.notify.windows.com`",
             "example": "https://fcm.googleapis.com/fcm/send/mau-endpoint"
           }
         },
@@ -8316,13 +9001,27 @@
             "format": "date-time",
             "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
           },
-          "usedAt": {
+          "acceptedBy": {
+            "description": "Người đã nhận lời mời (tên hiển thị của tài khoản) và lúc nhận; null nếu chưa dùng. Để giáo viên phát hiện nhận nhầm",
             "type": [
-              "string",
+              "object",
               "null"
             ],
-            "format": "date-time",
-            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+            "properties": {
+              "displayName": {
+                "type": "string"
+              },
+              "acceptedAt": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              }
+            },
+            "required": [
+              "displayName",
+              "acceptedAt"
+            ],
+            "additionalProperties": false
           },
           "token": {
             "type": "string",
@@ -8336,11 +9035,17 @@
             "maxLength": 8,
             "description": "Mã ngắn 8 ký tự Crockford base32 (chữ hoa, không có `I L O U`), để phụ huynh nhập tay. Chỉ xuất hiện ở phản hồi này"
           },
+          "shortCodeExpiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "description": "Mã ngắn chỉ sống 48 giờ (ngắn hơn link 7 ngày vì dễ đoán hơn); hết hạn thì dùng link hoặc `resend`"
+          },
           "url": {
             "type": "string",
             "maxLength": 300,
             "format": "uri",
-            "description": "Link chia sẻ `https://dayhoc.app/i/{token}`; client sinh mã QR từ chính chuỗi này"
+            "description": "Link chia sẻ `https://dayhoc.app/i#t=<token>`: token nằm ở fragment nên không vào log máy chủ, CDN hay header Referer; client sinh mã QR từ chính chuỗi này. Trang landing phải đặt `Referrer-Policy: no-referrer` và `Cache-Control: no-store`, đọc fragment rồi gọi `POST /invites/preview` bằng body"
           }
         },
         "required": [
@@ -8350,9 +9055,10 @@
           "status",
           "createdAt",
           "expiresAt",
-          "usedAt",
+          "acceptedBy",
           "token",
           "shortCode",
+          "shortCodeExpiresAt",
           "url"
         ],
         "additionalProperties": false,
@@ -8363,10 +9069,11 @@
           "status": "pending",
           "createdAt": "2026-12-14T09:00:00+07:00",
           "expiresAt": "2026-12-21T09:00:00+07:00",
-          "usedAt": null,
+          "acceptedBy": null,
           "token": "q3Zp8mT1xV0kLw5Hn2RcYb7JdFgSaE9uXoIiKtUeMhA",
           "shortCode": "7K3QZ9XM",
-          "url": "https://dayhoc.app/i/q3Zp8mT1xV0kLw5Hn2RcYb7JdFgSaE9uXoIiKtUeMhA"
+          "shortCodeExpiresAt": "2026-12-16T09:00:00+07:00",
+          "url": "https://dayhoc.app/i#t=q3Zp8mT1xV0kLw5Hn2RcYb7JdFgSaE9uXoIiKtUeMhA"
         }
       },
       "InviteStatus": {
@@ -8427,13 +9134,27 @@
             "format": "date-time",
             "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
           },
-          "usedAt": {
+          "acceptedBy": {
+            "description": "Người đã nhận lời mời (tên hiển thị của tài khoản) và lúc nhận; null nếu chưa dùng. Để giáo viên phát hiện nhận nhầm",
             "type": [
-              "string",
+              "object",
               "null"
             ],
-            "format": "date-time",
-            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+            "properties": {
+              "displayName": {
+                "type": "string"
+              },
+              "acceptedAt": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              }
+            },
+            "required": [
+              "displayName",
+              "acceptedAt"
+            ],
+            "additionalProperties": false
           }
         },
         "required": [
@@ -8443,7 +9164,7 @@
           "status",
           "createdAt",
           "expiresAt",
-          "usedAt"
+          "acceptedBy"
         ],
         "additionalProperties": false,
         "example": {
@@ -8453,7 +9174,23 @@
           "status": "pending",
           "createdAt": "2026-12-14T09:00:00+07:00",
           "expiresAt": "2026-12-21T09:00:00+07:00",
-          "usedAt": null
+          "acceptedBy": null
+        }
+      },
+      "InviteTokenRequest": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "example": {
+          "token": "q3Zp8mT1xV0kLw5Hn2RcYb7JdFgSaE9uXoIiKtUeMhA"
         }
       },
       "InvitePreview": {
@@ -8462,15 +9199,9 @@
           "teacherName": {
             "type": "string"
           },
-          "studentName": {
-            "type": "string"
-          },
-          "className": {
-            "description": "Lớp đang học của học viên; null nếu chưa ghi danh lớp nào",
-            "type": [
-              "string",
-              "null"
-            ]
+          "studentGivenName": {
+            "type": "string",
+            "description": "Chỉ tên gọi của trẻ (tên cuối), không họ; họ tên đầy đủ chỉ trả sau khi nhận lời mời"
           },
           "expiresAt": {
             "type": "string",
@@ -8480,16 +9211,14 @@
         },
         "required": [
           "teacherName",
-          "studentName",
-          "className",
+          "studentGivenName",
           "expiresAt"
         ],
         "additionalProperties": false,
-        "description": "Chỉ tên giáo viên, tên con và lớp; không có liên hệ hay id",
+        "description": "Chỉ tên giáo viên và tên gọi của con; không có họ, lớp, liên hệ hay id",
         "example": {
           "teacherName": "Cô Lan",
-          "studentName": "Nguyễn Minh Anh",
-          "className": "Toán 9A",
+          "studentGivenName": "Anh",
           "expiresAt": "2026-12-21T09:00:00+07:00"
         }
       },
@@ -8658,7 +9387,13 @@
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 9007199254740991,
-                "description": "Buổi chưa hủy nhưng chưa có điểm danh"
+                "description": "Buổi không hủy, đã qua giờ kết thúc nhưng chưa có điểm danh"
+              },
+              "upcoming": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991,
+                "description": "Buổi không hủy chưa qua giờ kết thúc, chưa tính vào chuyên cần"
               }
             },
             "required": [
@@ -8666,7 +9401,8 @@
               "late",
               "excused",
               "unexcused",
-              "notRecorded"
+              "notRecorded",
+              "upcoming"
             ],
             "additionalProperties": false,
             "description": "Đếm theo buổi không bị hủy trong tuần"

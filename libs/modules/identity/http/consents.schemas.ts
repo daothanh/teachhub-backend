@@ -6,8 +6,8 @@ const termsVersion = z.string().trim().min(1).max(40).meta({
   example: '2026-12-01',
 });
 
-/** MVP: chỉ phụ huynh và học sinh đồng ý ở app; giáo viên đồng ý khi đăng ký (Sprint 1). */
-const consentRole = z.enum(['parent', 'student']);
+/** Sprint 4 chỉ có phụ huynh (Học sinh ngoài phạm vi, thêm giá trị `student` ở sprint sau); giáo viên đồng ý khi đăng ký (Sprint 1). */
+const consentRole = z.enum(['parent']);
 
 export const createConsentRequestSchema = z
   .object({ role: consentRole, termsVersion })

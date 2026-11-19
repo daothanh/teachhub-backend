@@ -32,7 +32,16 @@ export const inviteSchema = z
     status: inviteStatusSchema,
     createdAt: z.iso.datetime({ offset: true }),
     expiresAt: z.iso.datetime({ offset: true }),
-    usedAt: z.iso.datetime({ offset: true }).nullable(),
+    acceptedBy: z
+      .object({
+        displayName: z.string(),
+        acceptedAt: z.iso.datetime({ offset: true }),
+      })
+      .nullable()
+      .meta({
+        description:
+          'Người đã nhận lời mời (tên hiển thị của tài khoản) và lúc nhận; null nếu chưa dùng. Để giáo viên phát hiện nhận nhầm',
+      }),
   })
   .meta({
     id: 'Invite',
@@ -43,7 +52,7 @@ export const inviteSchema = z
       status: 'pending',
       createdAt: '2026-12-14T09:00:00+07:00',
       expiresAt: '2026-12-21T09:00:00+07:00',
-      usedAt: null,
+      acceptedBy: null,
     },
   });
 export type Invite = z.infer<typeof inviteSchema>;
@@ -59,9 +68,13 @@ export const inviteCreatedSchema = inviteSchema
       description:
         'Mã ngắn 8 ký tự Crockford base32 (chữ hoa, không có `I L O U`), để phụ huynh nhập tay. Chỉ xuất hiện ở phản hồi này',
     }),
+    shortCodeExpiresAt: z.iso.datetime({ offset: true }).meta({
+      description:
+        'Mã ngắn chỉ sống 48 giờ (ngắn hơn link 7 ngày vì dễ đoán hơn); hết hạn thì dùng link hoặc `resend`',
+    }),
     url: z.url().max(300).meta({
       description:
-        'Link chia sẻ `https://dayhoc.app/i/{token}`; client sinh mã QR từ chính chuỗi này',
+        'Link chia sẻ `https://dayhoc.app/i#t=<token>`: token nằm ở fragment nên không vào log máy chủ, CDN hay header Referer; client sinh mã QR từ chính chuỗi này. Trang landing phải đặt `Referrer-Policy: no-referrer` và `Cache-Control: no-store`, đọc fragment rồi gọi `POST /invites/preview` bằng body',
     }),
   })
   .meta({
@@ -73,10 +86,11 @@ export const inviteCreatedSchema = inviteSchema
       status: 'pending',
       createdAt: '2026-12-14T09:00:00+07:00',
       expiresAt: '2026-12-21T09:00:00+07:00',
-      usedAt: null,
+      acceptedBy: null,
       token: 'q3Zp8mT1xV0kLw5Hn2RcYb7JdFgSaE9uXoIiKtUeMhA',
       shortCode: '7K3QZ9XM',
-      url: 'https://dayhoc.app/i/q3Zp8mT1xV0kLw5Hn2RcYb7JdFgSaE9uXoIiKtUeMhA',
+      shortCodeExpiresAt: '2026-12-16T09:00:00+07:00',
+      url: 'https://dayhoc.app/i#t=q3Zp8mT1xV0kLw5Hn2RcYb7JdFgSaE9uXoIiKtUeMhA',
     },
   });
 export type InviteCreated = z.infer<typeof inviteCreatedSchema>;
@@ -93,27 +107,33 @@ export type InviteList = z.infer<typeof inviteListSchema>;
 // ---- Phía phụ huynh: preview · accept · redeem-code ----
 
 /**
- * Chuỗi bất kỳ ≤ 128 ký tự, cố ý không kiểm định dạng: token sai định dạng, sai giá trị, hết hạn, đã dùng đều
- * trả cùng `410 INVITE_INVALID`, không phải 422, để không dò được lời mời.
+ * Token nằm ở body, không ở đường dẫn (tránh vào log URL). Chuỗi bất kỳ ≤ 128 ký tự, cố ý không kiểm định dạng:
+ * token sai định dạng, sai giá trị, hết hạn, đã dùng đều trả cùng `410 INVITE_INVALID`, không phải 422.
  */
-export const inviteTokenParam = z.string().min(1).max(128);
+export const inviteTokenRequestSchema = z
+  .object({ token: z.string().min(1).max(128) })
+  .meta({
+    id: 'InviteTokenRequest',
+    example: { token: 'q3Zp8mT1xV0kLw5Hn2RcYb7JdFgSaE9uXoIiKtUeMhA' },
+  });
+export type InviteTokenRequest = z.infer<typeof inviteTokenRequestSchema>;
 
 export const invitePreviewSchema = z
   .object({
     teacherName: z.string(),
-    studentName: z.string(),
-    className: z.string().nullable().meta({
-      description: 'Lớp đang học của học viên; null nếu chưa ghi danh lớp nào',
+    studentGivenName: z.string().meta({
+      description:
+        'Chỉ tên gọi của trẻ (tên cuối), không họ; họ tên đầy đủ chỉ trả sau khi nhận lời mời',
     }),
     expiresAt: z.iso.datetime({ offset: true }),
   })
   .meta({
     id: 'InvitePreview',
-    description: 'Chỉ tên giáo viên, tên con và lớp; không có liên hệ hay id',
+    description:
+      'Chỉ tên giáo viên và tên gọi của con; không có họ, lớp, liên hệ hay id',
     example: {
       teacherName: 'Cô Lan',
-      studentName: 'Nguyễn Minh Anh',
-      className: 'Toán 9A',
+      studentGivenName: 'Anh',
       expiresAt: '2026-12-21T09:00:00+07:00',
     },
   });

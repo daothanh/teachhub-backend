@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   guardianInviteStatusSchema,
+  latestInviteSchema,
   pageQuerySchema,
   paginatedSchema,
 } from '@teachhub/core';
@@ -167,6 +168,7 @@ const rosterGuardianSchema = z
     fullName: z.string(),
     relation: z.enum(['father', 'mother', 'guardian']),
     inviteStatus: guardianInviteStatusSchema,
+    latestInvite: latestInviteSchema,
   })
   .meta({ id: 'RosterGuardian' });
 
@@ -204,6 +206,10 @@ export const rosterSchema = z
               fullName: 'Nguyễn Văn Hải',
               relation: 'father',
               inviteStatus: 'invited',
+              latestInvite: {
+                id: '019b2c80-0001-7a10-8a01-000000000001',
+                expiresAt: '2026-12-21T09:00:00+07:00',
+              },
             },
           ],
         },

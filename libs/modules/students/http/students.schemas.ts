@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   guardianInviteStatusSchema,
+  latestInviteSchema,
   pageQuerySchema,
   paginatedSchema,
 } from '@teachhub/core';
@@ -41,6 +42,7 @@ export const guardianSchema = z
     phone: z.string().nullable(),
     email: z.string().nullable(),
     inviteStatus: guardianInviteStatusSchema,
+    latestInvite: latestInviteSchema,
   })
   .meta({ id: 'Guardian' });
 
@@ -110,6 +112,7 @@ const studentExample = {
       phone: '0912345678',
       email: null,
       inviteStatus: 'not_invited',
+      latestInvite: null,
     },
   ],
 };

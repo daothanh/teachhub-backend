@@ -181,14 +181,6 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
     notApplicable:
       'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-03; test chéo tenant/học viên làm cùng task đó',
   },
-  'GET /v1/invites/{token}/preview': {
-    notApplicable:
-      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-04; test chéo tenant/học viên làm cùng task đó',
-  },
-  'POST /v1/invites/{token}/accept': {
-    notApplicable:
-      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-04; test chéo tenant/học viên làm cùng task đó',
-  },
   'POST /v1/invites/redeem-code': {
     notApplicable:
       'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-04; test chéo tenant/học viên làm cùng task đó',
@@ -216,5 +208,29 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
   'POST /v1/web-push/unsubscribe': {
     notApplicable:
       'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-08b; test chéo tenant/học viên làm cùng task đó',
+  },
+  'POST /v1/invites/preview': {
+    notApplicable:
+      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-04; test chéo tenant/học viên làm cùng task đó',
+  },
+  'POST /v1/invites/accept': {
+    notApplicable:
+      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-04; test chéo tenant/học viên làm cùng task đó',
+  },
+  'POST /v1/sessions/{id}/reschedule': {
+    notApplicable:
+      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-07; test chéo tenant/học viên làm cùng task đó',
+  },
+  'POST /v1/sessions/{id}/cancel': {
+    notApplicable:
+      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-07; test chéo tenant/học viên làm cùng task đó',
+  },
+  'POST /v1/sessions/{id}/makeup': {
+    notApplicable:
+      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-07; test chéo tenant/học viên làm cùng task đó',
+  },
+  'DELETE /v1/me': {
+    notApplicable:
+      'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-09; test chéo tenant/học viên làm cùng task đó',
   },
 };

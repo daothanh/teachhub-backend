@@ -66,7 +66,12 @@ export const familyAttendanceWeekSchema = z
         excused: z.int().min(0),
         unexcused: z.int().min(0),
         notRecorded: z.int().min(0).meta({
-          description: 'Buổi chưa hủy nhưng chưa có điểm danh',
+          description:
+            'Buổi không hủy, đã qua giờ kết thúc nhưng chưa có điểm danh',
+        }),
+        upcoming: z.int().min(0).meta({
+          description:
+            'Buổi không hủy chưa qua giờ kết thúc, chưa tính vào chuyên cần',
         }),
       })
       .meta({ description: 'Đếm theo buổi không bị hủy trong tuần' }),

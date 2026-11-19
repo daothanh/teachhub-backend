@@ -40,10 +40,11 @@ export type PushUnregisterRequest = z.infer<typeof pushUnregisterRequestSchema>;
 
 // ---- GET /notifications · POST /notifications/read ----
 
-/** Sprint 3 chỉ có hai loại, cùng cho báo vắng (US-3.2); loại khác thêm ở sprint sau. */
+/** Sprint 3: báo vắng (US-3.2). Sprint 4 thêm `schedule_changed` (US-2.2); loại khác thêm ở sprint sau. */
 export const notificationTypeSchema = z.enum([
   'student_absent',
   'student_absent_correction',
+  'schedule_changed',
 ]);
 
 const absencePayloadSchema = z
@@ -58,6 +59,23 @@ const absencePayloadSchema = z
   .meta({
     description:
       'Chỉ tên con, lớp, giờ buổi và các id để mở đúng màn; không có trạng thái khác hay ghi chú',
+  });
+
+const scheduleChangedPayloadSchema = z
+  .object({
+    classId: z.uuid(),
+    className: z.string(),
+    sessionId: z.uuid(),
+    change: z.enum(['rescheduled', 'cancelled', 'makeup']),
+    sessionStartsAt: z.iso.datetime({ offset: true }),
+    previousStartsAt: z.iso.datetime({ offset: true }).nullable().meta({
+      description: 'Giờ cũ khi `change = rescheduled`; còn lại null',
+    }),
+    reason: z.string().max(300).nullable(),
+  })
+  .meta({
+    description:
+      'Lớp, buổi, giờ mới/cũ và lý do (nếu giáo viên nhập); không có dữ liệu học viên',
   });
 
 const notificationBase = z.object({
@@ -79,6 +97,10 @@ export const notificationSchema = z
     notificationBase.extend({
       type: z.literal('student_absent_correction'),
       payload: absencePayloadSchema,
+    }),
+    notificationBase.extend({
+      type: z.literal('schedule_changed'),
+      payload: scheduleChangedPayloadSchema,
     }),
   ])
   .meta({

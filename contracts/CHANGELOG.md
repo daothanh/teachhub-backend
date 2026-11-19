@@ -6,47 +6,74 @@
 
 Thân hàm trả 501 `NOT_IMPLEMENTED` tới khi làm task backend tương ứng; schema đã validate thật. Không có bảng hay migration (S4-BE-01 làm cùng task backend).
 
-| Endpoint                                                                                                                          | Task backend   |
-| --------------------------------------------------------------------------------------------------------------------------------- | -------------- |
-| `POST /v1/students/{id}/invites`, `GET /v1/students/{id}/invites`, `POST /v1/invites/{id}/revoke`, `POST /v1/invites/{id}/resend` | S4-BE-03       |
-| `GET /v1/invites/{token}/preview`, `POST /v1/invites/{token}/accept`, `POST /v1/invites/redeem-code`                              | S4-BE-04       |
-| `POST /v1/consents`, `GET /v1/consents/status` (bổ sung ngoài Spec §5.4)                                                          | S4-BE-05       |
-| `GET /v1/family/students`, `GET /v1/family/students/{id}/attendance`                                                              | S4-BE-06       |
-| `POST /v1/web-push/subscriptions`, `POST /v1/web-push/unsubscribe` (bổ sung ngoài Spec §5.4)                                      | S4-BE-08b (P1) |
+| Endpoint | Task backend |
+| --- | --- |
+| `POST /v1/students/{id}/invites`, `GET /v1/students/{id}/invites`, `POST /v1/invites/{id}/revoke`, `POST /v1/invites/{id}/resend` | S4-BE-03 |
+| `POST /v1/invites/preview`, `POST /v1/invites/accept`, `POST /v1/invites/redeem-code` | S4-BE-04 |
+| `POST /v1/consents`, `GET /v1/consents/status` (bổ sung ngoài Spec §5.4) | S4-BE-05 |
+| `GET /v1/family/students`, `GET /v1/family/students/{id}/attendance` | S4-BE-06 |
+| `POST /v1/sessions/{id}/reschedule`, `POST /v1/sessions/{id}/cancel`, `POST /v1/sessions/{id}/makeup` | S4-BE-07 |
+| `POST /v1/web-push/subscriptions`, `POST /v1/web-push/unsubscribe` (bổ sung ngoài Spec §5.4) | S4-BE-08b (P1) |
+| `DELETE /v1/me` | S4-BE-09 |
 
-Thay đổi trên endpoint cũ (chỉ thêm trường ở phản hồi, không breaking): `Guardian` có thêm `inviteStatus`; mỗi phần tử `GET /classes/{id}/roster` có thêm `inviteStatus` và `guardians[]` (S4-BE-02). `PATCH /students/{id}` không đổi schema, chỉ ghi rõ giới hạn 2 phụ huynh → 422.
+Thay đổi trên endpoint cũ (chỉ thêm trường, không breaking):
 
-Mã lỗi mới: `INVITE_INVALID` (410) và `INVITE_CODE_LOCKED` (429, `details.retryAfterSec`).
+- `Guardian` thêm `inviteStatus` và `latestInvite`; mỗi phần tử `GET /classes/{id}/roster` thêm `inviteStatus` và `guardians[]` (S4-BE-02).
+- `Session` thêm `cancelReason` và `makeupOf`.
+- Thông báo thêm loại `schedule_changed` (client bỏ qua `type` lạ như đã quy ước).
+- `POST /auth/otp/send` thêm `purpose` (`login` mặc định, `delete_account`). Thân hàm hiện có chưa đọc `purpose`: S4-BE-09 phải tách mã theo mục đích trước khi bật `DELETE /me`.
+- `PATCH /students/{id}` không đổi schema, chỉ ghi rõ giới hạn 2 phụ huynh → 422.
 
-Không nằm trong hợp đồng này: US-2.2 (dời/hủy/buổi bù, S4-BE-07) và `DELETE /me` (S4-BE-09) không thuộc phạm vi S3-FL-12; kênh email (S4-BE-08) không có endpoint.
+Mã lỗi mới: `SESSION_HAS_ATTENDANCE` (409), `INVITE_INVALID` (410), `INVITE_CODE_LOCKED` (429, `details.retryAfterSec`).
 
 Quyết định khi soạn (cần TL chốt nếu muốn khác):
 
 Lời mời:
 
-- Một mã lỗi `INVITE_INVALID` (410) cho token/mã sai, sai định dạng, hết hạn, đã dùng, bị thu hồi, thay cho hai mã `INVITE_EXPIRED`/`INVITE_USED` của Spec §5.6, để không dò được trạng thái lời mời. Nút "Nhắn giáo viên xin link" hiện với mọi 410. Tham số `{token}` ở đường dẫn chỉ giới hạn độ dài (≤ 128), nên token sai định dạng cũng ra 410, không ra 422.
-- Chưa đồng ý → 403 `CONSENT_REQUIRED` (mã có sẵn trong Spec §5.6, kèm `details.termsVersion`), không phải 409 như câu chữ của Plan S4-BE-04. Kiểm đồng ý chạy trước khi xét token/mã nên người chưa đồng ý không dò được mã đúng sai.
-- `accept` và `redeem-code` đều cần đăng nhập, cùng trả `InviteAccepted` (`membershipId`, `studentId`, `studentName`). `redeem-code` khóa theo user 5 lần sai/15 phút (Spec: `lock:invite:{userId}`) → 429 `INVITE_CODE_LOCKED`; kèm giới hạn IP 10 lần/phút. `preview` công khai, 30 lần/phút mỗi IP.
-- Lời mời gắn với một phụ huynh (`guardianId` bắt buộc khi tạo), vì `invites.guardian_id` và trạng thái mời tính theo từng phụ huynh. "Mời tất cả phụ huynh chưa kích hoạt" là client gọi lặp theo `roster.guardians[]`.
-- Tạo lại cho phụ huynh đang có lời mời `pending` thì lời mời cũ bị vô hiệu (Plan S4-BE-03). `resend` làm đúng việc đó theo id lời mời; không làm gì với phụ huynh đã `used` (409 `CONFLICT_STALE`).
-- `token` và `shortCode` chỉ có trong phản hồi tạo/gửi lại (`InviteCreated`). `GET /students/{id}/invites` không trả cả hai, nên giáo viên muốn chia sẻ lại phải bấm gửi lại. Link là `https://dayhoc.app/i/{token}`, QR do client sinh từ chuỗi này, không có trường ảnh QR.
-- Trạng thái `inviteStatus` của phụ huynh: `not_invited`, `invited`, `activated`, `expired` (Plan S4-BE-02). Lời mời bị thu hồi tính là `not_invited`. Ở `roster` là phép gộp theo các phụ huynh của học viên.
-- `redeem-code` nhận mã không phân biệt hoa thường; chỉ chặn ký tự `U`, còn `I`/`L`/`O` server tự đổi theo Crockford.
+- Một mã `INVITE_INVALID` (410) cho token/mã sai, sai định dạng, hết hạn, đã dùng, bị thu hồi, thay cho `INVITE_EXPIRED`/`INVITE_USED` của Spec §5.6, để không dò được trạng thái. Thân 410 không có thông tin giáo viên hay trẻ. Nút "Nhắn giáo viên xin link" hiện với mọi 410.
+- Token không đi trong đường dẫn: `preview` và `accept` nhận `{token}` ở body (token sai định dạng cũng ra 410, không ra 422). Link chia sẻ `https://dayhoc.app/i#t=<token>`: fragment không vào log, CDN hay Referer. Trang landing phải đặt `Referrer-Policy: no-referrer` và `Cache-Control: no-store` (cần sửa S4-WEB-02 và deep link S4-FL-05, vốn theo mẫu `/i/{token}` của Spec).
+- Preview chỉ trả tên giáo viên và tên gọi của trẻ (`studentGivenName`, tên cuối), không lớp, không họ. Họ tên đầy đủ chỉ trả sau `accept`.
+- Chưa đồng ý → 403 `CONSENT_REQUIRED` (mã có sẵn trong Spec §5.6, kèm `details.termsVersion`), không phải 409 như Plan S4-BE-04. Kiểm đồng ý chạy trước khi xét token/mã để không dò được mã đúng sai.
+- Giới hạn tần suất: `@Throttle` chỉ theo IP. Đếm theo user, khóa 5 lần sai/15 phút (`INVITE_CODE_LOCKED`), đếm theo IP (IPv6 theo /64) và bộ đếm toàn cục là bộ đếm riêng trong service. Phát lại phản hồi 410 đã lưu (cùng `Idempotency-Key`) và lỗi 422 không tính vào bộ đếm.
+- Mã ngắn 8 ký tự Crockford (2^40), sống 48 giờ (`shortCodeExpiresAt`), ngắn hơn link 7 ngày. Giữ 8 ký tự; nâng lên 10 chỉ cần đổi pattern, chờ TL chốt.
+- Lời mời gắn một phụ huynh (`guardianId` bắt buộc khi tạo). Tạo lại cho phụ huynh đang có lời mời `pending` thì lời mời cũ bị vô hiệu; `resend` làm việc đó theo id; phụ huynh đã `used` → 409 `CONFLICT_STALE`.
+- "Mời tất cả phụ huynh chưa kích hoạt" chỉ lặp trên `not_invited` (tạo mới) và `expired` (`resend` bằng `latestInvite.id`), bỏ `invited` và `activated`.
+- `token` và `shortCode` chỉ có ở `InviteCreated`. Phản hồi lưu cho `Idempotency-Key` của create/resend phải mã hóa khi nghỉ, TTL ≤ 10 phút. `GET /students/{id}/invites` có `acceptedBy` (tên hiển thị, lúc nhận). Rủi ro nhận nhầm do chuyển tiếp link được chấp nhận ở MVP: giáo viên gỡ liên kết qua `PATCH` `guardians`, người đó mất quyền xem `/family/**` ngay.
+- Đối chiếu trạng thái:
+
+| `InviteStatus` (một lời mời) | `GuardianInviteStatus` (một phụ huynh) |
+| --- | --- |
+| `pending` | `invited` |
+| `used` | `activated` |
+| `expired` | `expired` |
+| `revoked` | `not_invited` (nếu không còn lời mời `pending`; `latestInvite` vẫn trỏ lời mời thu hồi) |
+| không có lời mời | `not_invited`, `latestInvite = null` |
+
+Ở roster, `inviteStatus` của học viên gộp theo phụ huynh: `activated` > `invited` > `expired` > `not_invited`.
 
 Đồng ý xử lý dữ liệu:
 
-- `POST /consents` luôn thêm dòng mới (201), không bao giờ sửa dòng cũ; không có PUT/PATCH/DELETE. `acceptedAt`, `ip_hash` và user agent do server lấy, không nhận từ body. `termsVersion` phải là bản hiện hành, lệch → 409 `CONFLICT_STALE`.
-- Thêm `GET /consents/status?role=` (ngoài Spec): trả bản điều khoản hiện hành và user đã đồng ý bản đó chưa. Cần cho màn đồng ý và guard S4-FL-09; web cũng dùng. Chưa có `forStudentId` (phụ huynh đồng ý cho con dưới 16 tuổi), vì vai trò Học sinh nằm ngoài Sprint 4.
-- Không đòi membership vai trò đó khi ghi đồng ý, vì phụ huynh mới đồng ý trước khi nhận lời mời. `/family/**` thì đòi cả membership Phụ huynh lẫn đã đồng ý, nếu không → 403 `FORBIDDEN` hoặc `CONSENT_REQUIRED`.
+- `POST /consents` chỉ thêm dòng (bằng chứng pháp lý), không sửa/xóa; cùng user, role, `termsVersion` trong 60 giây thì trả lại dòng vừa ghi (vẫn 201). Throttle 10 lần/phút. `acceptedAt`, `ip_hash`, user agent do server lấy. `termsVersion` khác bản hiện hành → 409 `CONFLICT_STALE`.
+- `role` chỉ có `parent` ở Sprint 4 (Học sinh ngoài phạm vi). Chưa có `forStudentId`.
+- Thêm `GET /consents/status?role=` (ngoài Spec) cho màn đồng ý và guard S4-FL-09. Ghi đồng ý không đòi membership; `/family/**` đòi cả membership Phụ huynh lẫn đã đồng ý.
 
 `/family/**`:
 
-- `GET /family/students/{id}/attendance?week=`: `week` là một ngày ISO bất kỳ trong tuần (mặc định tuần hiện tại), server lấy tuần Thứ Hai đến Chủ Nhật theo múi giờ tenant. Trả `summary` và `sessions[]` của tuần (có buổi hủy và buổi bù); không có ghi chú giáo viên. Không có endpoint lịch học riêng.
-- Con không liên kết, của tenant khác hay không có đều 404 `NOT_FOUND`. `GET /family/students` chỉ trả các con đã liên kết, không có phone/email phụ huynh khác hay ghi chú.
+- `week` là ngày ISO bất kỳ trong tuần (mặc định tuần hiện tại), tuần Thứ Hai đến Chủ Nhật theo múi giờ tenant. `summary.notRecorded` chỉ tính buổi đã qua giờ kết thúc; `upcoming` là buổi chưa tới. Không ghi chú giáo viên. Không có endpoint lịch riêng.
+- Con không liên kết, của tenant khác hay không có đều 404.
+
+Dời, hủy, buổi bù (US-2.2):
+
+- Hủy buổi đã có điểm danh → 409 `SESSION_HAS_ATTENDANCE`; app hướng dẫn sửa điểm danh trước. Hủy buổi đã hủy → 200 idempotent, không gửi thông báo lần hai. Dời chỉ cho buổi `planned`. Buổi bù chỉ tạo từ buổi `cancelled`, mỗi buổi gốc một buổi bù (phỏng đoán từ Plan, cần TL chốt).
+- Thông báo `schedule_changed` có `change` (`rescheduled`/`cancelled`/`makeup`), giờ mới/cũ, lý do; deepLink `teachhub://sessions/{sessionId}`.
+
+Xóa tài khoản (US-0.9):
+
+- `DELETE /me` body `{otp}`, 204; OTP sai dùng `OTP_INVALID`/`OTP_LOCKED` sẵn có. OTP gửi qua `otp/send` với `purpose = delete_account`. Mô tả ghi dữ liệu xóa/ẩn danh và phần giữ 5 năm theo Spec §4.8.
 
 Web Push (P1):
 
-- `POST /web-push/subscriptions` nhận đúng dạng `PushSubscription.toJSON()`, upsert theo `endpoint`; `Idempotency-Key` tùy chọn như `push/register`. Thêm `POST /web-push/unsubscribe` để hủy khi đăng xuất (ngoài Spec). Không có endpoint đọc subscription. Khóa công khai VAPID web lấy từ cấu hình build, không có endpoint.
+- `endpoint` chỉ nhận `https`, không userinfo/cổng, host thuộc allowlist (`fcm.googleapis.com`, `*.push.apple.com`, `updates.push.services.mozilla.com`, `*.notify.windows.com`) bằng `pattern`; server kiểm lại lúc gửi, không theo redirect; mỗi user tối đa 10 subscription, bảng theo user. `unsubscribe` ngoài Spec. `Idempotency-Key` tùy chọn như `push/register`. Khóa VAPID công khai lấy từ cấu hình build web.
 
 ## Sprint 3 (S2-FL-10)
 
