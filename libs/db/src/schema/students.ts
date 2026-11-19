@@ -4,6 +4,7 @@ import {
   date,
   foreignKey,
   index,
+  jsonb,
   pgTable,
   text,
   timestamp,
@@ -113,6 +114,8 @@ export const enrollments = pgTable(
     studentId: uuid().notNull(),
     joinedOn: date({ mode: 'string' }).notNull(),
     leftOn: date({ mode: 'string' }),
+    /** Mức riêng của học viên (FeeOverride); null = kế thừa lớp. */
+    feeOverride: jsonb(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

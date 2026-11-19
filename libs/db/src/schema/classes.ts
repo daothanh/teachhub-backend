@@ -1,9 +1,11 @@
 import {
+  bigint,
   check,
   date,
   foreignKey,
   index,
   integer,
+  jsonb,
   pgTable,
   text,
   timestamp,
@@ -15,7 +17,8 @@ import { branches, tenants } from './tenancy.js';
 
 // Lớp (Technical Spec §4.4). RLS của các bảng Sprint 2 cho mọi vai trò nhân sự của tenant (`staff_tenant_ids()`);
 // quyền theo vai trò (hiện chỉ `tenant_owner`) nằm ở guard, không ở RLS. RLS, trigger updated_at/audit viết tay cuối file migration classes.
-// Chưa có học phí, subject_kind, notification_settings: thêm cột tùy chọn ở sprint sau (US-1.2, US-9.3).
+// Học phí (S5-BE-01): fee_type + fee_amount cùng có hoặc cùng null; fee_rules null = mặc định của calculator.
+// Chưa có subject_kind, notification_settings: thêm cột tùy chọn ở sprint sau (US-1.2, US-9.3).
 
 export const classes = pgTable(
   'classes',
@@ -34,6 +37,9 @@ export const classes = pgTable(
     startDate: date({ mode: 'string' }).notNull(),
     endDate: date({ mode: 'string' }),
     status: text().notNull().default('active'),
+    feeType: text(),
+    feeAmount: bigint({ mode: 'number' }),
+    feeRules: jsonb(),
     archivedAt: timestamp({ withTimezone: true }),
     createdBy: uuid(),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
@@ -51,6 +57,18 @@ export const classes = pgTable(
     check('classes_grade_check', sql`${t.grade} between 1 and 12`),
     check('classes_mode_check', sql`${t.mode} in ('offline', 'online')`),
     check('classes_status_check', sql`${t.status} in ('active', 'archived')`),
+    check(
+      'classes_fee_type_check',
+      sql`${t.feeType} in ('per_session', 'monthly', 'course')`,
+    ),
+    check(
+      'classes_fee_amount_check',
+      sql`${t.feeAmount} > 0 and ${t.feeAmount} <= 100000000000`,
+    ),
+    check(
+      'classes_fee_pair_check',
+      sql`(${t.feeType} is null) = (${t.feeAmount} is null)`,
+    ),
     check(
       'classes_capacity_check',
       sql`${t.capacity} is null or ${t.capacity} > 0`,
