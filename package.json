@@ -23,6 +23,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node --env-file=.env scripts/migrate.mjs",
     "openapi:gen": "UPDATE_OPENAPI=1 vitest run apps/api/src/openapi.spec.ts",
+    "seed:dev": "node --env-file=.env scripts/seed-dev.mjs",
     "db:check": "node scripts/check-migrations.mjs",
     "mock": "docker compose --profile mock up mock"
   },
