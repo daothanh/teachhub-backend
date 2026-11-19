@@ -98,21 +98,25 @@ ALTER TABLE "enrollments" ADD COLUMN "fee_override" jsonb;--> statement-breakpoi
 ALTER TABLE "billing_periods" ADD CONSTRAINT "billing_periods_tenant_id_tenants_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "invoice_lines" ADD CONSTRAINT "invoice_lines_tenant_id_tenants_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "invoice_lines" ADD CONSTRAINT "invoice_lines_tenant_invoice_fk" FOREIGN KEY ("tenant_id","invoice_id") REFERENCES "public"."invoices"("tenant_id","id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "invoice_lines" ADD CONSTRAINT "invoice_lines_tenant_session_fk" FOREIGN KEY ("tenant_id","session_id") REFERENCES "public"."sessions"("tenant_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "invoices" ADD CONSTRAINT "invoices_tenant_id_tenants_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "invoices" ADD CONSTRAINT "invoices_tenant_period_fk" FOREIGN KEY ("tenant_id","period_id") REFERENCES "public"."billing_periods"("tenant_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "invoices" ADD CONSTRAINT "invoices_tenant_student_fk" FOREIGN KEY ("tenant_id","student_id") REFERENCES "public"."students"("tenant_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "invoices" ADD CONSTRAINT "invoices_tenant_replaces_fk" FOREIGN KEY ("tenant_id","replaces_invoice_id") REFERENCES "public"."invoices"("tenant_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "invoices" ADD CONSTRAINT "invoices_tenant_replacement_fk" FOREIGN KEY ("tenant_id","replacement_invoice_id") REFERENCES "public"."invoices"("tenant_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "payout_accounts" ADD CONSTRAINT "payout_accounts_tenant_id_tenants_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "invoice_lines_session_id_idx" ON "invoice_lines" USING btree ("session_id") WHERE "invoice_lines"."session_id" is not null;--> statement-breakpoint
 CREATE UNIQUE INDEX "invoices_draft_uq" ON "invoices" USING btree ("tenant_id","period_id","student_id") WHERE "invoices"."status" = 'draft';--> statement-breakpoint
 CREATE UNIQUE INDEX "invoices_replaces_uq" ON "invoices" USING btree ("replaces_invoice_id") WHERE "invoices"."replaces_invoice_id" is not null;--> statement-breakpoint
-CREATE INDEX "invoices_tenant_period_status_idx" ON "invoices" USING btree ("tenant_id","period_id","status");--> statement-breakpoint
+CREATE INDEX "invoices_tenant_period_status_idx" ON "invoices" USING btree ("tenant_id","period_id","status","id");--> statement-breakpoint
+CREATE INDEX "invoices_replacement_id_idx" ON "invoices" USING btree ("replacement_invoice_id") WHERE "invoices"."replacement_invoice_id" is not null;--> statement-breakpoint
+CREATE INDEX "invoices_family_idx" ON "invoices" USING btree ("student_id","issued_at" DESC NULLS LAST,"id") WHERE "invoices"."status" <> 'draft';--> statement-breakpoint
 CREATE INDEX "invoices_student_id_idx" ON "invoices" USING btree ("student_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "payout_accounts_primary_uq" ON "payout_accounts" USING btree ("tenant_id") WHERE "payout_accounts"."is_primary";--> statement-breakpoint
 ALTER TABLE "classes" ADD CONSTRAINT "classes_fee_type_check" CHECK ("classes"."fee_type" in ('per_session', 'monthly', 'course'));--> statement-breakpoint
 ALTER TABLE "classes" ADD CONSTRAINT "classes_fee_amount_check" CHECK ("classes"."fee_amount" > 0 and "classes"."fee_amount" <= 100000000000);--> statement-breakpoint
-ALTER TABLE "classes" ADD CONSTRAINT "classes_fee_pair_check" CHECK (("classes"."fee_type" is null) = ("classes"."fee_amount" is null));
+ALTER TABLE "classes" ADD CONSTRAINT "classes_fee_pair_check" CHECK (("classes"."fee_type" is null) = ("classes"."fee_amount" is null));--> statement-breakpoint
+ALTER TABLE "classes" ADD CONSTRAINT "classes_fee_rules_check" CHECK ("classes"."fee_rules" is null or ("classes"."fee_type" is not null and jsonb_typeof("classes"."fee_rules") = 'object' and pg_column_size("classes"."fee_rules") < 4096));--> statement-breakpoint
+ALTER TABLE "enrollments" ADD CONSTRAINT "enrollments_fee_override_check" CHECK ("enrollments"."fee_override" is null or (jsonb_typeof("enrollments"."fee_override") = 'object' and pg_column_size("enrollments"."fee_override") < 4096));
 --> statement-breakpoint
 -- S5-BE-01 + S5-BE-04: học phí lớp, tài khoản nhận tiền, kỳ thu, hóa đơn. RLS + FORCE cho bảng mới theo tenant (nhân sự).
 -- Không bật audit trigger của DB cho payout_accounts/invoices: to_jsonb chép số tài khoản vào audit_logs; audit ghi ở tầng ứng dụng.
@@ -188,9 +192,10 @@ create policy invoice_lines_parent_read on invoice_lines for select to teachhub_
 --> statement-breakpoint
 
 -- Bất biến hóa đơn (US-7.3, Spec §4.3). Lỗi mang tiền tố INVOICE_IMMUTABLE để tầng ứng dụng map sang 409.
--- Chạy bằng quyền người gọi (api/worker), không security definer.
+-- Chạy bằng quyền người gọi (api/worker), không security definer. Void chỉ từ issued (chưa thanh toán).
+-- Service: đổi tài khoản chính phải bỏ cờ is_primary cũ trước khi đặt cờ mới (unique partial payout_accounts_primary_uq).
 create or replace function app_private.invoices_guard() returns trigger
-language plpgsql as $$
+language plpgsql set search_path = '' as $$
 begin
   if tg_op = 'INSERT' then
     if new.status <> 'draft' then
@@ -211,7 +216,7 @@ begin
   if new.status <> old.status and not (
        (old.status = 'draft' and new.status = 'issued')
     or (old.status = 'issued' and new.status in ('pending_confirmation', 'partially_paid', 'paid', 'void'))
-    or (old.status = 'pending_confirmation' and new.status in ('issued', 'partially_paid', 'paid', 'void'))
+    or (old.status = 'pending_confirmation' and new.status in ('issued', 'partially_paid', 'paid'))
     or (old.status = 'partially_paid' and new.status in ('pending_confirmation', 'paid'))
   ) then
     raise exception 'INVOICE_IMMUTABLE: không chuyển trạng thái % -> %', old.status, new.status;
@@ -230,6 +235,16 @@ begin
   ) then
     raise exception 'INVOICE_IMMUTABLE: hóa đơn đã phát hành không sửa tiền hay snapshot';
   end if;
+  -- Lý do hủy, giờ hủy và hóa đơn thay thế là chứng từ: đã ghi thì không đổi.
+  if old.status = 'void' and (
+       new.void_reason is distinct from old.void_reason
+    or new.voided_at is distinct from old.voided_at
+  ) then
+    raise exception 'INVOICE_IMMUTABLE: hóa đơn đã hủy không sửa lý do hay giờ hủy';
+  end if;
+  if old.replacement_invoice_id is not null and new.replacement_invoice_id is distinct from old.replacement_invoice_id then
+    raise exception 'INVOICE_IMMUTABLE: hóa đơn thay thế đã gán, không đổi';
+  end if;
   return new;
 end;
 $$;
@@ -240,8 +255,10 @@ create trigger trg_invoices_guard before insert or update or delete on invoices
 
 -- Dòng chỉ ghi được khi hóa đơn còn draft. Khóa dòng hóa đơn (for share) để phát hành đồng thời phải chờ giao dịch ghi dòng.
 -- Hóa đơn không còn thấy (xóa cascade từ bản nháp) thì cho qua.
+-- Service: trước khi ghi dòng phải khóa hóa đơn `select ... order by id for update` (nhiều hóa đơn thì theo thứ tự id) để không
+-- deadlock với `for share` ở đây. Worker bypassrls nên không cần policy riêng cho billing_*; api qua policy *_staff_all.
 create or replace function app_private.invoice_lines_guard() returns trigger
-language plpgsql as $$
+language plpgsql set search_path = '' as $$
 declare
   st text;
   inv uuid;
@@ -262,3 +279,77 @@ $$;
 --> statement-breakpoint
 create trigger trg_invoice_lines_guard before insert or update or delete on invoice_lines
   for each row execute function app_private.invoice_lines_guard();
+
+--> statement-breakpoint
+-- Vòng sửa 1: xóa tài khoản dọn payout_accounts. Hàm security definer chạy bằng owner (cũng bị FORCE RLS) nên cần policy riêng.
+-- Học viên chỉ ẩn danh (không xóa cứng) nên FK invoices→students không vướng; invoice_lines.session_id không có FK
+-- nên xóa cứng buổi (schedule) không chạm hóa đơn đã phát hành.
+create policy payout_accounts_owner_all on payout_accounts for all to teachhub_owner using (true) with check (true);
+--> statement-breakpoint
+create or replace function app_private.delete_account(p_check_only boolean default false) returns text
+language plpgsql security definer set search_path = '' as $$
+declare
+  uid uuid := nullif(current_setting('app.user_id', true), '')::uuid;
+  mine uuid[];
+  sole uuid[];
+begin
+  if uid is null then
+    raise exception 'delete_account: thiếu app.user_id' using errcode = '42501';
+  end if;
+  perform 1 from public.users where id = uid and deleted_at is null for update;
+  if not found then
+    raise exception 'delete_account: tài khoản không còn' using errcode = '42501';
+  end if;
+
+  select coalesce(array_agg(distinct m.tenant_id), '{}') into mine
+    from public.memberships m
+   where m.user_id = uid and m.status = 'active'
+     and m.role in ('tenant_owner', 'teacher', 'accountant', 'branch_manager');
+  perform 1 from public.tenants where id = any(mine) order by id for update;
+
+  select coalesce(array_agg(t), '{}') into sole from unnest(mine) t
+   where not exists (
+     select 1 from public.memberships o
+      where o.tenant_id = t and o.user_id <> uid and o.status = 'active'
+        and o.role in ('tenant_owner', 'teacher', 'accountant', 'branch_manager'));
+
+  if exists (
+    select 1 from public.memberships m
+     where m.user_id = uid and m.status = 'active' and m.role = 'tenant_owner'
+       and m.tenant_id = any(mine) and not (m.tenant_id = any(sole))) then
+    return 'OWNER_HAS_STAFF';
+  end if;
+  if exists (select 1 from public.classes c where c.tenant_id = any(sole) and c.status = 'active') then
+    return 'TENANT_HAS_ACTIVE_CLASSES';
+  end if;
+  if p_check_only then
+    return null;
+  end if;
+
+  update public.students
+     set full_name = 'Học viên đã xóa #' || right(id::text, 4),
+         dob = null, school = null, school_class = null, note = null
+   where tenant_id = any(sole);
+  update public.guardians
+     set full_name = 'Phụ huynh đã xóa', phone = null, email = null, user_id = null
+   where tenant_id = any(sole);
+  update public.tenants set name = 'Không gian đã xóa', deleted_at = now() where id = any(sole);
+  -- Số tài khoản nhận tiền là dữ liệu nhạy cảm: xóa. `invoices.payout` (snapshot) GIỮ có chủ đích vì hóa đơn là chứng từ tài chính.
+  delete from public.payout_accounts where tenant_id = any(sole);
+
+  update public.guardians set user_id = null where user_id = uid;
+  delete from public.notifications where recipient_user_id = uid;
+  delete from public.devices where user_id = uid;
+  delete from public.refresh_tokens where user_id = uid;
+  delete from public.auth_identities where user_id = uid;
+  delete from public.center_waitlist where user_id = uid;
+  delete from public.memberships where user_id = uid;
+  update public.users
+     set email = null, display_name = null, avatar_file_id = null, last_membership_id = null,
+         memberships_version = memberships_version + 1, deleted_at = now()
+   where id = uid;
+  return null;
+end;
+$$;
+--> statement-breakpoint
+revoke execute on function app_private.delete_account(boolean) from teachhub_worker, teachhub_readonly, public;

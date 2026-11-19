@@ -434,6 +434,140 @@ describe('billing schema: RLS, ràng buộc, bất biến hóa đơn', () => {
     ).toBe(0);
   });
 
+  it('guard: hóa đơn đã hủy không đổi void_reason, voided_at; replacement_invoice_id đã gán không đổi', async () => {
+    // draftX đã void và đã có replacement (test trước).
+    const bad = (q: ReturnType<typeof sql>) =>
+      expectInsertRejected(tx, A.userId, q, /INVOICE_IMMUTABLE/);
+    await bad(
+      sql`update invoices set void_reason = 'Đổi lý do' where id = ${ids.draftX}`,
+    );
+    await bad(
+      sql`update invoices set voided_at = now() + interval '1 day' where id = ${ids.draftX}`,
+    );
+    await bad(
+      sql`update invoices set replacement_invoice_id = ${ids.draftY} where id = ${ids.draftX}`,
+    );
+    await bad(
+      sql`update invoices set replacement_invoice_id = null where id = ${ids.draftX}`,
+    );
+  });
+
+  it('guard: pending_confirmation không chuyển thẳng sang void', async () => {
+    const stu = randomUUID();
+    const inv = randomUUID();
+    await worker.query(
+      `insert into students (id, tenant_id, full_name) values ($1, $2, 'P')`,
+      [stu, A.tenantId],
+    );
+    await asA(invoice(inv, stu));
+    await asA(issue(inv, 'TH-PEND00'));
+    await asA(
+      sql`update invoices set status = 'pending_confirmation' where id = ${inv}`,
+    );
+    await expectInsertRejected(
+      tx,
+      A.userId,
+      sql`update invoices set status = 'void', void_reason = 'x', voided_at = now() where id = ${inv}`,
+      /INVOICE_IMMUTABLE/,
+    );
+  });
+
+  it('fee_rules/fee_override: phải là object, nhỏ hơn 4KB; fee_rules null khi chưa có học phí', async () => {
+    const cls = (v: string) =>
+      sql.raw(`update classes set ${v} where id = '${ids.classA}'`);
+    await expectInsertRejected(
+      tx,
+      A.userId,
+      cls(`fee_rules = '{}'`),
+      /classes_fee_rules_check/,
+    );
+    await expectInsertRejected(
+      tx,
+      A.userId,
+      cls(`fee_type = 'monthly', fee_amount = 1, fee_rules = '[1]'`),
+      /classes_fee_rules_check/,
+    );
+    await expectInsertRejected(
+      tx,
+      A.userId,
+      cls(
+        `fee_type = 'monthly', fee_amount = 1, fee_rules = jsonb_build_object('x', repeat('a', 5000))`,
+      ),
+      /classes_fee_rules_check/,
+    );
+    const enr = (v: string) =>
+      sql.raw(`update enrollments set fee_override = ${v}`);
+    await expectInsertRejected(
+      tx,
+      A.userId,
+      enr(`'"x"'`),
+      /enrollments_fee_override_check/,
+    );
+    await expectInsertRejected(
+      tx,
+      A.userId,
+      enr(`jsonb_build_object('x', repeat('a', 5000))`),
+      /enrollments_fee_override_check/,
+    );
+  });
+
+  it('không có audit trigger của DB trên payout_accounts và invoices (số tài khoản không vào audit_logs)', async () => {
+    const { rows } = await worker.query(
+      `select tgrelid::regclass::text as t from pg_trigger
+        where not tgisinternal and tgname like '%audit%' and tgrelid::regclass::text in ('payout_accounts','invoices','invoice_lines')`,
+    );
+    expect(rows).toEqual([]);
+  });
+
+  it('delete_account: tenant có payout và hóa đơn đã phát hành → thành công, payout sạch, hóa đơn còn', async () => {
+    const C = await seedTenant(worker);
+    const stu = randomUUID();
+    const period = randomUUID();
+    const inv = randomUUID();
+    const sess = randomUUID();
+    const cls = randomUUID();
+    const asC = (q: ReturnType<typeof sql>) =>
+      tx.run({ userId: C.userId }, (t) => t.execute(q));
+    await asC(
+      sql`insert into students (id, tenant_id, full_name) values (${stu}, ${C.tenantId}, 'Em C')`,
+    );
+    await asC(sql`insert into billing_periods (id, tenant_id, period_month, close_date, due_date)
+      values (${period}, ${C.tenantId}, '2026-12-01', '2026-12-31', '2027-01-10')`);
+    await asC(sql`insert into payout_accounts (id, tenant_id, bank_bin, account_no, account_name, is_primary)
+      values (${randomUUID()}, ${C.tenantId}, '970436', '0123456789', 'NGUYEN VAN C', true)`);
+    await asC(sql`insert into invoices (id, tenant_id, period_id, student_id, total_amount)
+      values (${inv}, ${C.tenantId}, ${period}, ${stu}, 100000)`);
+    await asC(sql`insert into classes (id, tenant_id, branch_id, name, subject, grade, mode, start_date, status)
+      values (${cls}, ${C.tenantId}, ${C.branchId}, 'Lý', 'Lý', 9, 'online', '2026-12-14', 'archived')`);
+    await asC(sql`insert into sessions (id, tenant_id, class_id, session_date, starts_at, ends_at)
+      values (${sess}, ${C.tenantId}, ${cls}, '2026-12-15', now(), now() + interval '90 minutes')`);
+    await asC(sql`insert into invoice_lines (id, tenant_id, invoice_id, position, kind, description, amount, session_id)
+      values (${randomUUID()}, ${C.tenantId}, ${inv}, 1, 'session', 'Buổi', 100000, ${sess})`);
+    await asC(issue(inv, 'TH-DEX000'));
+    // Xóa cứng buổi (luồng schedule) không vướng dòng hóa đơn đã phát hành.
+    await worker.query(`delete from sessions where id = $1`, [sess]);
+
+    const res = await tx.run(
+      { userId: C.userId },
+      async (t) =>
+        (await t.execute(sql`select app_private.delete_account() as r`)).rows,
+    );
+    expect(res[0]).toEqual({ r: null });
+    const left = async (q: string) =>
+      Number((await worker.query(q, [C.tenantId])).rows[0].n);
+    expect(
+      await left(`select count(*) n from payout_accounts where tenant_id = $1`),
+    ).toBe(0);
+    expect(
+      await left(
+        `select count(*) n from invoices where tenant_id = $1 and payout is not null`,
+      ),
+    ).toBe(1);
+    expect(
+      await left(`select count(*) n from invoice_lines where tenant_id = $1`),
+    ).toBe(1);
+  });
+
   it('mọi bảng mới bật và ép RLS', async () => {
     const { rows } =
       await worker.query(`select relname, relrowsecurity, relforcerowsecurity from pg_class

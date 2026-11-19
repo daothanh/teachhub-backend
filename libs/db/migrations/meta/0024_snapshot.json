@@ -1,5 +1,5 @@
 {
-  "id": "1bb2f378-2c00-4c3a-ac63-6e2bdc3b9d06",
+  "id": "7d631942-e6e3-4bef-9a4f-23ee3e10c2a1",
   "prevId": "659ee302-e2d3-4549-b776-c467227a3fde",
   "version": "7",
   "dialect": "postgresql",
@@ -381,7 +381,24 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "invoice_lines_session_id_idx": {
+          "name": "invoice_lines_session_id_idx",
+          "columns": [
+            {
+              "expression": "session_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"invoice_lines\".\"session_id\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "invoice_lines_tenant_id_tenants_id_fk": {
           "name": "invoice_lines_tenant_id_tenants_id_fk",
@@ -409,21 +426,6 @@
             "id"
           ],
           "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "invoice_lines_tenant_session_fk": {
-          "name": "invoice_lines_tenant_session_fk",
-          "tableFrom": "invoice_lines",
-          "tableTo": "sessions",
-          "columnsFrom": [
-            "tenant_id",
-            "session_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
           "onUpdate": "no action"
         }
       },
@@ -658,9 +660,59 @@
               "isExpression": false,
               "asc": true,
               "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "invoices_replacement_id_idx": {
+          "name": "invoices_replacement_id_idx",
+          "columns": [
+            {
+              "expression": "replacement_invoice_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"invoices\".\"replacement_invoice_id\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "invoices_family_idx": {
+          "name": "invoices_family_idx",
+          "columns": [
+            {
+              "expression": "student_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "issued_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"invoices\".\"status\" <> 'draft'",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -1148,6 +1200,10 @@
         "classes_fee_pair_check": {
           "name": "classes_fee_pair_check",
           "value": "(\"classes\".\"fee_type\" is null) = (\"classes\".\"fee_amount\" is null)"
+        },
+        "classes_fee_rules_check": {
+          "name": "classes_fee_rules_check",
+          "value": "\"classes\".\"fee_rules\" is null or (\"classes\".\"fee_type\" is not null and jsonb_typeof(\"classes\".\"fee_rules\") = 'object' and pg_column_size(\"classes\".\"fee_rules\") < 4096)"
         },
         "classes_capacity_check": {
           "name": "classes_capacity_check",
@@ -2573,6 +2629,10 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
+        "enrollments_fee_override_check": {
+          "name": "enrollments_fee_override_check",
+          "value": "\"enrollments\".\"fee_override\" is null or (jsonb_typeof(\"enrollments\".\"fee_override\") = 'object' and pg_column_size(\"enrollments\".\"fee_override\") < 4096)"
+        },
         "enrollments_left_on_check": {
           "name": "enrollments_left_on_check",
           "value": "\"enrollments\".\"left_on\" is null or \"enrollments\".\"left_on\" >= \"enrollments\".\"joined_on\""

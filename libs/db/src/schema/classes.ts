@@ -70,6 +70,10 @@ export const classes = pgTable(
       sql`(${t.feeType} is null) = (${t.feeAmount} is null)`,
     ),
     check(
+      'classes_fee_rules_check',
+      sql`${t.feeRules} is null or (${t.feeType} is not null and jsonb_typeof(${t.feeRules}) = 'object' and pg_column_size(${t.feeRules}) < 4096)`,
+    ),
+    check(
       'classes_capacity_check',
       sql`${t.capacity} is null or ${t.capacity} > 0`,
     ),

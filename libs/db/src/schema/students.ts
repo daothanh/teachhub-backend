@@ -136,6 +136,10 @@ export const enrollments = pgTable(
       .where(sql`${t.leftOn} is null`),
     index('enrollments_student_id_idx').on(t.studentId),
     check(
+      'enrollments_fee_override_check',
+      sql`${t.feeOverride} is null or (jsonb_typeof(${t.feeOverride}) = 'object' and pg_column_size(${t.feeOverride}) < 4096)`,
+    ),
+    check(
       'enrollments_left_on_check',
       sql`${t.leftOn} is null or ${t.leftOn} >= ${t.joinedOn}`,
     ),

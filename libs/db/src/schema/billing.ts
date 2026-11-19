@@ -16,7 +16,6 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
-import { sessions } from './schedule.js';
 import { students } from './students.js';
 import { tenants } from './tenancy.js';
 
@@ -157,7 +156,15 @@ export const invoices = pgTable(
       t.tenantId,
       t.periodId,
       t.status,
+      t.id,
     ),
+    index('invoices_replacement_id_idx')
+      .on(t.replacementInvoiceId)
+      .where(sql`${t.replacementInvoiceId} is not null`),
+    // Danh sách hóa đơn của phụ huynh (phân trang con trỏ theo issued_at, id).
+    index('invoices_family_idx')
+      .on(t.studentId, t.issuedAt.desc(), t.id)
+      .where(sql`${t.status} <> 'draft'`),
     index('invoices_student_id_idx').on(t.studentId),
     check(
       'invoices_status_check',
@@ -217,6 +224,7 @@ export const invoiceLines = pgTable(
     amount: bigint({ mode: 'number' }).notNull(),
     charged: boolean().notNull().default(true),
     notChargedReason: text(),
+    // Không FK tới sessions: dòng là snapshot, buổi bị xóa cứng (schedule) không được chặn hay sửa dòng đã phát hành.
     sessionId: uuid(),
     sessionDate: date({ mode: 'string' }),
     className: text(),
@@ -229,12 +237,10 @@ export const invoiceLines = pgTable(
       columns: [t.tenantId, t.invoiceId],
       foreignColumns: [invoices.tenantId, invoices.id],
     }).onDelete('cascade'),
-    foreignKey({
-      name: 'invoice_lines_tenant_session_fk',
-      columns: [t.tenantId, t.sessionId],
-      foreignColumns: [sessions.tenantId, sessions.id],
-    }),
     unique('invoice_lines_invoice_position_uq').on(t.invoiceId, t.position),
+    index('invoice_lines_session_id_idx')
+      .on(t.sessionId)
+      .where(sql`${t.sessionId} is not null`),
     check(
       'invoice_lines_kind_check',
       sql`${t.kind} in ('session', 'monthly', 'course_installment', 'carry_over', 'prev_adjustment', 'discount', 'surcharge', 'manual_adjustment')`,
