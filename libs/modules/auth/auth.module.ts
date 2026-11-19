@@ -19,6 +19,6 @@ import { SessionService } from './session/session.service.js';
     SessionService,
     { provide: APP_GUARD, useClass: JwtAuthGuard },
   ],
-  exports: [JwtKeysService, SessionService],
+  exports: [JwtKeysService, SessionService, OtpService],
 })
 export class AuthModule {}

@@ -21,7 +21,6 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
   ApiErrors,
-  AppException,
   ApiIdempotencyKey,
   Ctx,
   type RequestContext,
@@ -30,6 +29,7 @@ import { TxService } from '@teachhub/db';
 import { Idempotency } from '@teachhub/infra';
 import { RequiresRole } from '@teachhub/modules/identity';
 import { ScheduleService } from '../application/schedule.service.js';
+import { SessionChangesService } from '../application/session-changes.service.js';
 import {
   type CancelSessionRequest,
   cancelSessionRequestSchema,
@@ -51,7 +51,7 @@ import {
 
 const idParam = z.uuid();
 
-// Hợp đồng Sprint 2 (S1-CT-02); S2-BE-08. Dời/hủy/bù: bổ sung Sprint 4 (S3-FL-12), thân hàm ở S4-BE-07.
+// Hợp đồng Sprint 2 (S1-CT-02); S2-BE-08. Dời/hủy/bù: bổ sung Sprint 4 (S3-FL-12), S4-BE-07.
 @ApiTags('schedule')
 @ApiBearerAuth('bearer')
 @RequiresRole('tenant_owner')
@@ -62,6 +62,7 @@ export class ScheduleController {
     private readonly tx: TxService,
     private readonly idem: Idempotency,
     private readonly schedule: ScheduleService,
+    private readonly changes: SessionChangesService,
   ) {}
 
   @Put('classes/:id/schedule-rules')
@@ -122,11 +123,17 @@ export class ScheduleController {
     'SESSION_CANCELLED',
   )
   reschedule(
-    @Param('id', { schema: idParam }) _id: string,
+    @Ctx() ctx: RequestContext,
+    @Req() req: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @Param('id', { schema: idParam }) id: string,
     @Body({ schema: rescheduleSessionRequestSchema })
-    _body: RescheduleSessionRequest,
-  ): Session {
-    throw new AppException('NOT_IMPLEMENTED');
+    body: RescheduleSessionRequest,
+  ): Promise<Session> {
+    return this.idem.run(req, reply, ctx, async (t) => ({
+      status: 200,
+      body: await this.changes.reschedule(t, ctx.tenantId!, id, body),
+    }));
   }
 
   @Post('sessions/:id/cancel')
@@ -141,10 +148,16 @@ export class ScheduleController {
   @ApiIdempotencyKey()
   @ApiErrors('VALIDATION_FAILED', 'NOT_FOUND', 'SESSION_HAS_ATTENDANCE')
   cancel(
-    @Param('id', { schema: idParam }) _id: string,
-    @Body({ schema: cancelSessionRequestSchema }) _body: CancelSessionRequest,
-  ): Session {
-    throw new AppException('NOT_IMPLEMENTED');
+    @Ctx() ctx: RequestContext,
+    @Req() req: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @Param('id', { schema: idParam }) id: string,
+    @Body({ schema: cancelSessionRequestSchema }) body: CancelSessionRequest,
+  ): Promise<Session> {
+    return this.idem.run(req, reply, ctx, async (t) => ({
+      status: 200,
+      body: await this.changes.cancel(t, ctx.tenantId!, id, body),
+    }));
   }
 
   @Post('sessions/:id/makeup')
@@ -158,9 +171,15 @@ export class ScheduleController {
   @ApiIdempotencyKey()
   @ApiErrors('VALIDATION_FAILED', 'NOT_FOUND', 'CONFLICT_STALE')
   makeup(
-    @Param('id', { schema: idParam }) _id: string,
-    @Body({ schema: makeupSessionRequestSchema }) _body: MakeupSessionRequest,
-  ): Session {
-    throw new AppException('NOT_IMPLEMENTED');
+    @Ctx() ctx: RequestContext,
+    @Req() req: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @Param('id', { schema: idParam }) id: string,
+    @Body({ schema: makeupSessionRequestSchema }) body: MakeupSessionRequest,
+  ): Promise<Session> {
+    return this.idem.run(req, reply, ctx, async (t) => ({
+      status: 201,
+      body: await this.changes.makeup(t, ctx.tenantId!, id, body),
+    }));
   }
 }

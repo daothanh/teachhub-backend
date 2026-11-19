@@ -71,11 +71,15 @@ export class AuthController {
     @Body({ schema: otpSendRequestSchema }) body: OtpSendRequest,
   ): Promise<void> {
     const email = body.email.toLowerCase();
-    const code = await this.otp.issue(email);
+    const code = await this.otp.issue(email, body.purpose);
+    const what =
+      body.purpose === 'delete_account'
+        ? 'xác nhận xóa tài khoản'
+        : 'đăng nhập';
     await this.mailer.send({
       to: email,
-      subject: `${code} là mã đăng nhập TeachHub của bạn`,
-      text: `Mã đăng nhập TeachHub: ${code}\n\nMã hết hạn sau ${OTP.ttlSec / 60} phút. Không chia sẻ mã này cho ai. Nếu bạn không yêu cầu, hãy bỏ qua email này.`,
+      subject: `${code} là mã ${what} TeachHub của bạn`,
+      text: `Mã ${what} TeachHub: ${code}\n\nMã hết hạn sau ${OTP.ttlSec / 60} phút. Không chia sẻ mã này cho ai. Nếu bạn không yêu cầu, hãy bỏ qua email này.`,
     });
   }
 

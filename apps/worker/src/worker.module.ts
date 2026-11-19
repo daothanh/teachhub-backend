@@ -7,8 +7,12 @@ import { JobsModule, RedisModule } from '@teachhub/infra';
 import { NotificationsJobsModule } from '@teachhub/modules/notifications';
 import { ScheduleRulesModule } from '@teachhub/modules/schedule';
 import { CRON_QUEUE, CronProcessor } from './cron.processor.js';
-import { OUTBOX_QUEUE_URGENT } from './outbox/outbox-policy.js';
+import {
+  OUTBOX_QUEUE_DEFAULT,
+  OUTBOX_QUEUE_URGENT,
+} from './outbox/outbox-policy.js';
 import { OutboxModule } from './outbox/outbox.module.js';
+import { ScheduleChangedProcessor } from './notify/schedule-changed.processor.js';
 import { UrgentProcessor } from './notify/urgent.processor.js';
 
 // Processor: `cron` (S2-BE-09), outbox relay (S3-BE-04). Notify, billing… thêm theo từng module.
@@ -23,6 +27,7 @@ import { UrgentProcessor } from './notify/urgent.processor.js';
     BullModule.registerQueue(
       { name: CRON_QUEUE },
       { name: OUTBOX_QUEUE_URGENT },
+      { name: OUTBOX_QUEUE_DEFAULT },
     ),
     BullModule.forRootAsync({
       inject: [ConfigService],
@@ -35,6 +40,6 @@ import { UrgentProcessor } from './notify/urgent.processor.js';
     }),
     OutboxModule,
   ],
-  providers: [CronProcessor, UrgentProcessor],
+  providers: [CronProcessor, UrgentProcessor, ScheduleChangedProcessor],
 })
 export class WorkerModule {}

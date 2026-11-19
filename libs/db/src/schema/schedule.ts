@@ -10,6 +10,7 @@ import {
   time,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
@@ -17,7 +18,7 @@ import { classes } from './classes.js';
 import { tenants } from './tenancy.js';
 
 // Lịch lặp và buổi học (Technical Spec §4.4). RLS, trigger updated_at viết tay cuối file migration schedule.
-// Chưa có valid_from/valid_to (bộ quy tắc thay nguyên khối), makeup_of, cancel_reason, holiday_ack: thêm cùng US-2.2, US-2.6.
+// Chưa có valid_from/valid_to (bộ quy tắc thay nguyên khối), holiday_ack: thêm cùng US-2.6.
 
 const createdAt = () =>
   timestamp({ withTimezone: true }).notNull().defaultNow();
@@ -80,6 +81,12 @@ export const sessions = pgTable(
     endsAt: timestamp({ withTimezone: true }).notNull(),
     status: text().notNull().default('planned'),
     isMakeup: boolean().notNull().default(false),
+    /** Lý do hủy (US-2.2); null nếu chưa hủy hoặc không nhập. */
+    cancelReason: text(),
+    /** Buổi gốc đã hủy mà buổi bù này thay thế; mỗi buổi gốc tối đa một buổi bù còn hiệu lực (buổi bù đã hủy thì cho tạo buổi bù khác). */
+    makeupOf: uuid(),
+    /** Giờ bắt đầu gốc khi buổi đã bị dời (US-2.2): reconcile coi khung giờ đó đã có chủ, không sinh lại và không xóa buổi đã dời. */
+    rescheduledFrom: timestamp({ withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -89,6 +96,18 @@ export const sessions = pgTable(
       columns: [t.tenantId, t.classId],
       foreignColumns: [classes.tenantId, classes.id],
     }),
+    foreignKey({
+      name: 'sessions_tenant_makeup_of_fk',
+      columns: [t.tenantId, t.makeupOf],
+      foreignColumns: [t.tenantId, t.id],
+    }),
+    uniqueIndex('sessions_makeup_of_uq')
+      .on(t.makeupOf)
+      .where(sql`${t.makeupOf} is not null and ${t.status} <> 'cancelled'`),
+    check(
+      'sessions_cancel_reason_check',
+      sql`char_length(${t.cancelReason}) <= 300`,
+    ),
     unique('sessions_rule_date_uq').on(t.ruleId, t.sessionDate),
     // Đích của khóa ngoại kép (tenant_id, session_id) từ attendance.
     // shortcut: unique thêm trên bảng sessions khóa bảng khi tạo; chấp nhận vì bảng còn nhỏ, bảng lớn thì tạo index CONCURRENTLY rồi gắn constraint.

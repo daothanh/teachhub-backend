@@ -218,6 +218,10 @@ export class OutboxRelayService
           jobId: ev.id,
           // shortcut: job xong giữ 1 giờ; sau đó BullMQ không còn nhớ jobId nên sự kiện được lấy lại muộn hơn 1 giờ sẽ chạy lại. Consumer đã idempotent theo eventId.
           removeOnComplete: { age: 3600 },
+          // Hàng `events` chưa có consumer đầy đủ: giữ tối đa 500 job lỗi để xem lại, không phình Redis. Hàng khẩn giữ hết.
+          ...(queueFor(ev.type) === OUTBOX_QUEUE_DEFAULT && {
+            removeOnFail: 500,
+          }),
         }),
         timeout,
       ]);
