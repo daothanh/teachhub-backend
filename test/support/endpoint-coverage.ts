@@ -94,16 +94,16 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
       'hợp đồng S1-CT-02, thân hàm trả 501 tới S2-BE-06; test chéo tenant làm cùng task đó',
   },
   'GET /v1/students': {
-    notApplicable:
-      'hợp đồng S1-CT-02, thân hàm trả 501 tới S2-BE-05; test chéo tenant làm cùng task đó',
+    file: 'students.e2e-spec.ts',
+    test: 'tenant B không sửa học viên của A (404) và không thấy trong danh sách/tìm kiếm',
   },
   'POST /v1/students': {
-    notApplicable:
-      'hợp đồng S1-CT-02, thân hàm trả 501 tới S2-BE-05; test chéo tenant làm cùng task đó',
+    file: 'students.e2e-spec.ts',
+    test: 'ứng viên trùng tối đa 5 và chỉ trong tenant: hồ sơ cùng tên + ngày sinh ở tenant khác không lộ',
   },
   'PATCH /v1/students/{id}': {
-    notApplicable:
-      'hợp đồng S1-CT-02, thân hàm trả 501 tới S2-BE-05; test chéo tenant làm cùng task đó',
+    file: 'students.e2e-spec.ts',
+    test: 'tenant B không sửa học viên của A (404) và không thấy trong danh sách/tìm kiếm',
   },
   'PUT /v1/classes/{id}/schedule-rules': {
     notApplicable:

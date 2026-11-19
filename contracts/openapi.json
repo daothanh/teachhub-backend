@@ -2213,7 +2213,7 @@
                       "type": "object",
                       "properties": {
                         "id": {
-                          "description": "Có `id` = cập nhật phụ huynh đó; không có = tạo mới",
+                          "description": "Có `id` = cập nhật phụ huynh đó; không có = tạo mới. `id` phải là phụ huynh đang liên kết với chính học viên này; sai (không tồn tại, của học viên hoặc tenant khác) → 422 `VALIDATION_FAILED` ở trường `guardians.N.id`. `POST /students` không nhận `id`.",
                           "type": "string",
                           "format": "uuid",
                           "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
@@ -2437,7 +2437,7 @@
                       "type": "object",
                       "properties": {
                         "id": {
-                          "description": "Có `id` = cập nhật phụ huynh đó; không có = tạo mới",
+                          "description": "Có `id` = cập nhật phụ huynh đó; không có = tạo mới. `id` phải là phụ huynh đang liên kết với chính học viên này; sai (không tồn tại, của học viên hoặc tenant khác) → 422 `VALIDATION_FAILED` ở trường `guardians.N.id`. `POST /students` không nhận `id`.",
                           "type": "string",
                           "format": "uuid",
                           "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"

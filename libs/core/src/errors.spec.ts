@@ -2,7 +2,7 @@ import { HttpException, NotFoundException } from '@nestjs/common';
 import { z } from 'zod';
 import { AppException } from './app.exception.js';
 import { validateEnv } from './config.js';
-import { toErrorBody } from './global-exception.filter.js';
+import { loggable, toErrorBody } from './global-exception.filter.js';
 import { validationPipe } from './validation.js';
 
 describe('toErrorBody', () => {
@@ -28,6 +28,23 @@ describe('toErrorBody', () => {
     const { status, body } = toErrorBody(new Error('password=secret'));
     expect(status).toBe(500);
     expect(body.message).not.toContain('secret');
+  });
+});
+
+describe('loggable', () => {
+  it('lỗi truy vấn Drizzle: bỏ params (PII), chỉ giữ lỗi gốc của driver', () => {
+    const driver = new Error('duplicate key value violates unique constraint');
+    const drizzleErr = Object.assign(
+      new Error('Failed query: insert … params: Nguyễn Văn A,0912345678'),
+      {
+        query: 'insert …',
+        params: ['Nguyễn Văn A', '0912345678'],
+        cause: driver,
+      },
+    );
+    expect(loggable(drizzleErr)).toBe(driver);
+    const other = new Error('x');
+    expect(loggable(other)).toBe(other);
   });
 });
 
