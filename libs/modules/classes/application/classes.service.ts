@@ -126,8 +126,13 @@ export class ClassesService {
       .for('update');
     if (!cur) throw new AppException('NOT_FOUND');
     if (cur.status === 'archived') throw new AppException('CONFLICT_STALE');
+    const { feeType, feeAmount, feeRules, ...rest } = body;
+    // Hợp đồng Sprint 5 đã nhận học phí; lưu thật ở S5-BE-01/02 (cột chưa có).
+    if ([feeType, feeAmount, feeRules].some((v) => v !== undefined)) {
+      throw new AppException('NOT_IMPLEMENTED');
+    }
     const patch = Object.fromEntries(
-      Object.entries(body).filter(([, v]) => v !== undefined),
+      Object.entries(rest).filter(([, v]) => v !== undefined),
     ) as UpdateClassRequest;
     const merged = { ...cur, ...patch };
     const errors = classDraftErrors({
@@ -217,6 +222,10 @@ export class ClassesService {
       endDate: r.endDate,
       status: r.status as Class['status'],
       enrolledCount: enrolled.get(r.id) ?? 0,
+      // shortcut: chưa có cột học phí; S5-BE-01/02 đọc thật.
+      feeType: null,
+      feeAmount: null,
+      feeRules: null,
       scheduleRules: rules.get(r.id) ?? [],
       createdAt: r.createdAt.toISOString(),
     }));

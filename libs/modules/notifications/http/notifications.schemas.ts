@@ -40,11 +40,13 @@ export type PushUnregisterRequest = z.infer<typeof pushUnregisterRequestSchema>;
 
 // ---- GET /notifications · POST /notifications/read ----
 
-/** Sprint 3: báo vắng (US-3.2). Sprint 4 thêm `schedule_changed` (US-2.2); loại khác thêm ở sprint sau. */
+/** Sprint 3: báo vắng (US-3.2). Sprint 4 thêm `schedule_changed` (US-2.2). Sprint 5 thêm `billing_ready` và `invoice_issued`. */
 export const notificationTypeSchema = z.enum([
   'student_absent',
   'student_absent_correction',
   'schedule_changed',
+  'billing_ready',
+  'invoice_issued',
 ]);
 
 const absencePayloadSchema = z
@@ -81,6 +83,40 @@ export const scheduleChangedPayloadSchema = z
   .meta({
     description:
       'Lớp, buổi, giờ mới/cũ và lý do (nếu giáo viên nhập); không có dữ liệu học viên',
+  });
+
+/**
+ * Payload loại `billing_ready` (US-7.2 AC1, gửi giáo viên khi `billing.close` tạo bản nháp). CHƯA nằm trong `notificationSchema`
+ * vì cùng lý do `oasdiff` như `schedule_changed`. Push chỉ data-only (`notificationId`, `type`).
+ */
+export const billingReadyPayloadSchema = z
+  .object({
+    periodId: z.uuid(),
+    periodMonth: z.iso.date(),
+    draftCount: z.int().min(0),
+    draftTotalAmount: z.int().min(0).meta({ description: 'VND' }),
+  })
+  .meta({
+    description:
+      'Kỳ và số bản nháp; text push "Học phí tháng X đã sẵn sàng" do client dựng từ `periodMonth`. deepLink `teachhub://billing/periods/{periodId}`',
+  });
+
+/**
+ * Payload loại `invoice_issued` (US-7.3, gửi phụ huynh qua outbox `invoice_issued`, kèm email). CHƯA nằm trong `notificationSchema`.
+ * Không có số tài khoản hay mã QR: phụ huynh mở hóa đơn qua `GET /family/invoices/{invoiceId}`.
+ */
+export const invoiceIssuedPayloadSchema = z
+  .object({
+    invoiceId: z.uuid(),
+    studentId: z.uuid(),
+    studentName: z.string(),
+    periodMonth: z.iso.date(),
+    totalAmount: z.int().min(1).meta({ description: 'VND' }),
+    dueDate: z.iso.date(),
+  })
+  .meta({
+    description:
+      'Hóa đơn mới phát hành của một con. deepLink `teachhub://invoices/{invoiceId}`',
   });
 
 const notificationBase = z.object({

@@ -135,6 +135,7 @@ export class EnrollmentsService {
         studentStatus: r.studentStatus as 'active' | 'paused',
         // shortcut: chưa có bảng lời mời phụ huynh; S4-BE-03 thay bằng trạng thái gộp thật (activated > invited > expired).
         inviteStatus: 'not_invited' as const,
+        feeOverride: null, // shortcut: chưa có cột fee_override; S5-BE-02 đọc thật.
         // Trigger CSDL giữ tối đa 2 phụ huynh chưa gỡ cho mỗi học viên.
         guardians: gs
           .filter((g) => g.studentId === r.studentId)

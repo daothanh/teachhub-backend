@@ -233,4 +233,56 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
     file: 'delete-account.e2e-spec.ts',
     test: 'phụ huynh xóa tài khoản: gỡ liên kết, thiết bị, thông báo; học viên và không gian của giáo viên không đổi',
   },
+  'GET /v1/billing-periods': {
+    notApplicable:
+      'hợp đồng S4-FL-10, thân hàm trả 501 tới S5-BE-06; test chéo tenant/học viên làm cùng task đó',
+  },
+  'GET /v1/billing-periods/{id}': {
+    notApplicable:
+      'hợp đồng S4-FL-10, thân hàm trả 501 tới S5-BE-06; test chéo tenant/học viên làm cùng task đó',
+  },
+  'POST /v1/billing-periods/{id}/issue': {
+    notApplicable:
+      'hợp đồng S4-FL-10, thân hàm trả 501 tới S5-BE-07; test chéo tenant/học viên làm cùng task đó',
+  },
+  'GET /v1/invoices/{id}': {
+    notApplicable:
+      'hợp đồng S4-FL-10, thân hàm trả 501 tới S5-BE-06; test chéo tenant/học viên làm cùng task đó',
+  },
+  'POST /v1/invoices/{id}/adjustments': {
+    notApplicable:
+      'hợp đồng S4-FL-10, thân hàm trả 501 tới S5-BE-06; test chéo tenant/học viên làm cùng task đó',
+  },
+  'POST /v1/invoices/{id}/void': {
+    notApplicable:
+      'hợp đồng S4-FL-10, thân hàm trả 501 tới S5-BE-07; test chéo tenant/học viên làm cùng task đó',
+  },
+  'GET /v1/family/invoices': {
+    notApplicable:
+      'hợp đồng S4-FL-10, thân hàm trả 501 tới S5-BE-08; test chéo tenant/học viên làm cùng task đó',
+  },
+  'GET /v1/family/invoices/{id}': {
+    notApplicable:
+      'hợp đồng S4-FL-10, thân hàm trả 501 tới S5-BE-08; test chéo tenant/học viên làm cùng task đó',
+  },
+  'PUT /v1/enrollments/{id}/fee-override': {
+    notApplicable:
+      'hợp đồng S4-FL-10, thân hàm trả 501 tới S5-BE-02; test chéo tenant/học viên làm cùng task đó',
+  },
+  'GET /v1/payout-accounts': {
+    notApplicable:
+      'hợp đồng S4-FL-10, thân hàm trả 501 tới S5-BE-02; test chéo tenant/học viên làm cùng task đó',
+  },
+  'POST /v1/payout-accounts': {
+    notApplicable:
+      'hợp đồng S4-FL-10, thân hàm trả 501 tới S5-BE-02; test chéo tenant/học viên làm cùng task đó',
+  },
+  'PATCH /v1/payout-accounts/{id}': {
+    notApplicable:
+      'hợp đồng S4-FL-10, thân hàm trả 501 tới S5-BE-02; test chéo tenant/học viên làm cùng task đó',
+  },
+  'DELETE /v1/payout-accounts/{id}': {
+    notApplicable:
+      'hợp đồng S4-FL-10, thân hàm trả 501 tới S5-BE-02; test chéo tenant/học viên làm cùng task đó',
+  },
 };
