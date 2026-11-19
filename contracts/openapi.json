@@ -334,11 +334,13 @@
                   "id_token": {
                     "type": "string",
                     "minLength": 1,
+                    "maxLength": 4096,
                     "description": "identityToken do Sign in with Apple trả về"
                   },
                   "nonce": {
                     "type": "string",
                     "minLength": 1,
+                    "maxLength": 256,
                     "description": "Nonce gốc client đã băm (SHA-256) khi xin token; server băm lại và so với claim `nonce`"
                   },
                   "fullName": {
@@ -1212,7 +1214,7 @@
               "default": 1,
               "type": "integer",
               "minimum": 1,
-              "maximum": 9007199254740991
+              "maximum": 10000
             }
           },
           {
@@ -1293,7 +1295,7 @@
         ]
       },
       "post": {
-        "description": "Bắt buộc tên, môn, khối, hình thức, ngày bắt đầu; địa điểm bắt buộc với lớp tại chỗ; ngày kết thúc không nhỏ hơn ngày bắt đầu. Sai → 422 `VALIDATION_FAILED` kèm `errors` theo trường. Lịch lặp đặt riêng ở `PUT /classes/{id}/schedule-rules`.",
+        "description": "Bắt buộc tên, môn, khối, hình thức, ngày bắt đầu; địa điểm bắt buộc với lớp tại chỗ; ngày kết thúc không nhỏ hơn ngày bắt đầu. Sai → 422 `VALIDATION_FAILED` kèm `errors` theo trường. Lịch lặp đặt riêng ở `PUT /classes/{id}/schedule-rules`. Phản hồi là lớp kèm `warnings` (mặc định rỗng). Hết hạn mức gói → 402 `PLAN_LIMIT_EXCEEDED`.",
         "operationId": "classes_create",
         "parameters": [
           {
@@ -1406,7 +1408,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Class"
+                  "$ref": "#/components/schemas/ClassCreated"
                 }
               }
             }
@@ -1417,6 +1419,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "PLAN_LIMIT_EXCEEDED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanLimitErrorBody"
                 }
               }
             }
@@ -1801,7 +1813,7 @@
     },
     "/v1/classes/{id}/roster": {
       "get": {
-        "description": "Không phân trang. Nhãn \"Giá riêng\" và trạng thái phụ huynh thêm ở sprint sau.",
+        "description": "Chỉ ghi danh chưa rời lớp (học viên `active` hoặc `paused`). Không phân trang. Nhãn \"Giá riêng\" và trạng thái phụ huynh thêm ở sprint sau.",
         "operationId": "classes_roster",
         "parameters": [
           {
@@ -1870,7 +1882,7 @@
     },
     "/v1/classes/{id}/enrollments": {
       "post": {
-        "description": "Dùng chung hồ sơ `students`, không tạo bản trùng. Học viên đã ghi danh mở ở lớp này → 200 với ghi danh sẵn có.",
+        "description": "Dùng chung hồ sơ `students`, không tạo bản trùng. Học viên đã ghi danh mở ở lớp này → 200 với ghi danh sẵn có. Lớp đã lưu trữ hoặc học viên đã nghỉ (`left`) → 409 `CONFLICT_STALE`. Hết hạn mức gói → 402.",
         "operationId": "classes_enroll",
         "parameters": [
           {
@@ -1954,6 +1966,16 @@
               }
             }
           },
+          "402": {
+            "description": "PLAN_LIMIT_EXCEEDED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanLimitErrorBody"
+                }
+              }
+            }
+          },
           "403": {
             "description": "FORBIDDEN",
             "content": {
@@ -1975,7 +1997,7 @@
             }
           },
           "409": {
-            "description": "IDEMPOTENCY_IN_PROGRESS",
+            "description": "CONFLICT_STALE\n\nIDEMPOTENCY_IN_PROGRESS",
             "content": {
               "application/json": {
                 "schema": {
@@ -2008,7 +2030,7 @@
     },
     "/v1/students": {
       "get": {
-        "description": "Tìm theo `q` (không phân biệt dấu, dùng `pg_trgm` + `unaccent`); bỏ `q` thì liệt kê tất cả.",
+        "description": "Tìm theo `q` (từ 2 ký tự, không phân biệt dấu, dùng `pg_trgm` + `unaccent`); bỏ `q` thì liệt kê tất cả. Lọc `status` (mặc định `active`) và `classId`.",
         "operationId": "students_list",
         "parameters": [
           {
@@ -2019,7 +2041,7 @@
               "default": 1,
               "type": "integer",
               "minimum": 1,
-              "maximum": 9007199254740991
+              "maximum": 10000
             }
           },
           {
@@ -2034,6 +2056,32 @@
             }
           },
           {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": "active",
+              "type": "string",
+              "enum": [
+                "active",
+                "paused",
+                "left"
+              ]
+            }
+          },
+          {
+            "name": "classId",
+            "required": false,
+            "in": "query",
+            "description": "Chỉ học viên đang ghi danh ở lớp này",
+            "schema": {
+              "description": "Chỉ học viên đang ghi danh ở lớp này",
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          {
             "name": "q",
             "required": false,
             "in": "query",
@@ -2042,6 +2090,7 @@
               "description": "Tìm theo họ tên, không phân biệt dấu",
               "example": "nguyen minh",
               "type": "string",
+              "minLength": 2,
               "maxLength": 100
             }
           }
@@ -2099,7 +2148,7 @@
         ]
       },
       "post": {
-        "description": "Chỉ họ tên bắt buộc. Trùng họ tên và ngày sinh với hồ sơ có sẵn → 409 `STUDENT_POSSIBLE_DUPLICATE` kèm `details.candidates` (`[{ id, fullName, dob, school }]`); client hỏi \"Có phải cùng một em?\", chọn \"không\" thì gửi lại với `confirmNew: true` (khóa idempotency mới). Số điện thoại phụ huynh tùy chọn, lưu vào `guardians`.",
+        "description": "Chỉ họ tên bắt buộc. Trùng họ tên và ngày sinh với hồ sơ có sẵn → 409 `STUDENT_POSSIBLE_DUPLICATE` kèm `details.candidates` (`StudentCandidate`: `id`, `fullName`, `dob`, `school`); client hỏi \"Có phải cùng một em?\", chọn \"không\" thì gửi lại với `confirmNew: true` (khóa idempotency mới). Chỉ tìm trong tenant hiện tại, tối đa 5 ứng viên. Số điện thoại phụ huynh tùy chọn, lưu vào `guardians`. Hết hạn mức gói → 402 `PLAN_LIMIT_EXCEEDED`.",
         "operationId": "students_create",
         "parameters": [
           {
@@ -2163,6 +2212,12 @@
                     "items": {
                       "type": "object",
                       "properties": {
+                        "id": {
+                          "description": "Có `id` = cập nhật phụ huynh đó; không có = tạo mới",
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
                         "fullName": {
                           "type": "string",
                           "minLength": 1,
@@ -2254,6 +2309,16 @@
               }
             }
           },
+          "402": {
+            "description": "PLAN_LIMIT_EXCEEDED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanLimitErrorBody"
+                }
+              }
+            }
+          },
           "403": {
             "description": "FORBIDDEN",
             "content": {
@@ -2265,11 +2330,11 @@
             }
           },
           "409": {
-            "description": "STUDENT_POSSIBLE_DUPLICATE\n\nIDEMPOTENCY_IN_PROGRESS",
+            "description": "IDEMPOTENCY_IN_PROGRESS\n\nSTUDENT_POSSIBLE_DUPLICATE",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
+                  "$ref": "#/components/schemas/StudentDuplicateErrorBody"
                 }
               }
             }
@@ -2298,6 +2363,7 @@
     },
     "/v1/students/{id}": {
       "patch": {
+        "description": "Có `guardians` thì thay toàn bộ danh sách: phụ huynh có `id` được cập nhật, không có `id` được tạo mới, phụ huynh không còn trong danh sách bị gỡ liên kết.",
         "operationId": "students_update",
         "parameters": [
           {
@@ -2370,6 +2436,12 @@
                     "items": {
                       "type": "object",
                       "properties": {
+                        "id": {
+                          "description": "Có `id` = cập nhật phụ huynh đó; không có = tạo mới",
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
                         "fullName": {
                           "type": "string",
                           "minLength": 1,
@@ -2491,7 +2563,7 @@
     },
     "/v1/classes/{id}/schedule-rules": {
       "put": {
-        "description": "Thay toàn bộ quy tắc, sinh buổi \"dự kiến\" trong cùng giao dịch: từ ngày bắt đầu tới ngày kết thúc của lớp, hoặc cuốn chiếu 8 tuần nếu lớp không có ngày kết thúc. Chỉ buổi tương lai chưa điểm danh bị thay; buổi đã dạy giữ nguyên. Gửi lại cùng `Idempotency-Key` không sinh buổi trùng.",
+        "description": "Thay toàn bộ quy tắc, sinh buổi \"dự kiến\" trong cùng giao dịch: từ ngày bắt đầu tới ngày kết thúc của lớp, hoặc cuốn chiếu 8 tuần nếu lớp không có ngày kết thúc. Chỉ buổi tương lai chưa điểm danh bị thay; buổi đã dạy giữ nguyên. Gửi lại cùng `Idempotency-Key` không sinh buổi trùng. Trùng (thứ + giờ bắt đầu) hoặc giờ bắt đầu + thời lượng vượt 24:00 → 422 `VALIDATION_FAILED`; lớp đã lưu trữ → 409 `CONFLICT_STALE`.",
         "operationId": "schedule_putRules",
         "parameters": [
           {
@@ -2619,7 +2691,7 @@
             }
           },
           "409": {
-            "description": "IDEMPOTENCY_IN_PROGRESS",
+            "description": "CONFLICT_STALE\n\nIDEMPOTENCY_IN_PROGRESS",
             "content": {
               "application/json": {
                 "schema": {
@@ -2652,7 +2724,7 @@
     },
     "/v1/sessions": {
       "get": {
-        "description": "Sắp theo `startsAt`. Khoảng `from`…`to` tối đa 62 ngày; lớp đã lưu trữ không xuất hiện.",
+        "description": "Sắp theo `startsAt`. `from` và `to` là ngày theo múi giờ của tenant, bao gồm cả hai đầu. Ngoại lệ có chủ ý so với quy ước chung: khoảng tối đa 62 ngày và không phân trang. Lớp đã lưu trữ không xuất hiện.",
         "operationId": "schedule_sessions",
         "parameters": [
           {
@@ -2754,7 +2826,7 @@
               "default": 1,
               "type": "integer",
               "minimum": 1,
-              "maximum": 9007199254740991
+              "maximum": 10000
             }
           },
           {
@@ -2840,7 +2912,7 @@
     },
     "/v1/admin/bank-transfer-orders/{id}/confirm": {
       "post": {
-        "description": "Quyền IAM: `/teachhub/admin/bank-transfer`. Một giao dịch: đơn → `confirmed` (ghi `x-admin-user-id`), `subscriptions` → Pro, `audit_logs`, rồi push cho giáo viên. Đơn không còn `pending` → 409 `CONFLICT_STALE`.",
+        "description": "Quyền IAM: `/teachhub/admin/bank-transfer`. Một giao dịch: đơn → `confirmed` (ghi `x-admin-user-id`), `subscriptions` → Pro, `audit_logs`, rồi push cho giáo viên. Body bắt buộc `amount`, `bankTransactionRef`, `expectedUpdatedAt`; đơn không còn `pending` hoặc `expectedUpdatedAt` lệch `updatedAt` → 409 `CONFLICT_STALE`.",
         "operationId": "admin_confirmBankTransferOrder",
         "parameters": [
           {
@@ -2864,6 +2936,47 @@
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "amount": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991,
+                    "description": "Số tiền (đồng) admin đã đối chiếu với sao kê",
+                    "example": 250000
+                  },
+                  "bankTransactionRef": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100,
+                    "example": "FT26354123456"
+                  },
+                  "expectedUpdatedAt": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                    "description": "`updatedAt` của đơn lúc admin xem; lệch → 409 `CONFLICT_STALE`"
+                  }
+                },
+                "required": [
+                  "amount",
+                  "bankTransactionRef",
+                  "expectedUpdatedAt"
+                ],
+                "example": {
+                  "amount": 250000,
+                  "bankTransactionRef": "FT26354123456",
+                  "expectedUpdatedAt": "2026-12-20T10:15:00+07:00"
+                }
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "",
@@ -2916,7 +3029,7 @@
             }
           },
           "422": {
-            "description": "IDEMPOTENCY_KEY_REUSED",
+            "description": "VALIDATION_FAILED\n\nIDEMPOTENCY_KEY_REUSED",
             "content": {
               "application/json": {
                 "schema": {
@@ -2953,7 +3066,7 @@
               "default": 1,
               "type": "integer",
               "minimum": 1,
-              "maximum": 9007199254740991
+              "maximum": 10000
             }
           },
           {
@@ -3075,7 +3188,8 @@
                   "bodyMarkdown": {
                     "type": "string",
                     "minLength": 1,
-                    "maxLength": 50000
+                    "maxLength": 50000,
+                    "description": "Markdown; khi hiển thị không cho phép HTML thô"
                   },
                   "sources": {
                     "minItems": 1,
@@ -3091,6 +3205,7 @@
                         },
                         "url": {
                           "type": "string",
+                          "maxLength": 2000,
                           "format": "uri"
                         }
                       },
@@ -3192,7 +3307,7 @@
     },
     "/v1/admin/legal-articles/{id}/publish": {
       "post": {
-        "description": "Quyền IAM: `/teachhub/admin/legal-articles`. Bắt buộc ghi tên luật sư/kế toán duyệt trước khi hiển thị; phát hành xong giáo viên nhận thông báo trong app. Bài đã phát hành → 409 `CONFLICT_STALE`.",
+        "description": "Quyền IAM: `/teachhub/admin/legal-articles`. Bắt buộc ghi tên luật sư/kế toán duyệt trước khi hiển thị; phát hành xong giáo viên nhận thông báo trong app. `publishedBy` lấy từ `x-admin-user-id`, không nhận từ body; `reviewedBy` là nhãn văn bản thuần. Bài đã phát hành → 409 `CONFLICT_STALE`.",
         "operationId": "admin_publishLegalArticle",
         "parameters": [
           {
@@ -3227,6 +3342,7 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 120,
+                    "description": "Nhãn văn bản thuần (plain text), không render HTML",
                     "example": "LS. Trần Thị Mai"
                   },
                   "reviewerRole": {
@@ -3966,6 +4082,223 @@
           "durationMin": 90
         }
       },
+      "ClassCreated": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120,
+            "example": "Toán 9A"
+          },
+          "subject": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "example": "Toán"
+          },
+          "grade": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 12,
+            "example": 9
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "offline",
+              "online"
+            ]
+          },
+          "location": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "capacity": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "startDate": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
+            "example": "2026-12-14"
+          },
+          "endDate": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "archived"
+            ]
+          },
+          "enrolledCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "Số học viên đang ghi danh (chưa rời lớp)"
+          },
+          "scheduleRules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScheduleRule"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "warnings": {
+            "default": [],
+            "description": "Cảnh báo không chặn; mặc định []",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "subject",
+          "grade",
+          "mode",
+          "location",
+          "capacity",
+          "startDate",
+          "endDate",
+          "status",
+          "enrolledCount",
+          "scheduleRules",
+          "createdAt",
+          "warnings"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "id": "019b2c3f-5e01-7c20-9b01-000000000001",
+          "name": "Toán 9A",
+          "subject": "Toán",
+          "grade": 9,
+          "mode": "offline",
+          "location": "Nhà riêng, 12 Trần Phú",
+          "capacity": 20,
+          "startDate": "2026-12-14",
+          "endDate": null,
+          "status": "active",
+          "enrolledCount": 3,
+          "scheduleRules": [
+            {
+              "id": "019b2c40-1a01-7a10-8a01-000000000001",
+              "weekday": 2,
+              "startTime": "18:00",
+              "durationMin": 90
+            },
+            {
+              "id": "019b2c40-1a01-7a10-8a01-000000000002",
+              "weekday": 4,
+              "startTime": "18:00",
+              "durationMin": 90
+            }
+          ],
+          "createdAt": "2026-12-14T09:30:00+07:00",
+          "warnings": []
+        }
+      },
+      "PlanLimitErrorBody": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Mã trong contracts/error_codes.json"
+          },
+          "message": {
+            "type": "string"
+          },
+          "details": {
+            "type": "object",
+            "properties": {
+              "limit": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "current": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "attempted": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "feature": {
+                "type": "string",
+                "example": "max_active_students"
+              }
+            },
+            "required": [
+              "limit",
+              "current",
+              "attempted",
+              "feature"
+            ],
+            "additionalProperties": false
+          },
+          "errors": {
+            "description": "Chỉ có với VALIDATION_FAILED: lỗi theo trường",
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "requestId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "details",
+          "requestId"
+        ],
+        "additionalProperties": false
+      },
       "Roster": {
         "type": "object",
         "properties": {
@@ -3987,12 +4320,11 @@
                 "fullName": {
                   "type": "string"
                 },
-                "status": {
+                "studentStatus": {
                   "type": "string",
                   "enum": [
                     "active",
-                    "paused",
-                    "left"
+                    "paused"
                   ]
                 },
                 "joinedOn": {
@@ -4005,7 +4337,7 @@
                 "enrollmentId",
                 "studentId",
                 "fullName",
-                "status",
+                "studentStatus",
                 "joinedOn"
               ],
               "additionalProperties": false
@@ -4022,14 +4354,14 @@
               "enrollmentId": "019b2c50-0001-7b30-8c01-000000000001",
               "studentId": "019b2c4f-0001-7b30-8c01-000000000001",
               "fullName": "Nguyễn Minh Anh",
-              "status": "active",
+              "studentStatus": "active",
               "joinedOn": "2026-12-14"
             },
             {
               "enrollmentId": "019b2c50-0001-7b30-8c01-000000000002",
               "studentId": "019b2c4f-0001-7b30-8c01-000000000002",
               "fullName": "Trần Gia Bảo",
-              "status": "active",
+              "studentStatus": "active",
               "joinedOn": "2026-12-14"
             }
           ]
@@ -4254,6 +4586,88 @@
         ],
         "additionalProperties": false
       },
+      "StudentDuplicateErrorBody": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Mã trong contracts/error_codes.json"
+          },
+          "message": {
+            "type": "string"
+          },
+          "details": {
+            "type": "object",
+            "properties": {
+              "candidates": {
+                "maxItems": 5,
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/StudentCandidate"
+                }
+              }
+            },
+            "required": [
+              "candidates"
+            ],
+            "additionalProperties": false
+          },
+          "errors": {
+            "description": "Chỉ có với VALIDATION_FAILED: lỗi theo trường",
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "requestId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "details",
+          "requestId"
+        ],
+        "additionalProperties": false
+      },
+      "StudentCandidate": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "fullName": {
+            "type": "string"
+          },
+          "dob": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+          },
+          "school": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "fullName",
+          "dob",
+          "school"
+        ],
+        "additionalProperties": false
+      },
       "ScheduleRulesResult": {
         "type": "object",
         "properties": {
@@ -4435,8 +4849,10 @@
               "transferNote": "TEACHHUB PRO CO LAN",
               "status": "pending",
               "createdAt": "2026-12-20T10:15:00+07:00",
+              "bankTransactionRef": null,
               "confirmedBy": null,
-              "confirmedAt": null
+              "confirmedAt": null,
+              "updatedAt": "2026-12-20T10:15:00+07:00"
             }
           ],
           "total": 1,
@@ -4495,6 +4911,19 @@
             ],
             "format": "date-time",
             "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "bankTransactionRef": {
+            "description": "Mã giao dịch ngân hàng admin đối chiếu khi xác nhận",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "description": "Dùng làm `expectedUpdatedAt` khi xác nhận (khóa lạc quan)"
           }
         },
         "required": [
@@ -4506,7 +4935,9 @@
           "status",
           "createdAt",
           "confirmedBy",
-          "confirmedAt"
+          "confirmedAt",
+          "bankTransactionRef",
+          "updatedAt"
         ],
         "additionalProperties": false,
         "example": {
@@ -4517,8 +4948,10 @@
           "transferNote": "TEACHHUB PRO CO LAN",
           "status": "pending",
           "createdAt": "2026-12-20T10:15:00+07:00",
+          "bankTransactionRef": null,
           "confirmedBy": null,
-          "confirmedAt": null
+          "confirmedAt": null,
+          "updatedAt": "2026-12-20T10:15:00+07:00"
         }
       },
       "BankTransferConfirmed": {
@@ -4577,8 +5010,10 @@
             "transferNote": "TEACHHUB PRO CO LAN",
             "status": "confirmed",
             "createdAt": "2026-12-20T10:15:00+07:00",
+            "bankTransactionRef": "FT26354123456",
             "confirmedBy": "iam-user-0042",
-            "confirmedAt": "2026-12-20T14:02:00+07:00"
+            "confirmedAt": "2026-12-20T14:02:00+07:00",
+            "updatedAt": "2026-12-20T14:02:00+07:00"
           },
           "subscription": {
             "planCode": "pro",
@@ -4638,6 +5073,7 @@
               "reviewedBy": null,
               "reviewerRole": null,
               "reviewedOn": null,
+              "publishedBy": null,
               "publishedAt": null,
               "updatedAt": "2026-12-20T09:00:00+07:00"
             }
@@ -4679,6 +5115,7 @@
                 },
                 "url": {
                   "type": "string",
+                  "maxLength": 2000,
                   "format": "uri"
                 }
               },
@@ -4702,6 +5139,7 @@
             ]
           },
           "reviewedBy": {
+            "description": "Nhãn văn bản thuần (plain text), không render HTML",
             "type": [
               "string",
               "null"
@@ -4725,6 +5163,13 @@
             ],
             "format": "date",
             "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+          },
+          "publishedBy": {
+            "description": "`x-admin-user-id` của người phát hành; server ghi, không nhận từ body",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "publishedAt": {
             "type": [
@@ -4752,6 +5197,7 @@
           "reviewedBy",
           "reviewerRole",
           "reviewedOn",
+          "publishedBy",
           "publishedAt",
           "updatedAt"
         ],
@@ -4773,6 +5219,7 @@
           "reviewedBy": null,
           "reviewerRole": null,
           "reviewedOn": null,
+          "publishedBy": null,
           "publishedAt": null,
           "updatedAt": "2026-12-20T09:00:00+07:00"
         }

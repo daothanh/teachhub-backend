@@ -33,11 +33,12 @@ export class ScheduleController {
     summary: 'Thay bộ quy tắc lặp của lớp và sinh buổi (US-2.1)',
     description:
       'Thay toàn bộ quy tắc, sinh buổi "dự kiến" trong cùng giao dịch: từ ngày bắt đầu tới ngày kết thúc của lớp, hoặc cuốn chiếu 8 tuần nếu lớp không có ngày kết thúc. ' +
-      'Chỉ buổi tương lai chưa điểm danh bị thay; buổi đã dạy giữ nguyên. Gửi lại cùng `Idempotency-Key` không sinh buổi trùng.',
+      'Chỉ buổi tương lai chưa điểm danh bị thay; buổi đã dạy giữ nguyên. Gửi lại cùng `Idempotency-Key` không sinh buổi trùng. ' +
+      'Trùng (thứ + giờ bắt đầu) hoặc giờ bắt đầu + thời lượng vượt 24:00 → 422 `VALIDATION_FAILED`; lớp đã lưu trữ → 409 `CONFLICT_STALE`.',
   })
   @ApiOkResponse({ standardSchema: scheduleRulesResultSchema })
   @ApiIdempotencyKey()
-  @ApiErrors('VALIDATION_FAILED', 'NOT_FOUND')
+  @ApiErrors('VALIDATION_FAILED', 'NOT_FOUND', 'CONFLICT_STALE')
   putRules(
     @Param('id', { schema: idParam }) _id: string,
     @Body({ schema: putScheduleRulesRequestSchema })
@@ -50,7 +51,8 @@ export class ScheduleController {
   @ApiOperation({
     summary: 'Buổi học trong khoảng ngày (US-2.1, US-2.3)',
     description:
-      'Sắp theo `startsAt`. Khoảng `from`…`to` tối đa 62 ngày; lớp đã lưu trữ không xuất hiện.',
+      'Sắp theo `startsAt`. `from` và `to` là ngày theo múi giờ của tenant, bao gồm cả hai đầu. ' +
+      'Ngoại lệ có chủ ý so với quy ước chung: khoảng tối đa 62 ngày và không phân trang. Lớp đã lưu trữ không xuất hiện.',
   })
   @ApiOkResponse({ standardSchema: sessionsResponseSchema })
   @ApiErrors('VALIDATION_FAILED')

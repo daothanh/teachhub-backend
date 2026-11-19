@@ -15,8 +15,10 @@ const bankTransferOrderExample = {
   transferNote: 'TEACHHUB PRO CO LAN',
   status: 'pending',
   createdAt: '2026-12-20T10:15:00+07:00',
+  bankTransactionRef: null,
   confirmedBy: null,
   confirmedAt: null,
+  updatedAt: '2026-12-20T10:15:00+07:00',
 };
 
 export const bankTransferOrderSchema = z
@@ -33,6 +35,12 @@ export const bankTransferOrderSchema = z
       .nullable()
       .meta({ description: '`x-admin-user-id` của người xác nhận' }),
     confirmedAt: dateTime.nullable(),
+    bankTransactionRef: z.string().nullable().meta({
+      description: 'Mã giao dịch ngân hàng admin đối chiếu khi xác nhận',
+    }),
+    updatedAt: dateTime.meta({
+      description: 'Dùng làm `expectedUpdatedAt` khi xác nhận (khóa lạc quan)',
+    }),
   })
   .meta({ id: 'BankTransferOrder', example: bankTransferOrderExample });
 
@@ -69,8 +77,10 @@ export const bankTransferConfirmedSchema = z
       order: {
         ...bankTransferOrderExample,
         status: 'confirmed',
+        bankTransactionRef: 'FT26354123456',
         confirmedBy: 'iam-user-0042',
         confirmedAt: '2026-12-20T14:02:00+07:00',
+        updatedAt: '2026-12-20T14:02:00+07:00',
       },
       subscription: {
         planCode: 'pro',
@@ -79,6 +89,34 @@ export const bankTransferConfirmedSchema = z
       },
     },
   });
+export const confirmBankTransferRequestSchema = z
+  .object({
+    amount: z.int().min(0).meta({
+      description: 'Số tiền (đồng) admin đã đối chiếu với sao kê',
+      example: 250000,
+    }),
+    bankTransactionRef: z
+      .string()
+      .trim()
+      .min(1)
+      .max(100)
+      .meta({ example: 'FT26354123456' }),
+    expectedUpdatedAt: dateTime.meta({
+      description:
+        '`updatedAt` của đơn lúc admin xem; lệch → 409 `CONFLICT_STALE`',
+    }),
+  })
+  .meta({
+    example: {
+      amount: 250000,
+      bankTransactionRef: 'FT26354123456',
+      expectedUpdatedAt: '2026-12-20T10:15:00+07:00',
+    },
+  });
+export type ConfirmBankTransferRequest = z.infer<
+  typeof confirmBankTransferRequestSchema
+>;
+
 export type BankTransferConfirmed = z.infer<typeof bankTransferConfirmedSchema>;
 
 // --- Thư viện quy định (US-9.6) ---
@@ -87,7 +125,10 @@ export const legalArticleStatusSchema = z.enum(['draft', 'published']);
 
 const legalSource = z.object({
   title: z.string().trim().min(1).max(200),
-  url: z.url(),
+  url: z
+    .url()
+    .max(2000)
+    .refine((u) => u.startsWith('https://'), 'Liên kết phải dùng https.'),
 });
 
 const legalArticleExample = {
@@ -107,6 +148,7 @@ const legalArticleExample = {
   reviewedBy: null,
   reviewerRole: null,
   reviewedOn: null,
+  publishedBy: null,
   publishedAt: null,
   updatedAt: '2026-12-20T09:00:00+07:00',
 };
@@ -121,9 +163,15 @@ export const legalArticleSchema = z
     sources: z.array(legalSource),
     version: z.int().min(1),
     status: legalArticleStatusSchema,
-    reviewedBy: z.string().nullable(),
+    reviewedBy: z.string().nullable().meta({
+      description: 'Nhãn văn bản thuần (plain text), không render HTML',
+    }),
     reviewerRole: z.enum(['lawyer', 'accountant']).nullable(),
     reviewedOn: z.iso.date().nullable(),
+    publishedBy: z.string().nullable().meta({
+      description:
+        '`x-admin-user-id` của người phát hành; server ghi, không nhận từ body',
+    }),
     publishedAt: dateTime.nullable(),
     updatedAt: dateTime,
   })
@@ -141,7 +189,13 @@ export const createLegalArticleRequestSchema = z
       .max(120),
     title: z.string().trim().min(1, 'Vui lòng nhập tiêu đề.').max(200),
     summary: z.string().trim().min(1, 'Vui lòng nhập tóm tắt.').max(1000),
-    bodyMarkdown: z.string().min(1, 'Vui lòng nhập nội dung.').max(50_000),
+    bodyMarkdown: z
+      .string()
+      .min(1, 'Vui lòng nhập nội dung.')
+      .max(50_000)
+      .meta({
+        description: 'Markdown; khi hiển thị không cho phép HTML thô',
+      }),
     sources: z
       .array(legalSource)
       .min(1, 'Cần ít nhất một văn bản gốc.')
@@ -167,7 +221,10 @@ export const publishLegalArticleRequestSchema = z
       .trim()
       .min(1, 'Vui lòng nhập tên người duyệt.')
       .max(120)
-      .meta({ example: 'LS. Trần Thị Mai' }),
+      .meta({
+        description: 'Nhãn văn bản thuần (plain text), không render HTML',
+        example: 'LS. Trần Thị Mai',
+      }),
     reviewerRole: z.enum(['lawyer', 'accountant']),
     reviewedOn: z.iso.date().meta({ example: '2026-12-19' }),
   })

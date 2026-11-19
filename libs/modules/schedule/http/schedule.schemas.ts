@@ -37,6 +37,28 @@ export const putScheduleRulesRequestSchema = z
       .max(14)
       .meta({ description: 'Toàn bộ bộ quy tắc mới; mảng rỗng = bỏ lịch lặp' }),
   })
+  .superRefine((v, ctx) => {
+    const seen = new Set<string>();
+    v.rules.forEach((r, i) => {
+      const key = `${r.weekday} ${r.startTime}`;
+      if (seen.has(key)) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Quy tắc trùng thứ và giờ bắt đầu.',
+          path: ['rules', i, 'startTime'],
+        });
+      }
+      seen.add(key);
+      const [h, m] = r.startTime.split(':').map(Number);
+      if ((h ?? 0) * 60 + (m ?? 0) + r.durationMin > 24 * 60) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Buổi học không được kéo qua 24:00.',
+          path: ['rules', i, 'durationMin'],
+        });
+      }
+    });
+  })
   .meta({
     example: {
       rules: [
@@ -104,7 +126,7 @@ export const sessionsQuerySchema = z
     if (days < 0) {
       ctx.addIssue({
         code: 'custom',
-        message: 'Ngày kết thúc phải sau ngày bắt đầu.',
+        message: 'Ngày kết thúc không được trước ngày bắt đầu.',
         path: ['to'],
       });
     } else if (days > 62) {

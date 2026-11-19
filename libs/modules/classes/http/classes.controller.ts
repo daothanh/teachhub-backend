@@ -2,10 +2,12 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
   Param,
   Patch,
   Post,
   Query,
+  Res,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -14,11 +16,19 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
+import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
-import { ApiErrors, ApiIdempotencyKey, AppException } from '@teachhub/core';
+import {
+  ApiErrors,
+  ApiIdempotencyKey,
+  ApiPlanLimitExceeded,
+  AppException,
+} from '@teachhub/core';
 import { RequiresRole } from '@teachhub/modules/identity';
 import {
   type Class,
+  type ClassCreated,
+  classCreatedSchema,
   type ClassListQuery,
   classListQuerySchema,
   type ClassPage,
@@ -72,14 +82,16 @@ export class ClassesController {
     summary: 'Tạo lớp (US-1.1 AC1, AC2)',
     description:
       'Bắt buộc tên, môn, khối, hình thức, ngày bắt đầu; địa điểm bắt buộc với lớp tại chỗ; ngày kết thúc không nhỏ hơn ngày bắt đầu. Sai → 422 `VALIDATION_FAILED` kèm `errors` theo trường. ' +
-      'Lịch lặp đặt riêng ở `PUT /classes/{id}/schedule-rules`.',
+      'Lịch lặp đặt riêng ở `PUT /classes/{id}/schedule-rules`. Phản hồi là lớp kèm `warnings` (mặc định rỗng). ' +
+      'Hết hạn mức gói → 402 `PLAN_LIMIT_EXCEEDED`.',
   })
-  @ApiCreatedResponse({ standardSchema: classSchema })
+  @ApiCreatedResponse({ standardSchema: classCreatedSchema })
   @ApiIdempotencyKey()
   @ApiErrors('VALIDATION_FAILED')
+  @ApiPlanLimitExceeded()
   create(
     @Body({ schema: createClassRequestSchema }) _body: CreateClassRequest,
-  ): Class {
+  ): ClassCreated {
     throw new AppException('NOT_IMPLEMENTED');
   }
 
@@ -96,6 +108,7 @@ export class ClassesController {
   }
 
   @Post(':id/archive')
+  @HttpCode(200)
   @ApiOperation({
     summary: 'Lưu trữ lớp (US-1.1 AC3)',
     description: 'Lớp đã lưu trữ thì gọi lại vẫn 200, trả lớp hiện tại.',
@@ -111,7 +124,7 @@ export class ClassesController {
   @ApiOperation({
     summary: 'Học viên đang ghi danh của lớp (bản tối thiểu)',
     description:
-      'Không phân trang. Nhãn "Giá riêng" và trạng thái phụ huynh thêm ở sprint sau.',
+      'Chỉ ghi danh chưa rời lớp (học viên `active` hoặc `paused`). Không phân trang. Nhãn "Giá riêng" và trạng thái phụ huynh thêm ở sprint sau.',
   })
   @ApiOkResponse({ standardSchema: rosterSchema })
   @ApiErrors('NOT_FOUND')
@@ -123,7 +136,8 @@ export class ClassesController {
   @ApiOperation({
     summary: 'Ghi danh học viên có sẵn vào lớp (US-1.4 AC3)',
     description:
-      'Dùng chung hồ sơ `students`, không tạo bản trùng. Học viên đã ghi danh mở ở lớp này → 200 với ghi danh sẵn có.',
+      'Dùng chung hồ sơ `students`, không tạo bản trùng. Học viên đã ghi danh mở ở lớp này → 200 với ghi danh sẵn có. ' +
+      'Lớp đã lưu trữ hoặc học viên đã nghỉ (`left`) → 409 `CONFLICT_STALE`. Hết hạn mức gói → 402.',
   })
   @ApiCreatedResponse({ standardSchema: enrollmentSchema })
   @ApiOkResponse({
@@ -131,8 +145,11 @@ export class ClassesController {
     description: 'Đã ghi danh trước đó',
   })
   @ApiIdempotencyKey()
-  @ApiErrors('VALIDATION_FAILED', 'NOT_FOUND')
+  @ApiErrors('VALIDATION_FAILED', 'NOT_FOUND', 'CONFLICT_STALE')
+  @ApiPlanLimitExceeded()
   enroll(
+    // Trạng thái 200/201 do thân hàm đặt qua `reply.status` (như WorkspacesController).
+    @Res({ passthrough: true }) _reply: FastifyReply,
     @Param('id', { schema: idParam }) _id: string,
     @Body({ schema: createEnrollmentRequestSchema })
     _body: CreateEnrollmentRequest,

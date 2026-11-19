@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
   Param,
   Post,
   Query,
@@ -19,6 +20,8 @@ import { z } from 'zod';
 import { ApiErrors, ApiIdempotencyKey, AppException } from '@teachhub/core';
 import {
   type BankTransferConfirmed,
+  type ConfirmBankTransferRequest,
+  confirmBankTransferRequestSchema,
   bankTransferConfirmedSchema,
   type BankTransferListQuery,
   bankTransferListQuerySchema,
@@ -73,18 +76,21 @@ export class AdminController {
   }
 
   @Post('bank-transfer-orders/:id/confirm')
+  @HttpCode(200)
   @AdminAuth('/teachhub/admin/bank-transfer')
   @ApiOperation({
     summary: 'Xác nhận đã nhận chuyển khoản, kích hoạt Pro (US-0.8 AC3)',
     description:
       'Quyền IAM: `/teachhub/admin/bank-transfer`. Một giao dịch: đơn → `confirmed` (ghi `x-admin-user-id`), `subscriptions` → Pro, `audit_logs`, rồi push cho giáo viên. ' +
-      'Đơn không còn `pending` → 409 `CONFLICT_STALE`.',
+      'Body bắt buộc `amount`, `bankTransactionRef`, `expectedUpdatedAt`; đơn không còn `pending` hoặc `expectedUpdatedAt` lệch `updatedAt` → 409 `CONFLICT_STALE`.',
   })
   @ApiOkResponse({ standardSchema: bankTransferConfirmedSchema })
   @ApiIdempotencyKey()
-  @ApiErrors('NOT_FOUND', 'CONFLICT_STALE')
+  @ApiErrors('VALIDATION_FAILED', 'NOT_FOUND', 'CONFLICT_STALE')
   confirmBankTransferOrder(
     @Param('id', { schema: idParam }) _id: string,
+    @Body({ schema: confirmBankTransferRequestSchema })
+    _body: ConfirmBankTransferRequest,
   ): BankTransferConfirmed {
     throw new AppException('NOT_IMPLEMENTED');
   }
@@ -124,11 +130,12 @@ export class AdminController {
   }
 
   @Post('legal-articles/:id/publish')
+  @HttpCode(200)
   @AdminAuth('/teachhub/admin/legal-articles')
   @ApiOperation({
     summary: 'Ghi người duyệt và phát hành bài (US-9.6 AC2, AC3)',
     description:
-      'Quyền IAM: `/teachhub/admin/legal-articles`. Bắt buộc ghi tên luật sư/kế toán duyệt trước khi hiển thị; phát hành xong giáo viên nhận thông báo trong app. Bài đã phát hành → 409 `CONFLICT_STALE`.',
+      'Quyền IAM: `/teachhub/admin/legal-articles`. Bắt buộc ghi tên luật sư/kế toán duyệt trước khi hiển thị; phát hành xong giáo viên nhận thông báo trong app. `publishedBy` lấy từ `x-admin-user-id`, không nhận từ body; `reviewedBy` là nhãn văn bản thuần. Bài đã phát hành → 409 `CONFLICT_STALE`.',
   })
   @ApiOkResponse({ standardSchema: legalArticleSchema })
   @ApiIdempotencyKey()

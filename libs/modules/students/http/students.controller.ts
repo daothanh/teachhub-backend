@@ -15,13 +15,20 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { z } from 'zod';
-import { ApiErrors, ApiIdempotencyKey, AppException } from '@teachhub/core';
+import {
+  ApiErrors,
+  ApiErrorWithDetails,
+  ApiIdempotencyKey,
+  ApiPlanLimitExceeded,
+  AppException,
+} from '@teachhub/core';
 import { RequiresRole } from '@teachhub/modules/identity';
 import {
   type CreateStudentRequest,
   createStudentRequestSchema,
   type Student,
   type StudentListQuery,
+  studentDuplicateDetailsSchema,
   studentListQuerySchema,
   type StudentPage,
   studentPageSchema,
@@ -43,7 +50,7 @@ export class StudentsController {
   @ApiOperation({
     summary: 'Danh sách và tìm học viên không dấu (US-1.4)',
     description:
-      'Tìm theo `q` (không phân biệt dấu, dùng `pg_trgm` + `unaccent`); bỏ `q` thì liệt kê tất cả.',
+      'Tìm theo `q` (từ 2 ký tự, không phân biệt dấu, dùng `pg_trgm` + `unaccent`); bỏ `q` thì liệt kê tất cả. Lọc `status` (mặc định `active`) và `classId`.',
   })
   @ApiOkResponse({ standardSchema: studentPageSchema })
   @ApiErrors('VALIDATION_FAILED')
@@ -54,16 +61,23 @@ export class StudentsController {
   }
 
   @Post()
+  // Đặt trước các decorator khác: schema 409 phải thắng ErrorBody chung của Idempotency-Key.
+  @ApiErrorWithDetails(
+    'STUDENT_POSSIBLE_DUPLICATE',
+    'StudentDuplicateErrorBody',
+    studentDuplicateDetailsSchema,
+  )
   @ApiOperation({
     summary: 'Thêm học viên (US-1.4 AC1, AC4)',
     description:
       'Chỉ họ tên bắt buộc. Trùng họ tên và ngày sinh với hồ sơ có sẵn → 409 `STUDENT_POSSIBLE_DUPLICATE` kèm `details.candidates` ' +
-      '(`[{ id, fullName, dob, school }]`); client hỏi "Có phải cùng một em?", chọn "không" thì gửi lại với `confirmNew: true` (khóa idempotency mới). ' +
-      'Số điện thoại phụ huynh tùy chọn, lưu vào `guardians`.',
+      '(`StudentCandidate`: `id`, `fullName`, `dob`, `school`); client hỏi "Có phải cùng một em?", chọn "không" thì gửi lại với `confirmNew: true` (khóa idempotency mới). ' +
+      'Chỉ tìm trong tenant hiện tại, tối đa 5 ứng viên. Số điện thoại phụ huynh tùy chọn, lưu vào `guardians`. Hết hạn mức gói → 402 `PLAN_LIMIT_EXCEEDED`.',
   })
   @ApiCreatedResponse({ standardSchema: studentSchema })
   @ApiIdempotencyKey()
-  @ApiErrors('VALIDATION_FAILED', 'STUDENT_POSSIBLE_DUPLICATE')
+  @ApiErrors('VALIDATION_FAILED')
+  @ApiPlanLimitExceeded()
   create(
     @Body({ schema: createStudentRequestSchema }) _body: CreateStudentRequest,
   ): Student {
@@ -71,7 +85,11 @@ export class StudentsController {
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Sửa học viên (US-1.4)' })
+  @ApiOperation({
+    summary: 'Sửa học viên (US-1.4)',
+    description:
+      'Có `guardians` thì thay toàn bộ danh sách: phụ huynh có `id` được cập nhật, không có `id` được tạo mới, phụ huynh không còn trong danh sách bị gỡ liên kết.',
+  })
   @ApiOkResponse({ standardSchema: studentSchema })
   @ApiIdempotencyKey()
   @ApiErrors('VALIDATION_FAILED', 'NOT_FOUND')

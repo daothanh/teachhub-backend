@@ -7,10 +7,26 @@ const phone = z
   .meta({ example: '0912345678' });
 
 export const guardianInputSchema = z.object({
+  id: z.uuid().optional().meta({
+    description: 'Có `id` = cập nhật phụ huynh đó; không có = tạo mới',
+  }),
   fullName: z.string().trim().min(1, 'Vui lòng nhập tên phụ huynh.').max(120),
   relation: z.enum(['father', 'mother', 'guardian']).default('guardian'),
   phone: phone.nullish(),
   email: z.email().max(254).nullish(),
+});
+
+export const studentCandidateSchema = z
+  .object({
+    id: z.uuid(),
+    fullName: z.string(),
+    dob: z.iso.date().nullable(),
+    school: z.string().nullable(),
+  })
+  .meta({ id: 'StudentCandidate' });
+
+export const studentDuplicateDetailsSchema = z.object({
+  candidates: z.array(studentCandidateSchema).max(5),
 });
 
 export const guardianSchema = z
@@ -64,7 +80,10 @@ export const createStudentRequestSchema = studentFields
   });
 export type CreateStudentRequest = z.infer<typeof createStudentRequestSchema>;
 
-/** Chỉ gửi trường đổi; có `guardians` thì thay toàn bộ danh sách phụ huynh. */
+/**
+ * Chỉ gửi trường đổi. Có `guardians` thì thay toàn bộ danh sách: phụ huynh có `id` được cập nhật,
+ * không có `id` được tạo mới, phụ huynh không còn trong danh sách bị gỡ liên kết.
+ */
 export const updateStudentRequestSchema = studentFields
   .partial()
   .meta({ example: { schoolClass: '9A4' } });
@@ -104,7 +123,12 @@ export const studentSchema = z
 export type Student = z.infer<typeof studentSchema>;
 
 export const studentListQuerySchema = pageQuerySchema.extend({
-  q: z.string().trim().max(100).optional().meta({
+  status: z.enum(['active', 'paused', 'left']).default('active'),
+  classId: z
+    .uuid()
+    .optional()
+    .meta({ description: 'Chỉ học viên đang ghi danh ở lớp này' }),
+  q: z.string().trim().min(2).max(100).optional().meta({
     description: 'Tìm theo họ tên, không phân biệt dấu',
     example: 'nguyen minh',
   }),

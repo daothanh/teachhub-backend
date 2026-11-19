@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 /** Query phân trang offset (Mục 5.5, G12): `page` từ 1, `pageSize` mặc định 20, tối đa 100. */
 export const pageQuerySchema = z.object({
-  page: z.coerce.number().int().min(1).default(1),
+  page: z.coerce.number().int().min(1).max(10_000).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 });
 export type PageQuery = z.infer<typeof pageQuerySchema>;

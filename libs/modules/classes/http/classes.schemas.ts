@@ -37,7 +37,7 @@ const endAfterStart = (v: ClassDates, ctx: z.RefinementCtx) => {
   if (v.startDate && v.endDate && v.endDate < v.startDate) {
     ctx.addIssue({
       code: 'custom',
-      message: 'Ngày kết thúc phải sau ngày bắt đầu.',
+      message: 'Ngày kết thúc không được trước ngày bắt đầu.',
       path: ['endDate'],
     });
   }
@@ -127,6 +127,20 @@ export const classSchema = z
   .meta({ id: 'Class', example: classExample });
 export type Class = z.infer<typeof classSchema>;
 
+/** Phản hồi POST /classes: lớp trần + cảnh báo không chặn (mặc định rỗng; TT29, trùng giờ… thêm sau). */
+export const classCreatedSchema = classSchema
+  .extend({
+    warnings: z
+      .array(z.object({ code: z.string(), message: z.string() }))
+      .default([])
+      .meta({ description: 'Cảnh báo không chặn; mặc định []' }),
+  })
+  .meta({
+    id: 'ClassCreated',
+    example: { ...classExample, warnings: [] },
+  });
+export type ClassCreated = z.infer<typeof classCreatedSchema>;
+
 export const classListQuerySchema = pageQuerySchema.extend({
   status: z.enum(['active', 'archived']).default('active'),
 });
@@ -150,7 +164,7 @@ export const rosterSchema = z
         enrollmentId: z.uuid(),
         studentId: z.uuid(),
         fullName: z.string(),
-        status: z.enum(['active', 'paused', 'left']),
+        studentStatus: z.enum(['active', 'paused']),
         joinedOn: z.iso.date(),
       }),
     ),
@@ -163,14 +177,14 @@ export const rosterSchema = z
           enrollmentId: '019b2c50-0001-7b30-8c01-000000000001',
           studentId: '019b2c4f-0001-7b30-8c01-000000000001',
           fullName: 'Nguyễn Minh Anh',
-          status: 'active',
+          studentStatus: 'active',
           joinedOn: '2026-12-14',
         },
         {
           enrollmentId: '019b2c50-0001-7b30-8c01-000000000002',
           studentId: '019b2c4f-0001-7b30-8c01-000000000002',
           fullName: 'Trần Gia Bảo',
-          status: 'active',
+          studentStatus: 'active',
           joinedOn: '2026-12-14',
         },
       ],
