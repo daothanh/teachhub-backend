@@ -169,6 +169,13 @@
       "when": 1795079569930,
       "tag": "0023_schedule_changes_delete_account",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1795084442699,
+      "tag": "0024_billing_schema",
+      "breakpoints": true
     }
   ]
 }
