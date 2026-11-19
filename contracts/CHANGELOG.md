@@ -20,7 +20,7 @@ Thay đổi trên endpoint cũ (chỉ thêm trường, không breaking):
 
 - `Guardian` thêm `inviteStatus` và `latestInvite`; mỗi phần tử `GET /classes/{id}/roster` thêm `inviteStatus` và `guardians[]` (S4-BE-02).
 - `Session` thêm `cancelReason` và `makeupOf`.
-- Thông báo thêm loại `schedule_changed` (client bỏ qua `type` lạ như đã quy ước).
+- Thông báo loại `schedule_changed`: payload mô tả trong description `GET /notifications` và có sẵn `scheduleChangedPayloadSchema` trong mã, nhưng CHƯA nằm trong `oneOf` của `Notification`, vì `oasdiff` báo `response-property-one-of-added` (ERR) so với Sprint 3. Cần Owner/TL chọn: chấp nhận ngoại lệ (Sprint 3 chưa có client phát hành) rồi thêm một dòng vào union, hoặc giữ như hiện tại.
 - `POST /auth/otp/send` thêm `purpose` (`login` mặc định, `delete_account`). Thân hàm hiện có chưa đọc `purpose`: S4-BE-09 phải tách mã theo mục đích trước khi bật `DELETE /me`.
 - `PATCH /students/{id}` không đổi schema, chỉ ghi rõ giới hạn 2 phụ huynh → 422.
 
@@ -65,7 +65,7 @@ Lời mời:
 Dời, hủy, buổi bù (US-2.2):
 
 - Hủy buổi đã có điểm danh → 409 `SESSION_HAS_ATTENDANCE`; app hướng dẫn sửa điểm danh trước. Hủy buổi đã hủy → 200 idempotent, không gửi thông báo lần hai. Dời chỉ cho buổi `planned`. Buổi bù chỉ tạo từ buổi `cancelled`, mỗi buổi gốc một buổi bù (phỏng đoán từ Plan, cần TL chốt).
-- Thông báo `schedule_changed` có `change` (`rescheduled`/`cancelled`/`makeup`), giờ mới/cũ, lý do; deepLink `teachhub://sessions/{sessionId}`.
+- Thông báo `schedule_changed` (xem mục trên) có `change` (`rescheduled`/`cancelled`/`makeup`), giờ mới/cũ, lý do; deepLink `teachhub://sessions/{sessionId}`.
 
 Xóa tài khoản (US-0.9):
 

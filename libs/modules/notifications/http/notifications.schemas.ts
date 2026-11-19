@@ -61,7 +61,12 @@ const absencePayloadSchema = z
       'Chỉ tên con, lớp, giờ buổi và các id để mở đúng màn; không có trạng thái khác hay ghi chú',
   });
 
-const scheduleChangedPayloadSchema = z
+/**
+ * Payload loại `schedule_changed` (US-2.2). CHƯA đưa vào `notificationSchema`: thêm thành viên vào `oneOf` của
+ * phản hồi bị `oasdiff` coi là breaking (`response-property-one-of-added`). Chờ TL/Owner chấp nhận ngoại lệ rồi thêm
+ * `notificationBase.extend({ type: z.literal('schedule_changed'), payload: scheduleChangedPayloadSchema })` vào union.
+ */
+export const scheduleChangedPayloadSchema = z
   .object({
     classId: z.uuid(),
     className: z.string(),
@@ -97,10 +102,6 @@ export const notificationSchema = z
     notificationBase.extend({
       type: z.literal('student_absent_correction'),
       payload: absencePayloadSchema,
-    }),
-    notificationBase.extend({
-      type: z.literal('schedule_changed'),
-      payload: scheduleChangedPayloadSchema,
     }),
   ])
   .meta({
