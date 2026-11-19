@@ -141,6 +141,9 @@ export const devices = pgTable(
   (t) => [
     index('devices_user_id_idx').on(t.userId),
     index('devices_last_seen_idx').on(t.lastSeenAt),
-    check('devices_platform_check', sql`${t.platform} in ('android', 'ios', 'web')`),
+    check(
+      'devices_platform_check',
+      sql`${t.platform} in ('android', 'ios', 'web')`,
+    ),
   ],
 );
