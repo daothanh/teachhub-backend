@@ -6,8 +6,9 @@ import { DbModule } from '@teachhub/db';
 import { JobsModule, RedisModule } from '@teachhub/infra';
 import { ScheduleRulesModule } from '@teachhub/modules/schedule';
 import { CRON_QUEUE, CronProcessor } from './cron.processor.js';
+import { OutboxModule } from './outbox/outbox.module.js';
 
-// Processor đầu tiên: `cron` (S2-BE-09). Outbox relay, notify, billing… thêm từ Sprint 3.
+// Processor: `cron` (S2-BE-09), outbox relay (S3-BE-04). Notify, billing… thêm theo từng module.
 @Module({
   imports: [
     CoreModule,
@@ -25,6 +26,7 @@ import { CRON_QUEUE, CronProcessor } from './cron.processor.js';
         },
       }),
     }),
+    OutboxModule,
   ],
   providers: [CronProcessor],
 })

@@ -120,6 +120,20 @@
       "when": 1795075666521,
       "tag": "0016_drop_students_trgm_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1795076191545,
+      "tag": "0017_outbox_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1795076195160,
+      "tag": "0018_outbox_rls",
+      "breakpoints": true
     }
   ]
 }
