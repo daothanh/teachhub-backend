@@ -31,7 +31,7 @@ export class OnboardingService {
     return toView(rows[0].steps ?? undefined);
   }
 
-  /** Ghi đè (idempotent) trạng thái một bước, trong giao dịch `t` do caller mở. */
+  /** Ghi đè (idempotent) trạng thái một bước, trong giao dịch `t` do caller mở. Không phát sự kiện. */
   async setStep(
     t: Tx,
     tenantId: string,
@@ -48,7 +48,7 @@ export class OnboardingService {
       sql`select settings #> '{onboarding,steps}' as steps from tenants where id = ${tenantId} for update`,
     );
     if (!before.rows[0]) throw new AppException('FORBIDDEN');
-    const previous = before.rows[0].steps?.[step];
+    const wasPending = before.rows[0].steps?.[step] === undefined;
     const after = await t.execute<Row>(
       sql`update tenants set settings = settings || jsonb_build_object('onboarding',
             coalesce(settings -> 'onboarding', '{}'::jsonb) || jsonb_build_object('steps',
@@ -56,13 +56,17 @@ export class OnboardingService {
           where id = ${tenantId}
           returning settings #> '{onboarding,steps}' as steps`,
     );
-    if (previous !== status) this.emit(tenantId, step, status);
-    return toView(after.rows[0]!.steps ?? undefined);
+    if (!after.rows[0]) throw new AppException('FORBIDDEN');
+    return {
+      view: toView(after.rows[0].steps ?? undefined),
+      /** Chỉ lần đầu bước rời `pending` mới là sự kiện; ghi đè lại không phát. */
+      firstTime: wasPending,
+    };
   }
 
-  // shortcut: chưa có kênh analytics/outbox sự kiện; ghi log có cấu trúc (không PII), phát trong giao dịch nên
-  // có thể lệch nếu commit lỗi. Nâng lên outbox khi S7 làm analytics.
-  private emit(
+  // shortcut: chưa có kênh analytics/outbox sự kiện; ghi log có cấu trúc (không PII). Caller gọi SAU khi giao dịch
+  // đã commit. Nâng lên outbox khi S7 làm analytics.
+  publish(
     tenantId: string,
     step: OnboardingStepName,
     status: Exclude<OnboardingStatus, 'pending'>,

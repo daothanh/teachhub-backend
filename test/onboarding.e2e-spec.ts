@@ -193,6 +193,33 @@ describe('Onboarding', () => {
     });
   });
 
+  it('hai PATCH song song hai bước khác nhau → cả hai được lưu', async () => {
+    const o = await owner();
+    await Promise.all([
+      patch(o, 'add_students', 'done'),
+      patch(o, 'set_schedule', 'skipped'),
+    ]);
+    expect(statuses(await get(o))).toMatchObject({
+      add_students: 'done',
+      set_schedule: 'skipped',
+    });
+  });
+
+  it('sự kiện chỉ phát lần đầu bước rời pending; ghi đè và phát lại không phát', async () => {
+    const o = await owner();
+    const { OnboardingService } =
+      await import('../libs/modules/tenancy/application/onboarding.service.js');
+    const publish = vi.spyOn(app.get(OnboardingService), 'publish');
+    const key = randomUUID();
+    await patch(o, 'add_students', 'skipped', key);
+    await patch(o, 'add_students', 'skipped', key);
+    await patch(o, 'add_students', 'done');
+    await patch(o, 'create_class', 'done');
+    const calls = publish.mock.calls.map((c) => `${c[1]}:${c[2]}`);
+    publish.mockRestore();
+    expect(calls).toEqual(['add_students:skipped', 'create_class:done']);
+  });
+
   it('chéo tenant: trạng thái của A không lộ sang B và PATCH của B không đổi A', async () => {
     const a = await owner();
     const b = await owner();

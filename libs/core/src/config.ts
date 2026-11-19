@@ -1,5 +1,11 @@
 import { z } from 'zod';
 
+const csv = (v: string) =>
+  v
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
 export const envSchema = z
   .object({
     NODE_ENV: z
@@ -36,21 +42,13 @@ export const envSchema = z
     SMTP_URL: z.url().default('smtp://127.0.0.1:1025'),
     EMAIL_FROM: z.string().min(1).default('TeachHub <no-reply@teachhub.vn>'),
     /** Client ID OAuth Google (iOS, Android, web), ngăn cách bởi dấu phẩy — `aud` hợp lệ của id_token. Trống = từ chối mọi id_token. */
-    GOOGLE_CLIENT_IDS: z
-      .string()
-      .default('')
-      .transform((v) =>
-        v
-          .split(',')
-          .map((s) => s.trim())
-          .filter(Boolean),
-      ),
+    GOOGLE_CLIENT_IDS: z.string().default('').transform(csv),
     /** Khóa công khai của Google; test trỏ về JWKS giả. */
     GOOGLE_JWKS_URL: z
       .url()
       .default('https://www.googleapis.com/oauth2/v3/certs'),
-    /** Bundle ID iOS của app — `aud` hợp lệ của identityToken Apple. Trống = từ chối mọi token Apple. */
-    APPLE_BUNDLE_ID: z.string().default(''),
+    /** Bundle ID (ngăn cách bởi dấu phẩy) — `aud` hợp lệ của identityToken Apple. Trống = từ chối mọi token Apple. */
+    APPLE_BUNDLE_ID: z.string().default('').transform(csv),
     /** Khóa công khai của Apple; test trỏ về JWKS giả. */
     APPLE_JWKS_URL: z.url().default('https://appleid.apple.com/auth/keys'),
     /** Số proxy tin cậy phía trước api (đọc lúc dựng Fastify trong app.ts). */
@@ -63,6 +61,18 @@ export const envSchema = z
     /** Khóa cũ khi xoay vòng: PEM SPKI + kid, giữ tới khi access token cũ hết hạn (15 phút). */
     JWT_PREVIOUS_PUBLIC_KEY: z.string().optional(),
     JWT_PREVIOUS_KID: z.string().optional(),
+  })
+  .superRefine((e, ctx) => {
+    if (!['staging', 'production'].includes(e.NODE_ENV)) return;
+    for (const k of ['GOOGLE_CLIENT_IDS', 'APPLE_BUNDLE_ID'] as const) {
+      if (e[k].length === 0) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [k],
+          message: 'Bắt buộc ở staging/production',
+        });
+      }
+    }
   })
   .refine((e) => e.JWT_PRIVATE_KEY || ['local', 'test'].includes(e.NODE_ENV), {
     path: ['JWT_PRIVATE_KEY'],

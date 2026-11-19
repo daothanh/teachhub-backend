@@ -54,7 +54,7 @@ export class OnboardingController {
   @ApiOkResponse({ standardSchema: onboardingSchema })
   @ApiIdempotencyKey()
   @ApiErrors('VALIDATION_FAILED')
-  patchStep(
+  async patchStep(
     @Ctx() ctx: RequestContext,
     @Req() req: FastifyRequest,
     @Res({ passthrough: true }) reply: FastifyReply,
@@ -63,10 +63,15 @@ export class OnboardingController {
     body: PatchOnboardingStepRequest,
   ): Promise<Onboarding> {
     const tenantId = tenantOf(ctx);
-    return this.idem.run(req, reply, ctx, async (t) => ({
-      status: 200,
-      body: await this.onboarding.setStep(t, tenantId, step, body.status),
-    }));
+    let firstTime = false;
+    const view = await this.idem.run(req, reply, ctx, async (t) => {
+      const r = await this.onboarding.setStep(t, tenantId, step, body.status);
+      firstTime = r.firstTime;
+      return { status: 200, body: r.view };
+    });
+    // Sau commit; phát lại từ Idempotency-Key không chạy hàm trên nên không phát lần hai.
+    if (firstTime) this.onboarding.publish(tenantId, step, body.status);
+    return view;
   }
 }
 

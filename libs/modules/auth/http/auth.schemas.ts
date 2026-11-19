@@ -34,7 +34,7 @@ export const appleSsoRequestSchema = z.object({
     .meta({ description: 'identityToken do Sign in with Apple trả về' }),
   nonce: z.string().min(1).max(256).meta({
     description:
-      'Nonce gốc client đã băm (SHA-256) khi xin token; server băm lại và so với claim `nonce`',
+      'Nonce thô; client gửi SHA-256 hex của nó lên Apple. Server băm lại nonce thô và so với claim `nonce`',
   }),
   fullName: z.string().trim().max(120).optional().meta({
     description:

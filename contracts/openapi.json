@@ -341,7 +341,7 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 256,
-                    "description": "Nonce gốc client đã băm (SHA-256) khi xin token; server băm lại và so với claim `nonce`"
+                    "description": "Nonce thô; client gửi SHA-256 hex của nó lên Apple. Server băm lại nonce thô và so với claim `nonce`"
                   },
                   "fullName": {
                     "description": "Apple chỉ gửi tên cho client ở lần đăng nhập đầu; client chuyển tiếp để lưu tên hiển thị",

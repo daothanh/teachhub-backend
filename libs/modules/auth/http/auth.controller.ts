@@ -144,14 +144,20 @@ export class AuthController {
     const email = a.email ?? '';
     const linkByEmail =
       a.email !== null && (a.emailMergeable || a.isPrivateRelay);
-    return this.signIn(
-      'apple',
-      a.subject,
-      email,
-      body.fullName || null,
-      linkByEmail,
-      true,
-    );
+    try {
+      return await this.signIn(
+        'apple',
+        a.subject,
+        email,
+        body.fullName || null,
+        linkByEmail,
+        true,
+      );
+    } catch (e) {
+      // Lỗi sau xác minh (yêu cầu OTP, DB, mở phiên): trả khóa để client gửi lại cùng token.
+      await this.apple.release(body.id_token);
+      throw e;
+    }
   }
 
   @Public()

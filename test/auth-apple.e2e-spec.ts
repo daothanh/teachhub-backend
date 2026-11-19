@@ -224,6 +224,49 @@ describe('SSO Apple: /v1/auth/sso/apple', () => {
     expect((await sso(token, 'n10')).statusCode).toBe(200);
   });
 
+  it('hai request song song cùng token → đúng một 200', async () => {
+    const token = await identityToken('n11', { sub: 'a-sub-par' });
+    const codes = (await Promise.all([sso(token, 'n11'), sso(token, 'n11')]))
+      .map((r) => r.statusCode)
+      .sort((a, b) => a - b);
+    expect(codes).toEqual([200, 401]);
+  });
+
+  it('lỗi sau xác minh (yêu cầu OTP) → nhả khóa: gửi lại cùng token nhận lại đúng lỗi đó, không phải TOKEN_REPLAYED', async () => {
+    const email = 'chua.xm2@example.com';
+    await signInOtp(email);
+    const token = await identityToken('n12', {
+      sub: 'a-sub-rel',
+      email,
+      email_verified: 'false',
+    });
+    for (let i = 0; i < 2; i++) {
+      const res = await sso(token, 'n12');
+      expect(res.json().details).toEqual({ reason: 'EMAIL_REQUIRES_OTP' });
+    }
+  });
+
+  it('Redis lỗi khi kiểm chống phát lại → 503', async () => {
+    const { REDIS } = await import('@teachhub/infra');
+    const spy = vi
+      .spyOn(app.get(REDIS), 'set')
+      .mockRejectedValueOnce(new Error('redis down'));
+    const res = await sso(await identityToken('n13'), 'n13');
+    spy.mockRestore();
+    expect(res.statusCode).toBe(503);
+    expect(res.json().code).toBe('SERVICE_UNAVAILABLE');
+  });
+
+  it('user đã có đúng địa chỉ relay → được gắn lại (shortcut đã ghi)', async () => {
+    const relay = 'xyz789@privaterelay.appleid.com';
+    const existing = await signInOtp(relay);
+    const res = await sso(
+      await identityToken('n14', { sub: 'a-sub-relay2', email: relay }),
+      'n14',
+    );
+    expect(res.json().user.id).toBe(existing);
+  });
+
   const unsigned = (claims: object) =>
     [
       Buffer.from('{"alg":"none"}').toString('base64url'),
