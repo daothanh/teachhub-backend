@@ -86,12 +86,12 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
     test: 'tenant B không xem/sửa/lưu trữ lớp của A → 404, lớp A không đổi; danh sách B trống',
   },
   'GET /v1/classes/{id}/roster': {
-    notApplicable:
-      'hợp đồng S1-CT-02, thân hàm trả 501 tới S2-BE-06b; test chéo tenant làm cùng task đó',
+    file: 'enrollments.e2e-spec.ts',
+    test: 'studentId của tenant khác trả cùng mã và nội dung với studentId không tồn tại; không ghi danh chéo tenant',
   },
   'POST /v1/classes/{id}/enrollments': {
-    notApplicable:
-      'hợp đồng S1-CT-02, thân hàm trả 501 tới S2-BE-06; test chéo tenant làm cùng task đó',
+    file: 'enrollments.e2e-spec.ts',
+    test: 'studentId của tenant khác trả cùng mã và nội dung với studentId không tồn tại; không ghi danh chéo tenant',
   },
   'GET /v1/students': {
     file: 'students.e2e-spec.ts',

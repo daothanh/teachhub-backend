@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { and, count, desc, eq, sql } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 import {
   AppException,
   type PageQuery,
@@ -8,7 +8,13 @@ import {
   toLimitOffset,
   uuidv7,
 } from '@teachhub/core';
-import { branches, classes, type Tx } from '@teachhub/db';
+import {
+  branches,
+  classes,
+  enrollments,
+  students,
+  type Tx,
+} from '@teachhub/db';
 import { classDraftErrors } from '../domain/class-rules.js';
 import type {
   Class,
@@ -145,8 +151,26 @@ export class ClassesService {
     return this.get(tx, tenantId, id);
   }
 
-  /** Ghép `scheduleRules` và `enrolledCount`: bảng của chúng có ở S2-BE-04/07, nối vào ở S2-BE-06/08. */
-  private async hydrate(_tx: Tx, rows: ClassRow[]): Promise<Class[]> {
+  /** Ghép `enrolledCount` (ghi danh mở, học viên chưa nghỉ) và `scheduleRules` (bảng có ở S2-BE-07, nối ở S2-BE-08). */
+  private async hydrate(tx: Tx, rows: ClassRow[]): Promise<Class[]> {
+    const counts = rows.length
+      ? await tx
+          .select({ classId: enrollments.classId, n: count() })
+          .from(enrollments)
+          .innerJoin(students, eq(students.id, enrollments.studentId))
+          .where(
+            and(
+              inArray(
+                enrollments.classId,
+                rows.map((r) => r.id),
+              ),
+              isNull(enrollments.leftOn),
+              ne(students.status, 'left'),
+            ),
+          )
+          .groupBy(enrollments.classId)
+      : [];
+    const enrolled = new Map(counts.map((c) => [c.classId, c.n]));
     return rows.map((r) => ({
       id: r.id,
       name: r.name,
@@ -158,7 +182,7 @@ export class ClassesService {
       startDate: r.startDate,
       endDate: r.endDate,
       status: r.status as Class['status'],
-      enrolledCount: 0,
+      enrolledCount: enrolled.get(r.id) ?? 0,
       scheduleRules: [],
       createdAt: r.createdAt.toISOString(),
     }));

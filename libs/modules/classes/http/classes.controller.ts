@@ -23,7 +23,6 @@ import {
   ApiErrors,
   ApiIdempotencyKey,
   ApiPlanLimitExceeded,
-  AppException,
   Ctx,
   type RequestContext,
 } from '@teachhub/core';
@@ -31,6 +30,7 @@ import { TxService } from '@teachhub/db';
 import { Idempotency } from '@teachhub/infra';
 import { RequiresRole } from '@teachhub/modules/identity';
 import { ClassesService } from '../application/classes.service.js';
+import { EnrollmentsService } from '../application/enrollments.service.js';
 import {
   type Class,
   type ClassCreated,
@@ -65,6 +65,7 @@ export class ClassesController {
     private readonly tx: TxService,
     private readonly idem: Idempotency,
     private readonly classes: ClassesService,
+    private readonly enrollments: EnrollmentsService,
   ) {}
 
   @Get()
@@ -168,8 +169,13 @@ export class ClassesController {
   })
   @ApiOkResponse({ standardSchema: rosterSchema })
   @ApiErrors('NOT_FOUND')
-  roster(@Param('id', { schema: idParam }) _id: string): Roster {
-    throw new AppException('NOT_IMPLEMENTED');
+  roster(
+    @Ctx() ctx: RequestContext,
+    @Param('id', { schema: idParam }) id: string,
+  ): Promise<Roster> {
+    return this.tx.run(ctx, (t) =>
+      this.enrollments.roster(t, ctx.tenantId!, id),
+    );
   }
 
   @Post(':id/enrollments')
@@ -188,12 +194,16 @@ export class ClassesController {
   @ApiErrors('VALIDATION_FAILED', 'NOT_FOUND', 'CONFLICT_STALE')
   @ApiPlanLimitExceeded()
   enroll(
-    // Trạng thái 200/201 do thân hàm đặt qua `reply.status` (như WorkspacesController).
-    @Res({ passthrough: true }) _reply: FastifyReply,
-    @Param('id', { schema: idParam }) _id: string,
+    @Ctx() ctx: RequestContext,
+    @Req() req: FastifyRequest,
+    // Trạng thái 200/201 do `Idempotency.run` đặt qua `reply.status` (như WorkspacesController).
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @Param('id', { schema: idParam }) id: string,
     @Body({ schema: createEnrollmentRequestSchema })
-    _body: CreateEnrollmentRequest,
-  ): Enrollment {
-    throw new AppException('NOT_IMPLEMENTED');
+    body: CreateEnrollmentRequest,
+  ): Promise<Enrollment> {
+    return this.idem.run(req, reply, ctx, (t) =>
+      this.enrollments.enroll(t, ctx.tenantId!, id, body),
+    );
   }
 }
