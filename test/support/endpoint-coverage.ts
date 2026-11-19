@@ -158,11 +158,11 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
     test: 'chéo tenant: userId trong body khác token → 403 FORBIDDEN, không ghi gì',
   },
   'GET /v1/notifications': {
-    notApplicable:
-      'hợp đồng S2-FL-10, thân hàm trả 501 tới S3-BE-06; test chéo tenant làm cùng task đó',
+    file: 'notifications.e2e-spec.ts',
+    test: 'GET /notifications: chỉ của chính user; chéo user thấy rỗng',
   },
   'POST /v1/notifications/read': {
-    notApplicable:
-      'hợp đồng S2-FL-10, thân hàm trả 501 tới S3-BE-06; test chéo tenant làm cùng task đó',
+    file: 'notifications.e2e-spec.ts',
+    test: 'POST /notifications/read: chéo user bị bỏ qua',
   },
 };
