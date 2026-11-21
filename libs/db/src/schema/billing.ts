@@ -21,7 +21,8 @@ import { tenants } from './tenancy.js';
 
 // Học phí và hóa đơn (Technical Spec §4.3, §4.4; S5-BE-01, S5-BE-04). Tiền là bigint đồng, trần 100 tỷ.
 // RLS, FORCE, trigger bất biến hóa đơn và policy phụ huynh viết tay cuối migration billing.
-// Không bật audit trigger ở DB cho payout_accounts/invoices: to_jsonb sẽ chép số tài khoản vào audit_logs; audit ghi ở tầng ứng dụng (che số).
+// Không bật audit trigger ở DB cho payout_accounts/invoices: to_jsonb sẽ chép số tài khoản vào audit_logs.
+// Service ghi audit qua app_private.audit_insert (writeAudit) với before/after đã che số tài khoản.
 
 const MAX_VND = '100000000000';
 const createdAt = () =>

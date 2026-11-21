@@ -32,7 +32,7 @@ const otpCode = z
   .regex(/^\d{6}$/)
   .meta({
     description:
-      'Mã OTP 6 số gửi tới email của user qua `POST /auth/otp/send` với `purpose = payout_account`. Bắt buộc khi đặt hoặc đổi `bankBin` hoặc `accountNo` (chặn người cầm máy đổi nơi nhận tiền); sai → 401 `OTP_INVALID`, nhập sai quá nhiều → 429 `OTP_LOCKED`. Mã `payout_account` chỉ dùng được cho route này',
+      'Mã OTP 6 số gửi tới email của user qua `POST /auth/otp/send` với `purpose = payout_account`. Bắt buộc khi đặt hoặc đổi `bankBin` hoặc `accountNo`, khi đặt một tài khoản khác làm chính (`isPrimary = true`) và khi xóa tài khoản chính còn tài khoản khác (chặn người cầm máy đổi nơi nhận tiền); sai → 401 `OTP_INVALID`, nhập sai quá nhiều → 429 `OTP_LOCKED`. Mã `payout_account` chỉ dùng được cho route này',
     example: '482913',
   });
 
@@ -87,6 +87,19 @@ export const updatePayoutAccountRequestSchema = z
   .meta({ example: { accountName: 'NGUYEN VAN B' } });
 export type UpdatePayoutAccountRequest = z.infer<
   typeof updatePayoutAccountRequestSchema
+>;
+
+/** Body tùy chọn của DELETE: chỉ cần khi xóa tài khoản chính mà còn tài khoản khác. */
+export const deletePayoutAccountRequestSchema = z
+  .object({ otpCode: otpCode.optional() })
+  .optional()
+  .meta({
+    id: 'DeletePayoutAccountRequest',
+    description:
+      'Xóa tài khoản chính khi còn tài khoản khác (chuyển nơi nhận tiền sang tài khoản khác) cần `otpCode`, thiếu → 422 `VALIDATION_FAILED`. Các trường hợp khác không cần body',
+  });
+export type DeletePayoutAccountRequest = z.infer<
+  typeof deletePayoutAccountRequestSchema
 >;
 
 export const payoutAccountSchema = z

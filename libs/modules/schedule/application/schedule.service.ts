@@ -58,6 +58,12 @@ export class ScheduleService {
       .for('update');
     if (!cls) throw new AppException('NOT_FOUND');
     if (cls.status === 'archived') throw new AppException('CONFLICT_STALE');
+    // Lớp trọn khóa cần lịch để biết tổng số buổi của khóa (US-1.2).
+    if (cls.feeType === 'course' && body.rules.length === 0) {
+      throw new AppException('VALIDATION_FAILED', undefined, {
+        rules: ['Lớp học phí trọn khóa cần ít nhất một quy tắc lịch học.'],
+      });
+    }
     const tz = await this.timezone(tx, tenantId);
 
     // 1. Quy tắc: giữ nguyên cái trùng hoàn toàn, xóa cái bị thay, thêm cái mới.
