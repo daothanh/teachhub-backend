@@ -551,7 +551,8 @@ export class BillingService {
       totalAmount: inv.totalAmount,
       // Sprint 5 chưa có thanh toán nên đúng là 0; S6-BE-02 thay bằng Σ payments chưa hủy.
       paidAmount: 0,
-      remainingAmount: inv.totalAmount,
+      remainingAmount:
+        inv.status === 'void' || inv.status === 'draft' ? 0 : inv.totalAmount,
       dueDate: period!.dueDate,
       issuedAt: at(inv.issuedAt),
       payout: inv.payout as Invoice['payout'],

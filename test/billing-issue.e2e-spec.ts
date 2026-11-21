@@ -685,6 +685,12 @@ describe('billing: phát hành và hủy hóa đơn', () => {
       });
       expect(again.statusCode).toBe(200);
       expect(again.json().invoice.voidReason).toBe('Sai số buổi học');
+      // Hóa đơn hủy không còn phải trả.
+      expect(again.json().invoice).toMatchObject({
+        status: 'void',
+        paidAmount: 0,
+        remainingAmount: 0,
+      });
     });
 
     it('AC-7: hóa đơn nháp → 409 CONFLICT_STALE; createReplacementDraft chờ TL xác nhận → 422 và không hủy', async () => {

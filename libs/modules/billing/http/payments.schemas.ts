@@ -13,6 +13,18 @@ import { invoiceStatusSchema, paymentMethodSchema } from './billing.schemas.js';
 
 // ---- Thanh toán (US-7.4) ----
 
+const actorSchema = z
+  .object({
+    id: z.uuid(),
+    name: z.string().meta({ description: 'Tên hiển thị' }),
+  })
+  .nullable()
+  .meta({
+    id: 'PaymentActor',
+    description:
+      '`recordedBy` = người ghi, `voidedBy` = người hủy (null khi chưa hủy): id và tên hiển thị; null khi không xác định được (vd. tài khoản đã xóa)',
+  });
+
 export const paymentSchema = z
   .object({
     id: z.uuid(),
@@ -24,7 +36,9 @@ export const paymentSchema = z
     }),
     note: z.string().nullable().meta({ description: 'Ghi chú của giáo viên' }),
     recordedAt: z.iso.datetime({ offset: true }),
+    recordedBy: actorSchema,
     voidedAt: z.iso.datetime({ offset: true }).nullable(),
+    voidedBy: actorSchema,
     voidReason: z.string().nullable().meta({
       description: 'Có khi `voidedAt` khác null; chỉ giáo viên thấy',
     }),
@@ -32,7 +46,7 @@ export const paymentSchema = z
   .meta({
     id: 'Payment',
     description:
-      'Một lần thu tiền của hóa đơn. Hủy không xóa dòng: `voidedAt` khác null và có bút toán đảo ở sổ doanh thu (US-7.4 AC4, US-9.5 AC1)',
+      'Một lần thu tiền của hóa đơn (chỉ phản hồi cho chủ tenant; phụ huynh chỉ có `FamilyPayment`, không có `recordedBy`, `voidedBy`, `note`, `voidReason`). Hủy không xóa dòng: `voidedAt` khác null và có bút toán đảo ở sổ doanh thu (US-7.4 AC4, US-9.5 AC1)',
     example: {
       id: '019c0b20-0001-7b30-8c01-000000000001',
       invoiceId: '019c0a10-0001-7b30-8c01-000000000001',
@@ -41,7 +55,12 @@ export const paymentSchema = z
       paidOn: '2027-01-05',
       note: null,
       recordedAt: '2027-01-05T09:12:00+07:00',
+      recordedBy: {
+        id: '019b2c00-0001-7b30-8c01-000000000001',
+        name: 'Cô Lan',
+      },
       voidedAt: null,
+      voidedBy: null,
       voidReason: null,
     },
   });
@@ -71,7 +90,6 @@ export type RecordPaymentRequest = z.infer<typeof recordPaymentRequestSchema>;
 export const paymentResultSchema = z
   .object({
     payment: paymentSchema,
-    invoiceId: z.uuid(),
     status: invoiceStatusSchema.meta({
       description:
         'Trạng thái hóa đơn sau thao tác: `partially_paid`, `paid` hoặc (sau hủy thanh toán cuối) `issued`',
@@ -97,10 +115,14 @@ export const paymentResultSchema = z
         paidOn: '2027-01-05',
         note: null,
         recordedAt: '2027-01-05T09:12:00+07:00',
+        recordedBy: {
+          id: '019b2c00-0001-7b30-8c01-000000000001',
+          name: 'Cô Lan',
+        },
         voidedAt: null,
+        voidedBy: null,
         voidReason: null,
       },
-      invoiceId: '019c0a10-0001-7b30-8c01-000000000001',
       status: 'partially_paid',
       paidAmount: 500000,
       remainingAmount: 700000,

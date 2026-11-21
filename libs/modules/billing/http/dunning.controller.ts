@@ -84,7 +84,7 @@ export class DunningController {
     summary: 'Bật hoặc tắt nhắc nợ theo học viên (US-7.5 AC3)',
     description:
       'Đặt `enrollments.dunning_enabled` của một ghi danh. Tắt: hủy mọi lời nhắc chưa gửi của các hóa đơn còn nợ của học viên đó (`cancelledCount`) nếu học viên không còn ghi danh đang mở nào bật nhắc; bật lại: lập lại các mốc chưa tới của hóa đơn còn nợ. Hóa đơn gộp mọi lớp của học viên nên app bật/tắt theo học viên bằng cách gọi cho từng ghi danh đang mở (danh sách ở `GET /receivables/{studentId}`). ' +
-      'Ghi danh đã rời lớp (`leftOn`) → 409 `CONFLICT_STALE`; ghi danh của tenant khác → 404. Giới hạn 20 lần/phút/user (429 `RATE_LIMITED`).',
+      'Ghi danh đã rời lớp (`leftOn`) → 409 `CONFLICT_STALE`; ghi danh của tenant khác → 404. Gọi lặp cùng giá trị → 200, `cancelledCount = 0`, không đổi gì. Giới hạn 20 lần/phút/user (429 `RATE_LIMITED`).',
   })
   @ApiOkResponse({ standardSchema: enrollmentDunningResultSchema })
   @ApiErrors('VALIDATION_FAILED', 'NOT_FOUND', 'CONFLICT_STALE', 'RATE_LIMITED')

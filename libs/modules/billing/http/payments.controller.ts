@@ -39,8 +39,8 @@ export class PaymentsController {
       'Chạy trong MỘT giao dịch có khóa hàng hóa đơn (`SELECT … FOR UPDATE`): thêm `payments`, tính lại trạng thái hóa đơn (`partially_paid` khi 0 < Σ < `totalAmount`, `paid` khi Σ ≥ `totalAmount`), ghi `student_ledger` (phần trả thừa) và `revenue_ledger` (một dòng đúng số tiền, US-9.5 AC1), ghi nhật ký kiểm toán, hủy các lời nhắc nợ chưa gửi khi thu đủ (US-7.5 AC2). ' +
       'Sự kiện outbox `payment_recorded` sinh thông báo `payment_recorded` cho phụ huynh trong ≤ 1 phút (US-7.4 AC3); phụ huynh mở `GET /family/invoices/{id}` làm biên nhận. ' +
       '`amount` nhỏ hơn số còn nợ là thu một phần; bằng là thu đủ; lớn hơn vẫn nhận, hóa đơn `paid` và `overpaidAmount` > 0 (vào sổ học viên, trừ ở kỳ sau, US-7.6 AC2). `paidOn` mặc định hôm nay theo múi giờ tenant, sau hôm nay → 422 `VALIDATION_FAILED`. ' +
-      'Chỉ hóa đơn `issued`, `partially_paid` hoặc `pending_confirmation`; hóa đơn `draft`, `void` hay đã `paid` → 409 `INVOICE_NOT_PAYABLE`. ' +
-      '`Idempotency-Key` bắt buộc: bấm lặp khi mạng chập chờn trả lại đúng kết quả đã lưu, chỉ có MỘT thanh toán; cùng khóa khác nội dung → 422 `IDEMPOTENCY_KEY_REUSED`. Giới hạn 20 lần/phút/user (429 `RATE_LIMITED`). ' +
+      'Chỉ hóa đơn `issued`, `partially_paid` hoặc `pending_confirmation`; hóa đơn `draft`, `void` hay đã `paid` → 409 `INVOICE_NOT_PAYABLE`. Hóa đơn đã `paid` không nhận thêm: muốn nhận thêm tiền thì ghi vào kỳ sau (trả thừa ở lần ghi cuối đã vào sổ học viên). ' +
+      '`Idempotency-Key` bắt buộc: gửi lại cùng khóa khi request đầu đang chạy → 409 `IDEMPOTENCY_IN_PROGRESS`; bấm lặp khi mạng chập chờn trả lại đúng kết quả đã lưu, chỉ có MỘT thanh toán; cùng khóa khác nội dung → 422 `IDEMPOTENCY_KEY_REUSED`. Giới hạn 20 lần/phút/user (429 `RATE_LIMITED`). ' +
       'Số tiền là số nguyên đồng. Hóa đơn của tenant khác → 404.',
   })
   @ApiCreatedResponse({ standardSchema: paymentResultSchema })
@@ -62,7 +62,7 @@ export class PaymentsController {
   @ApiOperation({
     summary: 'Danh sách thanh toán của hóa đơn (US-7.4)',
     description:
-      'Mọi thanh toán của hóa đơn, mới ghi trước, gồm cả thanh toán đã hủy (`voidedAt` khác null, kèm `voidReason`). Hóa đơn chưa có thanh toán → `items` rỗng. Hóa đơn của tenant khác hoặc bản nháp không tồn tại → 404.',
+      'Mọi thanh toán của hóa đơn, mới ghi trước, gồm cả thanh toán đã hủy (`voidedAt` khác null, kèm `voidReason`, `voidedBy`) và có `recordedBy`. Hóa đơn `void` vẫn trả danh sách thanh toán cũ. Hóa đơn chưa có thanh toán → `items` rỗng. Bản nháp, hóa đơn của tenant khác hoặc không tồn tại → 404.',
   })
   @ApiOkResponse({ standardSchema: paymentListSchema })
   @ApiErrors('NOT_FOUND')
@@ -78,7 +78,7 @@ export class PaymentsController {
     description:
       'Bắt buộc `reason`. Không xóa dòng: đặt `voidedAt`, `voidReason`, ghi bút toán đảo vào `revenue_ledger` (US-9.5 AC1) và `student_ledger` (đảo phần trả thừa nếu có), ghi nhật ký kiểm toán; tính lại trạng thái hóa đơn từ Σ thanh toán còn hiệu lực (có thể về `partially_paid` hoặc `issued`). Chạy trong một giao dịch có khóa hàng hóa đơn. ' +
       'Hóa đơn còn nợ trở lại thì các mốc nhắc nợ chưa tới được lập lại. Nếu phần trả thừa đã được trừ vào hóa đơn kỳ sau thì vẫn hủy được: số dư sổ học viên có thể thành nợ, chuyển kỳ tiếp theo (không sửa hóa đơn đã phát hành). Không báo phụ huynh riêng: biên nhận hiện `voidedAt` ở `GET /family/invoices/{id}`. ' +
-      'Hủy lại thanh toán đã hủy vẫn 200, trả trạng thái hiện tại (không ghi bút toán thứ hai). `Idempotency-Key` bắt buộc. Giới hạn 20 lần/phút/user (429 `RATE_LIMITED`). Thanh toán của tenant khác → 404.',
+      'Hủy lại thanh toán đã hủy (khóa mới) vẫn 200, trả bản hiện tại, giữ `voidReason` và `voidedBy` ban đầu, không ghi bút toán thứ hai; cùng khóa → phát lại kết quả đã lưu. `Idempotency-Key` bắt buộc (request cùng khóa đang chạy → 409 `IDEMPOTENCY_IN_PROGRESS`, khác nội dung → 422 `IDEMPOTENCY_KEY_REUSED`). Giới hạn 20 lần/phút/user (429 `RATE_LIMITED`). Thanh toán của tenant khác → 404.',
   })
   @ApiOkResponse({ standardSchema: paymentResultSchema })
   @ApiIdempotencyKey()

@@ -283,6 +283,8 @@ describe('family: hóa đơn của con', () => {
       status: 'void',
       qrPayload: null,
       payout: null,
+      paidAmount: 0,
+      remainingAmount: 0,
     });
     expect(det.json().voidedAt).toMatch(/\+07:00$/);
     const list = (await call(p.token, 'GET', '/family/invoices')).json();

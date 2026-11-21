@@ -7032,7 +7032,7 @@
     },
     "/v1/invoices/{id}/payments": {
       "post": {
-        "description": "Chạy trong MỘT giao dịch có khóa hàng hóa đơn (`SELECT … FOR UPDATE`): thêm `payments`, tính lại trạng thái hóa đơn (`partially_paid` khi 0 < Σ < `totalAmount`, `paid` khi Σ ≥ `totalAmount`), ghi `student_ledger` (phần trả thừa) và `revenue_ledger` (một dòng đúng số tiền, US-9.5 AC1), ghi nhật ký kiểm toán, hủy các lời nhắc nợ chưa gửi khi thu đủ (US-7.5 AC2). Sự kiện outbox `payment_recorded` sinh thông báo `payment_recorded` cho phụ huynh trong ≤ 1 phút (US-7.4 AC3); phụ huynh mở `GET /family/invoices/{id}` làm biên nhận. `amount` nhỏ hơn số còn nợ là thu một phần; bằng là thu đủ; lớn hơn vẫn nhận, hóa đơn `paid` và `overpaidAmount` > 0 (vào sổ học viên, trừ ở kỳ sau, US-7.6 AC2). `paidOn` mặc định hôm nay theo múi giờ tenant, sau hôm nay → 422 `VALIDATION_FAILED`. Chỉ hóa đơn `issued`, `partially_paid` hoặc `pending_confirmation`; hóa đơn `draft`, `void` hay đã `paid` → 409 `INVOICE_NOT_PAYABLE`. `Idempotency-Key` bắt buộc: bấm lặp khi mạng chập chờn trả lại đúng kết quả đã lưu, chỉ có MỘT thanh toán; cùng khóa khác nội dung → 422 `IDEMPOTENCY_KEY_REUSED`. Giới hạn 20 lần/phút/user (429 `RATE_LIMITED`). Số tiền là số nguyên đồng. Hóa đơn của tenant khác → 404.",
+        "description": "Chạy trong MỘT giao dịch có khóa hàng hóa đơn (`SELECT … FOR UPDATE`): thêm `payments`, tính lại trạng thái hóa đơn (`partially_paid` khi 0 < Σ < `totalAmount`, `paid` khi Σ ≥ `totalAmount`), ghi `student_ledger` (phần trả thừa) và `revenue_ledger` (một dòng đúng số tiền, US-9.5 AC1), ghi nhật ký kiểm toán, hủy các lời nhắc nợ chưa gửi khi thu đủ (US-7.5 AC2). Sự kiện outbox `payment_recorded` sinh thông báo `payment_recorded` cho phụ huynh trong ≤ 1 phút (US-7.4 AC3); phụ huynh mở `GET /family/invoices/{id}` làm biên nhận. `amount` nhỏ hơn số còn nợ là thu một phần; bằng là thu đủ; lớn hơn vẫn nhận, hóa đơn `paid` và `overpaidAmount` > 0 (vào sổ học viên, trừ ở kỳ sau, US-7.6 AC2). `paidOn` mặc định hôm nay theo múi giờ tenant, sau hôm nay → 422 `VALIDATION_FAILED`. Chỉ hóa đơn `issued`, `partially_paid` hoặc `pending_confirmation`; hóa đơn `draft`, `void` hay đã `paid` → 409 `INVOICE_NOT_PAYABLE`. Hóa đơn đã `paid` không nhận thêm: muốn nhận thêm tiền thì ghi vào kỳ sau (trả thừa ở lần ghi cuối đã vào sổ học viên). `Idempotency-Key` bắt buộc: gửi lại cùng khóa khi request đầu đang chạy → 409 `IDEMPOTENCY_IN_PROGRESS`; bấm lặp khi mạng chập chờn trả lại đúng kết quả đã lưu, chỉ có MỘT thanh toán; cùng khóa khác nội dung → 422 `IDEMPOTENCY_KEY_REUSED`. Giới hạn 20 lần/phút/user (429 `RATE_LIMITED`). Số tiền là số nguyên đồng. Hóa đơn của tenant khác → 404.",
         "operationId": "payments_record",
         "parameters": [
           {
@@ -7149,7 +7149,7 @@
         ]
       },
       "get": {
-        "description": "Mọi thanh toán của hóa đơn, mới ghi trước, gồm cả thanh toán đã hủy (`voidedAt` khác null, kèm `voidReason`). Hóa đơn chưa có thanh toán → `items` rỗng. Hóa đơn của tenant khác hoặc bản nháp không tồn tại → 404.",
+        "description": "Mọi thanh toán của hóa đơn, mới ghi trước, gồm cả thanh toán đã hủy (`voidedAt` khác null, kèm `voidReason`, `voidedBy`) và có `recordedBy`. Hóa đơn `void` vẫn trả danh sách thanh toán cũ. Hóa đơn chưa có thanh toán → `items` rỗng. Bản nháp, hóa đơn của tenant khác hoặc không tồn tại → 404.",
         "operationId": "payments_list",
         "parameters": [
           {
@@ -7218,7 +7218,7 @@
     },
     "/v1/payments/{id}/void": {
       "post": {
-        "description": "Bắt buộc `reason`. Không xóa dòng: đặt `voidedAt`, `voidReason`, ghi bút toán đảo vào `revenue_ledger` (US-9.5 AC1) và `student_ledger` (đảo phần trả thừa nếu có), ghi nhật ký kiểm toán; tính lại trạng thái hóa đơn từ Σ thanh toán còn hiệu lực (có thể về `partially_paid` hoặc `issued`). Chạy trong một giao dịch có khóa hàng hóa đơn. Hóa đơn còn nợ trở lại thì các mốc nhắc nợ chưa tới được lập lại. Nếu phần trả thừa đã được trừ vào hóa đơn kỳ sau thì vẫn hủy được: số dư sổ học viên có thể thành nợ, chuyển kỳ tiếp theo (không sửa hóa đơn đã phát hành). Không báo phụ huynh riêng: biên nhận hiện `voidedAt` ở `GET /family/invoices/{id}`. Hủy lại thanh toán đã hủy vẫn 200, trả trạng thái hiện tại (không ghi bút toán thứ hai). `Idempotency-Key` bắt buộc. Giới hạn 20 lần/phút/user (429 `RATE_LIMITED`). Thanh toán của tenant khác → 404.",
+        "description": "Bắt buộc `reason`. Không xóa dòng: đặt `voidedAt`, `voidReason`, ghi bút toán đảo vào `revenue_ledger` (US-9.5 AC1) và `student_ledger` (đảo phần trả thừa nếu có), ghi nhật ký kiểm toán; tính lại trạng thái hóa đơn từ Σ thanh toán còn hiệu lực (có thể về `partially_paid` hoặc `issued`). Chạy trong một giao dịch có khóa hàng hóa đơn. Hóa đơn còn nợ trở lại thì các mốc nhắc nợ chưa tới được lập lại. Nếu phần trả thừa đã được trừ vào hóa đơn kỳ sau thì vẫn hủy được: số dư sổ học viên có thể thành nợ, chuyển kỳ tiếp theo (không sửa hóa đơn đã phát hành). Không báo phụ huynh riêng: biên nhận hiện `voidedAt` ở `GET /family/invoices/{id}`. Hủy lại thanh toán đã hủy (khóa mới) vẫn 200, trả bản hiện tại, giữ `voidReason` và `voidedBy` ban đầu, không ghi bút toán thứ hai; cùng khóa → phát lại kết quả đã lưu. `Idempotency-Key` bắt buộc (request cùng khóa đang chạy → 409 `IDEMPOTENCY_IN_PROGRESS`, khác nội dung → 422 `IDEMPOTENCY_KEY_REUSED`). Giới hạn 20 lần/phút/user (429 `RATE_LIMITED`). Thanh toán của tenant khác → 404.",
         "operationId": "payments_voidPayment",
         "parameters": [
           {
@@ -7533,7 +7533,7 @@
     },
     "/v1/enrollments/{id}/dunning": {
       "put": {
-        "description": "Đặt `enrollments.dunning_enabled` của một ghi danh. Tắt: hủy mọi lời nhắc chưa gửi của các hóa đơn còn nợ của học viên đó (`cancelledCount`) nếu học viên không còn ghi danh đang mở nào bật nhắc; bật lại: lập lại các mốc chưa tới của hóa đơn còn nợ. Hóa đơn gộp mọi lớp của học viên nên app bật/tắt theo học viên bằng cách gọi cho từng ghi danh đang mở (danh sách ở `GET /receivables/{studentId}`). Ghi danh đã rời lớp (`leftOn`) → 409 `CONFLICT_STALE`; ghi danh của tenant khác → 404. Giới hạn 20 lần/phút/user (429 `RATE_LIMITED`).",
+        "description": "Đặt `enrollments.dunning_enabled` của một ghi danh. Tắt: hủy mọi lời nhắc chưa gửi của các hóa đơn còn nợ của học viên đó (`cancelledCount`) nếu học viên không còn ghi danh đang mở nào bật nhắc; bật lại: lập lại các mốc chưa tới của hóa đơn còn nợ. Hóa đơn gộp mọi lớp của học viên nên app bật/tắt theo học viên bằng cách gọi cho từng ghi danh đang mở (danh sách ở `GET /receivables/{studentId}`). Ghi danh đã rời lớp (`leftOn`) → 409 `CONFLICT_STALE`; ghi danh của tenant khác → 404. Gọi lặp cùng giá trị → 200, `cancelledCount = 0`, không đổi gì. Giới hạn 20 lần/phút/user (429 `RATE_LIMITED`).",
         "operationId": "dunning_putEnrollment",
         "parameters": [
           {
@@ -7711,7 +7711,7 @@
     },
     "/v1/receivables": {
       "get": {
-        "description": "Mỗi dòng một học viên còn nợ: tên, lớp, số nợ, nhóm tuổi nợ 0–30 / 31–60 / > 60 ngày tính từ hạn thanh toán của hóa đơn cũ nhất còn nợ (US-8.3 AC1). Mặc định sắp theo số nợ giảm dần, `summary` có tổng theo từng nhóm (AC2). Lọc: `agingBucket` (`0-30`, `31-60`, `over-60`), `classId`; sắp: `sortField` (`amount`, `overdueDays`, `studentName`), `sortOrder`; phân trang offset `page`, `pageSize`. Giá trị ngoài danh sách → 422 `VALIDATION_FAILED`. Số tiền là số nguyên đồng. Mở một dòng bằng `GET /receivables/{studentId}`.",
+        "description": "Mỗi dòng một học viên còn nợ: tên, lớp, số nợ, nhóm tuổi nợ 0–30 / 31–60 / > 60 ngày tính từ hạn thanh toán của hóa đơn cũ nhất còn nợ (US-8.3 AC1). Mặc định sắp theo số nợ giảm dần, `summary` có tổng theo từng nhóm (AC2). Lọc: `agingBucket` (`0-30`, `31-60`, `over-60`), `classId`, `q` (tên học viên, không dấu); `summary` tính theo `classId` và `q` đang áp, không theo `agingBucket`; sắp: `sortField` (`amount`, `overdueDays`, `studentName`), `sortOrder`; phân trang offset `page`, `pageSize`. Giá trị ngoài danh sách → 422 `VALIDATION_FAILED`. Số tiền là số nguyên đồng. Mở một dòng bằng `GET /receivables/{studentId}`.",
         "operationId": "receivables_list",
         "parameters": [
           {
@@ -7740,14 +7740,27 @@
             "name": "agingBucket",
             "required": false,
             "in": "query",
-            "description": "Chỉ học viên thuộc nhóm tuổi nợ này. Phần `summary` không bị lọc theo tham số này để thanh nhóm vẫn đủ ba số",
+            "description": "Chỉ học viên thuộc nhóm tuổi nợ này. Riêng `summary` không lọc theo tham số này (nó là trục chia nhóm) để thanh nhóm vẫn đủ ba số; `summary` tính theo đúng `classId` và `q` đang áp",
             "schema": {
-              "description": "Chỉ học viên thuộc nhóm tuổi nợ này. Phần `summary` không bị lọc theo tham số này để thanh nhóm vẫn đủ ba số",
+              "description": "Chỉ học viên thuộc nhóm tuổi nợ này. Riêng `summary` không lọc theo tham số này (nó là trục chia nhóm) để thanh nhóm vẫn đủ ba số; `summary` tính theo đúng `classId` và `q` đang áp",
               "allOf": [
                 {
                   "$ref": "#/components/schemas/AgingBucket"
                 }
               ]
+            }
+          },
+          {
+            "name": "q",
+            "required": false,
+            "in": "query",
+            "description": "Tìm theo họ tên học viên, không phân biệt dấu (như `GET /students?q=`)",
+            "schema": {
+              "description": "Tìm theo họ tên học viên, không phân biệt dấu (như `GET /students?q=`)",
+              "example": "nguyen minh",
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 100
             }
           },
           {
@@ -12884,7 +12897,7 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 100000000000,
-            "description": "max(0, `totalAmount` − `paidAmount`) ở mọi trạng thái; client chỉ hiển thị khi `status` là `issued`, `partially_paid` hoặc `paid`. Còn nợ 700.000 đ trên hóa đơn 1.200.000 đ đã thu 500.000 đ (US-7.4 AC2)"
+            "description": "0 khi `status` là `void` (hóa đơn hủy, không còn phải trả) hoặc `draft` (chưa phát hành); các trạng thái khác = max(0, `totalAmount` − `paidAmount`). Còn nợ 700.000 đ trên hóa đơn 1.200.000 đ đã thu 500.000 đ (US-7.4 AC2)"
           },
           "dueDate": {
             "type": "string",
@@ -13349,7 +13362,7 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 100000000000,
-            "description": "max(0, `totalAmount` − `paidAmount`); hiển thị khi `status` là `issued` hoặc `partially_paid` (P03: \"Còn nợ\")"
+            "description": "0 khi `status = void`; các trạng thái khác = max(0, `totalAmount` − `paidAmount`) (P03: \"Còn nợ\" khi `issued` hoặc `partially_paid`)"
           },
           "dueDate": {
             "type": "string",
@@ -13448,7 +13461,7 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 100000000000,
-            "description": "max(0, `totalAmount` − `paidAmount`); hiển thị khi `status` là `issued` hoặc `partially_paid` (P03: \"Còn nợ\")"
+            "description": "0 khi `status = void`; các trạng thái khác = max(0, `totalAmount` − `paidAmount`) (P03: \"Còn nợ\" khi `issued` hoặc `partially_paid`)"
           },
           "dueDate": {
             "type": "string",
@@ -13471,7 +13484,7 @@
             "items": {
               "$ref": "#/components/schemas/FamilyPayment"
             },
-            "description": "Biên nhận của hóa đơn, mới nhất trước, gồm cả thanh toán đã hủy (`voidedAt` ≠ null); rỗng khi chưa thu. Phụ huynh nhận thông báo `payment_recorded` trong ≤ 1 phút sau khi giáo viên ghi (US-7.4 AC3) rồi mở màn này làm biên nhận"
+            "description": "Biên nhận của hóa đơn, mới nhất trước, gồm cả thanh toán đã hủy (`voidedAt` ≠ null); rỗng khi chưa thu. Phụ huynh nhận thông báo `payment_recorded` trong ≤ 1 phút sau khi giáo viên ghi (US-7.4 AC3) rồi mở màn này làm biên nhận. Chỉ phụ huynh đã liên kết với con mới xem được; hóa đơn của con người khác → 404 `NOT_FOUND`. Không có `recordedBy`/`voidedBy` (chỉ giáo viên thấy)"
           },
           "transferNote": {
             "type": "string",
@@ -13665,11 +13678,6 @@
           "payment": {
             "$ref": "#/components/schemas/Payment"
           },
-          "invoiceId": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-          },
           "status": {
             "description": "Trạng thái hóa đơn sau thao tác: `partially_paid`, `paid` hoặc (sau hủy thanh toán cuối) `issued`",
             "allOf": [
@@ -13703,7 +13711,6 @@
         },
         "required": [
           "payment",
-          "invoiceId",
           "status",
           "paidAmount",
           "remainingAmount",
@@ -13720,10 +13727,14 @@
             "paidOn": "2027-01-05",
             "note": null,
             "recordedAt": "2027-01-05T09:12:00+07:00",
+            "recordedBy": {
+              "id": "019b2c00-0001-7b30-8c01-000000000001",
+              "name": "Cô Lan"
+            },
             "voidedAt": null,
+            "voidedBy": null,
             "voidReason": null
           },
-          "invoiceId": "019c0a10-0001-7b30-8c01-000000000001",
           "status": "partially_paid",
           "paidAmount": 500000,
           "remainingAmount": 700000,
@@ -13771,6 +13782,9 @@
             "format": "date-time",
             "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
           },
+          "recordedBy": {
+            "$ref": "#/components/schemas/PaymentActor"
+          },
           "voidedAt": {
             "type": [
               "string",
@@ -13778,6 +13792,9 @@
             ],
             "format": "date-time",
             "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "voidedBy": {
+            "$ref": "#/components/schemas/PaymentActor"
           },
           "voidReason": {
             "description": "Có khi `voidedAt` khác null; chỉ giáo viên thấy",
@@ -13795,11 +13812,13 @@
           "paidOn",
           "note",
           "recordedAt",
+          "recordedBy",
           "voidedAt",
+          "voidedBy",
           "voidReason"
         ],
         "additionalProperties": false,
-        "description": "Một lần thu tiền của hóa đơn. Hủy không xóa dòng: `voidedAt` khác null và có bút toán đảo ở sổ doanh thu (US-7.4 AC4, US-9.5 AC1)",
+        "description": "Một lần thu tiền của hóa đơn (chỉ phản hồi cho chủ tenant; phụ huynh chỉ có `FamilyPayment`, không có `recordedBy`, `voidedBy`, `note`, `voidReason`). Hủy không xóa dòng: `voidedAt` khác null và có bút toán đảo ở sổ doanh thu (US-7.4 AC4, US-9.5 AC1)",
         "example": {
           "id": "019c0b20-0001-7b30-8c01-000000000001",
           "invoiceId": "019c0a10-0001-7b30-8c01-000000000001",
@@ -13808,9 +13827,37 @@
           "paidOn": "2027-01-05",
           "note": null,
           "recordedAt": "2027-01-05T09:12:00+07:00",
+          "recordedBy": {
+            "id": "019b2c00-0001-7b30-8c01-000000000001",
+            "name": "Cô Lan"
+          },
           "voidedAt": null,
+          "voidedBy": null,
           "voidReason": null
         }
+      },
+      "PaymentActor": {
+        "description": "`recordedBy` = người ghi, `voidedBy` = người hủy (null khi chưa hủy): id và tên hiển thị; null khi không xác định được (vd. tài khoản đã xóa)",
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "name": {
+            "type": "string",
+            "description": "Tên hiển thị"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "additionalProperties": false
       },
       "PaymentList": {
         "type": "object",
@@ -14467,6 +14514,9 @@
             "format": "date-time",
             "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
           },
+          "recordedBy": {
+            "$ref": "#/components/schemas/PaymentActor"
+          },
           "voidedAt": {
             "type": [
               "string",
@@ -14474,6 +14524,9 @@
             ],
             "format": "date-time",
             "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "voidedBy": {
+            "$ref": "#/components/schemas/PaymentActor"
           },
           "voidReason": {
             "description": "Có khi `voidedAt` khác null; chỉ giáo viên thấy",
@@ -14497,7 +14550,9 @@
           "paidOn",
           "note",
           "recordedAt",
+          "recordedBy",
           "voidedAt",
+          "voidedBy",
           "voidReason",
           "invoiceCode"
         ],

@@ -287,3 +287,12 @@ Chờ chốt:
 - Issue #179, lý do `not_marked` cho buổi chưa điểm danh (`SessionNotChargedReason`): CHƯA thêm vì thêm giá trị enum phản hồi bị `oasdiff` báo `response-property-enum-value-added` (mức ERR) ở `GET /invoices/{id}`, `POST /invoices/{id}/adjustments`, `POST /invoices/{id}/void`. Cần Owner/TL chọn: chấp nhận ngoại lệ rồi thêm giá trị (client cũ coi như "không tính"), hoặc giữ như hiện tại. Ba loại thông báo Sprint 4/5 và hai loại mới `payment_recorded`, `payment_reminder` cùng chờ một quyết định ngoại lệ kiểu này.
 - Mô hình `student_ledger` (`kind`, quan hệ với dòng `carry_over`) và cách tính nợ ở T11 khi khoản nợ đã vào dòng `carry_over` của hóa đơn kỳ sau (đang mô tả: chỉ tính ở hóa đơn kỳ sau, không đếm hai lần).
 - Hủy hóa đơn đã có thanh toán (Sprint 5 mô tả 409): hiểu là có thanh toán còn hiệu lực; nếu muốn khác thì S6-BE-02 báo lại.
+
+Sửa sau review (PR #185):
+
+- `remainingAmount` (`Invoice`, `FamilyInvoiceSummary`) = 0 khi hóa đơn `void` hoặc `draft`; trạng thái khác = max(0, `totalAmount` − `paidAmount`). Hai mapper tạm trả đúng như vậy, có test hóa đơn hủy cho giáo viên và phụ huynh.
+- `Payment` thêm `recordedBy` và `voidedBy` (`{ id, name }`, nullable); chỉ ở phản hồi của chủ tenant, không có trong `FamilyPayment`. `PaymentResult` bỏ `invoiceId` thừa (đã có `payment.invoiceId`).
+- `GET /invoices/{id}/payments`: hóa đơn `void` vẫn trả danh sách cũ (gồm thanh toán đã hủy), bản nháp → 404.
+- Hủy thanh toán đã hủy (khóa mới) → 200 bản hiện tại, giữ `voidReason`, `voidedBy` ban đầu; cùng khóa → phát lại. Hóa đơn `paid` → 409 `INVOICE_NOT_PAYABLE`, tiền nhận thêm ghi vào kỳ sau. Mô tả hai route ghi nêu rõ `IDEMPOTENCY_IN_PROGRESS` (409) và `IDEMPOTENCY_KEY_REUSED` (422); hai mã này vốn đã được `@ApiIdempotencyKey()` khai vào phản hồi.
+- `GET /receivables` thêm `q` (tên học viên, không dấu); `summary` tính theo `classId` và `q` đang áp, không theo `agingBucket` (vì là trục chia nhóm, nếu lọc thì hai nhóm kia luôn 0).
+- Biên nhận phụ huynh: phụ huynh khác → 404. `PUT /enrollments/{id}/dunning` gọi lặp cùng giá trị → `cancelledCount = 0`.

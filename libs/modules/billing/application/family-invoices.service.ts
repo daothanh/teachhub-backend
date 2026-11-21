@@ -202,7 +202,7 @@ export class FamilyInvoicesService {
       totalAmount: Number(r.total_amount),
       // Sprint 5 chưa có thanh toán nên đúng là 0; S6-BE-02 thay bằng Σ payments chưa hủy.
       paidAmount: 0,
-      remainingAmount: Number(r.total_amount),
+      remainingAmount: r.status === 'void' ? 0 : Number(r.total_amount),
       dueDate: r.due_date,
       issuedAt: formatInZone(new Date(r.issued_at), tz.get(r.student_id)!),
     };

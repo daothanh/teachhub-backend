@@ -24,7 +24,12 @@ export const receivableSortFieldSchema = z
 export const receivablesQuerySchema = pageQuerySchema.extend({
   agingBucket: agingBucketSchema.optional().meta({
     description:
-      'Chỉ học viên thuộc nhóm tuổi nợ này. Phần `summary` không bị lọc theo tham số này để thanh nhóm vẫn đủ ba số',
+      'Chỉ học viên thuộc nhóm tuổi nợ này. Riêng `summary` không lọc theo tham số này (nó là trục chia nhóm) để thanh nhóm vẫn đủ ba số; `summary` tính theo đúng `classId` và `q` đang áp',
+  }),
+  q: z.string().trim().min(2).max(100).optional().meta({
+    description:
+      'Tìm theo họ tên học viên, không phân biệt dấu (như `GET /students?q=`)',
+    example: 'nguyen minh',
   }),
   classId: z.uuid().optional().meta({
     description: 'Chỉ học viên đang học lớp này (có hóa đơn nợ gồm lớp đó)',

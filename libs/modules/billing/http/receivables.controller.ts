@@ -37,7 +37,7 @@ export class ReceivablesController {
     summary: 'Công nợ và tuổi nợ theo học viên (T11, US-8.3)',
     description:
       'Mỗi dòng một học viên còn nợ: tên, lớp, số nợ, nhóm tuổi nợ 0–30 / 31–60 / > 60 ngày tính từ hạn thanh toán của hóa đơn cũ nhất còn nợ (US-8.3 AC1). Mặc định sắp theo số nợ giảm dần, `summary` có tổng theo từng nhóm (AC2). ' +
-      'Lọc: `agingBucket` (`0-30`, `31-60`, `over-60`), `classId`; sắp: `sortField` (`amount`, `overdueDays`, `studentName`), `sortOrder`; phân trang offset `page`, `pageSize`. Giá trị ngoài danh sách → 422 `VALIDATION_FAILED`. Số tiền là số nguyên đồng. Mở một dòng bằng `GET /receivables/{studentId}`.',
+      'Lọc: `agingBucket` (`0-30`, `31-60`, `over-60`), `classId`, `q` (tên học viên, không dấu); `summary` tính theo `classId` và `q` đang áp, không theo `agingBucket`; sắp: `sortField` (`amount`, `overdueDays`, `studentName`), `sortOrder`; phân trang offset `page`, `pageSize`. Giá trị ngoài danh sách → 422 `VALIDATION_FAILED`. Số tiền là số nguyên đồng. Mở một dòng bằng `GET /receivables/{studentId}`.',
   })
   @ApiOkResponse({ standardSchema: receivablesSchema })
   @ApiErrors('VALIDATION_FAILED')
