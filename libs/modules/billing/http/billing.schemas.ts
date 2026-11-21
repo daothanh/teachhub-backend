@@ -207,7 +207,7 @@ export const invoiceLineKindSchema = z
   .meta({
     id: 'InvoiceLineKind',
     description:
-      'Sprint 5 sinh `session`, `monthly`, `course_installment`, `discount`, `manual_adjustment`. Sprint 6 sinh thêm `carry_over` (số dư chuyển kỳ, US-7.6) và `prev_adjustment` (chênh lệch điểm danh sửa sau phát hành, US-7.6 AC3); `surcharge` cần US-7.8 (P1). Client coi giá trị lạ như dòng thường',
+      'Sprint 5 sinh `session`, `monthly`, `course_installment`, `discount`, `manual_adjustment`. Sprint 6 sinh thêm `carry_over` (số dư chuyển kỳ, US-7.6) và `prev_adjustment` (chênh lệch điểm danh sửa sau phát hành, US-7.6 AC3); Sprint 7 sinh thêm `surcharge` (phụ thu một lần, US-7.8, P1). Client coi giá trị lạ như dòng thường',
   });
 
 export const sessionNotChargedReasonSchema = z
@@ -425,6 +425,13 @@ export const createAdjustmentRequestSchema = z
       .min(1)
       .max(200)
       .meta({ example: 'Giảm học phí buổi học thử' }),
+    kind: z
+      .enum(['manual_adjustment', 'surcharge'])
+      .default('manual_adjustment')
+      .meta({
+        description:
+          'Sprint 7 (US-7.8, P1). `manual_adjustment` (mặc định, như Sprint 5) hoặc `surcharge` = phụ thu một lần (vd. tài liệu), tạo dòng `surcharge` chỉ cho bản nháp này, không lặp ở kỳ sau (AC2). `surcharge` bắt buộc `amount` > 0, ngược lại → 422 `VALIDATION_FAILED` ở `amount`. Giảm trừ cố định hằng kỳ vẫn đặt ở `PUT /enrollments/{id}/fee-override` (AC1); tổng âm vẫn cắt về 0 (AC3)',
+      }),
     adjustmentReason: z
       .string()
       .trim()

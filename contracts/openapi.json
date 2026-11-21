@@ -6605,7 +6605,7 @@
     },
     "/v1/invoices/{id}/adjustments": {
       "post": {
-        "description": "Chỉ khi hóa đơn còn `draft`; đã phát hành hay hủy → 409 `INVOICE_IMMUTABLE`. Thêm dòng `manual_adjustment` có `amount` ≠ 0 (âm giảm, dương phụ thu), bắt buộc `adjustmentReason`, ghi nhật ký kiểm toán; trả hóa đơn đã tính lại. Mỗi hóa đơn tối đa 20 dòng điều chỉnh, vượt → 422 `VALIDATION_FAILED`. Giới hạn 20 lần/phút/user (429 `RATE_LIMITED`). Tổng `totalAmount` không âm: điều chỉnh làm tổng < 0 thì `totalAmount = 0` và `clampedAmount` là phần âm bị cắt (chuyển kỳ khi có US-7.6). Chưa có endpoint xóa dòng điều chỉnh: nhập sai thì thêm dòng ngược dấu.",
+        "description": "Chỉ khi hóa đơn còn `draft`; đã phát hành hay hủy → 409 `INVOICE_IMMUTABLE`. Thêm dòng `manual_adjustment` (hoặc `surcharge` khi `kind = surcharge`, US-7.8) có `amount` ≠ 0 (âm giảm, dương phụ thu), bắt buộc `adjustmentReason`, ghi nhật ký kiểm toán; trả hóa đơn đã tính lại. Mỗi hóa đơn tối đa 20 dòng điều chỉnh, vượt → 422 `VALIDATION_FAILED`. Giới hạn 20 lần/phút/user (429 `RATE_LIMITED`). Tổng `totalAmount` không âm: điều chỉnh làm tổng < 0 thì `totalAmount = 0` và `clampedAmount` là phần âm bị cắt (chuyển kỳ khi có US-7.6). Chưa có endpoint xóa dòng điều chỉnh: nhập sai thì thêm dòng ngược dấu.",
         "operationId": "billing_adjust",
         "parameters": [
           {
@@ -8026,6 +8026,616 @@
           "billing"
         ]
       }
+    },
+    "/v1/reports/month-overview": {
+      "get": {
+        "description": "Bốn ô số của màn T12. Đổi tháng chỉ đổi `billedAmount` và `collectedAmount`; `outstandingAmount` và `activeStudentCount` là giá trị hiện tại. Cập nhật ngay khi ghi hoặc hủy thanh toán (US-7.4 AC3 \"báo cáo cập nhật\"): đọc thẳng từ sổ, không có bảng tổng hợp trễ.",
+        "operationId": "reports_monthOverview",
+        "parameters": [
+          {
+            "name": "month",
+            "required": false,
+            "in": "query",
+            "description": "Tháng dương lịch `YYYY-MM` theo múi giờ tenant; bỏ trống = tháng hiện tại. Tháng tương lai hợp lệ, số liệu bằng 0",
+            "schema": {
+              "description": "Tháng dương lịch `YYYY-MM` theo múi giờ tenant; bỏ trống = tháng hiện tại. Tháng tương lai hợp lệ, số liệu bằng 0",
+              "example": "2026-11",
+              "type": "string",
+              "pattern": "^\\d{4}-(0[1-9]|1[0-2])$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MonthOverview"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Tổng quan tháng: phải thu, đã thu, công nợ, học viên (T12, US-8.1)",
+        "tags": [
+          "reports"
+        ]
+      }
+    },
+    "/v1/reports/payments": {
+      "get": {
+        "description": "Mỗi dòng một bút toán của sổ doanh thu trong tháng, mới nhất trước, gồm cả dòng đảo do hủy thanh toán. `totalAmount` luôn bằng `collectedAmount` của tổng quan. Bổ sung ngoài bảng Spec §5.4: US-8.1 AC3 cần danh sách chi tiết của ô \"Đã thu\".",
+        "operationId": "reports_payments",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": 1,
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000
+            }
+          },
+          {
+            "name": "pageSize",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": 20,
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "month",
+            "required": false,
+            "in": "query",
+            "description": "Tháng dương lịch `YYYY-MM` theo múi giờ tenant; bỏ trống = tháng hiện tại. Tháng tương lai hợp lệ, số liệu bằng 0",
+            "schema": {
+              "description": "Tháng dương lịch `YYYY-MM` theo múi giờ tenant; bỏ trống = tháng hiện tại. Tháng tương lai hợp lệ, số liệu bằng 0",
+              "example": "2026-11",
+              "type": "string",
+              "pattern": "^\\d{4}-(0[1-9]|1[0-2])$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevenueEntryPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Danh sách khoản thu tạo nên số \"Đã thu\" của tháng (US-8.1 AC2, AC3)",
+        "tags": [
+          "reports"
+        ]
+      }
+    },
+    "/v1/reports/revenue-by-class": {
+      "get": {
+        "description": "Kèm chuyên cần của lớp (hiện ở thẻ \"Theo lớp\"). Lớp đã lưu trữ vẫn xuất hiện ở tháng cũ (US-8.2 AC2). Tổng các dòng bằng đúng `collectedAmount` của tổng quan (US-8.2 AC3): quy tắc chia thanh toán của hóa đơn nhiều lớp ghi ở schema.",
+        "operationId": "reports_revenueByClass",
+        "parameters": [
+          {
+            "name": "month",
+            "required": false,
+            "in": "query",
+            "description": "Tháng dương lịch `YYYY-MM` theo múi giờ tenant; bỏ trống = tháng hiện tại. Tháng tương lai hợp lệ, số liệu bằng 0",
+            "schema": {
+              "description": "Tháng dương lịch `YYYY-MM` theo múi giờ tenant; bỏ trống = tháng hiện tại. Tháng tương lai hợp lệ, số liệu bằng 0",
+              "example": "2026-11",
+              "type": "string",
+              "pattern": "^\\d{4}-(0[1-9]|1[0-2])$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevenueByClass"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Doanh thu đã thu theo lớp của một tháng (T12, US-8.2)",
+        "tags": [
+          "reports"
+        ]
+      }
+    },
+    "/v1/reports/revenue-12m": {
+      "get": {
+        "description": "12 tháng liên tiếp kết thúc ở `month` (mặc định tháng hiện tại), cũ nhất trước; cột \"T12 … T11\" của biểu đồ. Mỗi cột bằng `collectedAmount` của tháng đó.",
+        "operationId": "reports_revenue12m",
+        "parameters": [
+          {
+            "name": "month",
+            "required": false,
+            "in": "query",
+            "description": "Tháng dương lịch `YYYY-MM` theo múi giờ tenant; bỏ trống = tháng hiện tại. Tháng tương lai hợp lệ, số liệu bằng 0",
+            "schema": {
+              "description": "Tháng dương lịch `YYYY-MM` theo múi giờ tenant; bỏ trống = tháng hiện tại. Tháng tương lai hợp lệ, số liệu bằng 0",
+              "example": "2026-11",
+              "type": "string",
+              "pattern": "^\\d{4}-(0[1-9]|1[0-2])$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Revenue12m"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Doanh thu đã thu 12 tháng gần nhất (T12, US-8.2 AC1)",
+        "tags": [
+          "reports"
+        ]
+      }
+    },
+    "/v1/plan-usage": {
+      "get": {
+        "description": "Một lần gọi cho màn T14 (biến thể theo `plan.trialAvailable`), chip \"Pro · còn N ngày\" ở tab Thêm và nhãn khóa \"Pro\". Giới hạn và feature flag được backend thực thi ở mọi route (US-0.7 AC4): tạo lớp/học sinh vượt giới hạn → 402 `PLAN_LIMIT_EXCEEDED`, tính năng Pro → 402 `FEATURE_REQUIRES_PRO`, mục chỉ đọc → 402 `READONLY_PLAN_LIMIT`; client mở T14 khi gặp 402. Dữ liệu thật của gói do `subscription.lifecycle` (06:00 hằng ngày) và webhook cập nhật.",
+        "operationId": "subscription_planUsage",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanUsage"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Gói hiện tại, giới hạn, mức dùng và feature flag (US-0.7, US-0.8)",
+        "tags": [
+          "subscription"
+        ]
+      }
+    },
+    "/v1/subscription/trial": {
+      "post": {
+        "description": "Mở ngay toàn bộ tính năng Pro: `status = trialing`, `currentPeriodEnd` = bây giờ + 14 ngày, ghi `trialUsedAt`. Mỗi tenant một lần: đã dùng thử → 422 `TRIAL_ALREADY_USED`; đang `trialing` hoặc `active` → 409 `CONFLICT_STALE`. Không có body. Trả `PlanUsage` mới để client đóng T14 và hiện \"Đã bật Pro dùng thử · còn 14 ngày\". Hết dùng thử mà chưa trả phí: `status = expired`, không xóa dữ liệu (US-0.8 AC4); nhắc còn 7 ngày và 1 ngày do `subscription.lifecycle` (US-0.8 AC5).",
+        "operationId": "subscription_startTrial",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID, giữ nguyên khi thử lại hoặc phát lại từ outbox",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanUsage"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CONFLICT_STALE\n\nIDEMPOTENCY_IN_PROGRESS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "TRIAL_ALREADY_USED\n\nIDEMPOTENCY_KEY_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Bắt đầu dùng thử Pro 14 ngày (US-0.8 AC1)",
+        "tags": [
+          "subscription"
+        ]
+      }
+    },
+    "/v1/subscription/bank-transfer-orders": {
+      "post": {
+        "description": "Dành cho client web (R6, Spec §10): app không gọi và không dẫn link tới đây. Trả số tiền, nội dung chuyển khoản, tài khoản nhận và chuỗi QR cho màn T14a, trạng thái `pending`. Tenant đã có đơn `pending` → trả lại chính đơn đó (vẫn 201, không tạo trùng). Pro chỉ kích hoạt khi quản trị xác nhận đã nhận tiền (`POST /admin/bank-transfer-orders/{id}/confirm`, đã có từ Sprint 2), kèm push cho giáo viên; client đọc `GET /plan-usage` để thấy gói mới. Giới hạn 5 lần/phút/user.",
+        "operationId": "subscription_createBankTransferOrder",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID, giữ nguyên khi thử lại hoặc phát lại từ outbox",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSubscriptionBankTransferOrderRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriptionBankTransferOrder"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "IDEMPOTENCY_IN_PROGRESS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED\n\nIDEMPOTENCY_KEY_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Tạo đơn mua Pro bằng chuyển khoản, chỉ trên web (US-0.8 AC3)",
+        "tags": [
+          "subscription"
+        ]
+      }
+    },
+    "/v1/webhooks/revenuecat": {
+      "post": {
+        "description": "RevenueCat gọi server-to-server, không có JWT. Xác thực bằng header `Authorization` mang giá trị bí mật đặt trong cấu hình webhook, so sánh thời gian hằng (Spec §7.1); sai hoặc thiếu → 401 `UNAUTHENTICATED`. Idempotent theo `event.id` (bảng `subscription_events`, `event_id` duy nhất): gửi lại → 200 `duplicate`. Một giao dịch: ghi sự kiện, cập nhật `subscriptions` (`planCode`, `status`, `source`, `currentPeriodEnd`, `externalRef`) rồi `audit_logs`; Pro có hiệu lực ≤ 1 phút, app không cần khởi động lại. Mọi sự kiện hợp lệ nhưng không áp dụng trả 200 `ignored` (không 4xx) để RevenueCat không thử lại vô ích; chỉ sai chữ ký trả 401 và thân sai định dạng trả 422 `VALIDATION_FAILED`. Quy tắc từng loại sự kiện ghi ở `RevenueCatEvent.type`.",
+        "operationId": "revenueCatWebhook_receive",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevenueCatWebhookRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevenueCatWebhookResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "revenuecatSecret": []
+          }
+        ],
+        "summary": "Webhook RevenueCat cập nhật gói Pro (US-0.8 AC2)",
+        "tags": [
+          "webhooks"
+        ]
+      }
     }
   },
   "info": {
@@ -8060,6 +8670,12 @@
         "in": "header",
         "name": "x-admin-permissions",
         "description": "Đúng MỘT URI quyền mà BFF vừa kiểm cho thao tác này (không gửi cả danh sách quyền của nhân sự). Giá trị hợp lệ: `/teachhub/admin/bank-transfer`, `/teachhub/admin/legal-articles`, `/teachhub/admin/support`. Khác URI route yêu cầu (`x-admin-permission` của operation) → 403 `FORBIDDEN`."
+      },
+      "revenuecatSecret": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "Authorization",
+        "description": "Bí mật webhook RevenueCat (giá trị nguyên văn đặt ở mục Authorization header của webhook), xoay vòng định kỳ. Sai hoặc thiếu → 401 `UNAUTHENTICATED`."
       }
     },
     "schemas": {
@@ -13201,7 +13817,7 @@
           "surcharge",
           "manual_adjustment"
         ],
-        "description": "Sprint 5 sinh `session`, `monthly`, `course_installment`, `discount`, `manual_adjustment`. Sprint 6 sinh thêm `carry_over` (số dư chuyển kỳ, US-7.6) và `prev_adjustment` (chênh lệch điểm danh sửa sau phát hành, US-7.6 AC3); `surcharge` cần US-7.8 (P1). Client coi giá trị lạ như dòng thường"
+        "description": "Sprint 5 sinh `session`, `monthly`, `course_installment`, `discount`, `manual_adjustment`. Sprint 6 sinh thêm `carry_over` (số dư chuyển kỳ, US-7.6) và `prev_adjustment` (chênh lệch điểm danh sửa sau phát hành, US-7.6 AC3); Sprint 7 sinh thêm `surcharge` (phụ thu một lần, US-7.8, P1). Client coi giá trị lạ như dòng thường"
       },
       "SessionNotChargedReason": {
         "type": "string",
@@ -13228,6 +13844,15 @@
             "minLength": 1,
             "maxLength": 200,
             "example": "Giảm học phí buổi học thử"
+          },
+          "kind": {
+            "default": "manual_adjustment",
+            "description": "Sprint 7 (US-7.8, P1). `manual_adjustment` (mặc định, như Sprint 5) hoặc `surcharge` = phụ thu một lần (vd. tài liệu), tạo dòng `surcharge` chỉ cho bản nháp này, không lặp ở kỳ sau (AC2). `surcharge` bắt buộc `amount` > 0, ngược lại → 422 `VALIDATION_FAILED` ở `amount`. Giảm trừ cố định hằng kỳ vẫn đặt ở `PUT /enrollments/{id}/fee-override` (AC1); tổng âm vẫn cắt về 0 (AC3)",
+            "type": "string",
+            "enum": [
+              "manual_adjustment",
+              "surcharge"
+            ]
           },
           "adjustmentReason": {
             "type": "string",
@@ -14804,6 +15429,807 @@
           "payment_void"
         ],
         "description": "`unpaid_carried` = phần chưa thu của hóa đơn kỳ trước chuyển kỳ sau (ghi nợ), `overpayment` = trả thừa (ghi có), `prev_adjustment` = chênh lệch do sửa điểm danh sau phát hành (nợ hoặc có), `applied_to_invoice` = khoản đã đưa vào dòng `carry_over` của hóa đơn kỳ sau (bút toán đối ứng), `payment_void` = đảo do hủy thanh toán. Client coi giá trị lạ như dòng thường"
+      },
+      "MonthOverview": {
+        "type": "object",
+        "properties": {
+          "month": {
+            "type": "string",
+            "pattern": "^\\d{4}-(0[1-9]|1[0-2])$"
+          },
+          "billedAmount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "\"Phải thu\": Σ `totalAmount` hóa đơn đã phát hành (không `draft`, không `void`) của kỳ thu tháng này (US-8.1 AC1)"
+          },
+          "collectedAmount": {
+            "type": "integer",
+            "minimum": -100000000000,
+            "maximum": 100000000000,
+            "description": "\"Đã thu\": tổng thanh toán ghi trong tháng (US-8.1 AC1). Có dấu: bằng Σ `amount` của `revenue_ledger` có `entry_date` trong tháng, gồm cả dòng đảo do hủy thanh toán (hủy thanh toán của tháng trước làm tháng này giảm), nên hiếm khi âm"
+          },
+          "outstandingAmount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "\"Công nợ\": nợ ròng HIỆN TẠI của mọi học viên, không phụ thuộc tháng chọn; bằng `summary.totalAmount` của `GET /receivables` (US-8.1 AC1)"
+          },
+          "activeStudentCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "\"HS đang học\": học viên `active` hiện tại"
+          },
+          "hasData": {
+            "type": "boolean",
+            "description": "`false` khi tháng không có hóa đơn phát hành lẫn thanh toán (màn hiện \"Chưa có dữ liệu tháng này\")"
+          }
+        },
+        "required": [
+          "month",
+          "billedAmount",
+          "collectedAmount",
+          "outstandingAmount",
+          "activeStudentCount",
+          "hasData"
+        ],
+        "additionalProperties": false,
+        "description": "Bốn ô số của T12. Chạm vào số (US-8.1 AC3) mở danh sách tạo nên số đó: Phải thu → `GET /billing-periods?month=` rồi `GET /billing-periods/{id}`; Đã thu → `GET /reports/payments?month=`; Công nợ → `GET /receivables`; HS đang học → `GET /students`",
+        "example": {
+          "month": "2026-11",
+          "billedAmount": 72400000,
+          "collectedAmount": 65600000,
+          "outstandingAmount": 6800000,
+          "activeStudentCount": 46,
+          "hasData": true
+        }
+      },
+      "RevenueEntryPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RevenueEntry"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "pageSize": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "totalAmount": {
+            "type": "integer",
+            "minimum": -100000000000,
+            "maximum": 100000000000,
+            "description": "Σ `amount` của MỌI dòng trong tháng (không chỉ trang này); bằng `collectedAmount` của `GET /reports/month-overview` (US-8.1 AC2, sai lệch 0 đồng). Có dấu: bằng Σ `amount` của `revenue_ledger` có `entry_date` trong tháng, gồm cả dòng đảo do hủy thanh toán (hủy thanh toán của tháng trước làm tháng này giảm), nên hiếm khi âm"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "pageSize",
+          "totalAmount"
+        ],
+        "additionalProperties": false
+      },
+      "RevenueEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "Id dòng `revenue_ledger`"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/RevenueEntryKind"
+          },
+          "paymentId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "invoiceId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "invoiceCode": {
+            "example": "TH-25K7Q9",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "studentId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "studentName": {
+            "type": "string"
+          },
+          "method": {
+            "$ref": "#/components/schemas/PaymentMethod"
+          },
+          "entryDate": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
+            "description": "Ngày ghi sổ theo múi giờ tenant: `paidOn` của thanh toán với `payment`; ngày hủy với `reversal`"
+          },
+          "amount": {
+            "type": "integer",
+            "minimum": -100000000000,
+            "maximum": 100000000000,
+            "description": "Có dấu: dương với `payment`, âm với `reversal`"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "paymentId",
+          "invoiceId",
+          "invoiceCode",
+          "studentId",
+          "studentName",
+          "method",
+          "entryDate",
+          "amount"
+        ],
+        "additionalProperties": false
+      },
+      "RevenueEntryKind": {
+        "type": "string",
+        "enum": [
+          "payment",
+          "reversal"
+        ],
+        "description": "`payment` = dòng ghi khi thu tiền; `reversal` = dòng đảo khi hủy thanh toán (`amount` âm, US-9.5 AC1). Client coi giá trị lạ như `payment`"
+      },
+      "RevenueByClass": {
+        "type": "object",
+        "properties": {
+          "month": {
+            "type": "string",
+            "pattern": "^\\d{4}-(0[1-9]|1[0-2])$"
+          },
+          "collectedAmount": {
+            "type": "integer",
+            "minimum": -100000000000,
+            "maximum": 100000000000,
+            "description": "Tổng mọi dòng; bằng `collectedAmount` của `GET /reports/month-overview` (US-8.2 AC3). Có dấu: bằng Σ `amount` của `revenue_ledger` có `entry_date` trong tháng, gồm cả dòng đảo do hủy thanh toán (hủy thanh toán của tháng trước làm tháng này giảm), nên hiếm khi âm"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ClassRevenue"
+            },
+            "description": "Sắp theo `collectedAmount` giảm dần, dòng \"Khác\" (nếu có) ở cuối. Không phân trang (số lớp của một giáo viên nhỏ)"
+          }
+        },
+        "required": [
+          "month",
+          "collectedAmount",
+          "items"
+        ],
+        "additionalProperties": false,
+        "description": "Một khoản thanh toán thuộc hóa đơn gộp nhiều lớp được chia cho các lớp theo tỷ lệ dòng học phí dương của từng lớp trong hóa đơn đó (`session`, `monthly`, `course_installment`, `surcharge`), làm tròn đồng theo phần dư lớn nhất để tổng các lớp bằng đúng số tiền thanh toán; phần không gán được vào dòng \"Khác\" (`classId = null`). Dòng đảo chia ngược cùng tỷ lệ của thanh toán gốc. **Quy tắc phân bổ do Owner/TL chốt (US-8.2 AC3 đòi tổng khớp tuyệt đối).**",
+        "example": {
+          "month": "2026-11",
+          "collectedAmount": 65600000,
+          "items": [
+            {
+              "classId": "019b2c10-0001-7a10-8a01-0000000000a1",
+              "className": "Toán 9A",
+              "archived": false,
+              "collectedAmount": 28800000,
+              "attendancePercent": 92
+            },
+            {
+              "classId": null,
+              "className": null,
+              "archived": false,
+              "collectedAmount": 800000,
+              "attendancePercent": null
+            }
+          ]
+        }
+      },
+      "ClassRevenue": {
+        "type": "object",
+        "properties": {
+          "classId": {
+            "description": "null = dòng \"Khác\": phần tiền không gán được cho lớp nào (vd. thanh toán trả nợ cũ `carry_over`, phụ thu không thuộc lớp)",
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "className": {
+            "description": "null khi `classId` null",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "archived": {
+            "type": "boolean",
+            "description": "Lớp đã lưu trữ vẫn có dòng với số liệu lịch sử (US-8.2 AC2)"
+          },
+          "collectedAmount": {
+            "type": "integer",
+            "minimum": -100000000000,
+            "maximum": 100000000000,
+            "description": "Phần \"đã thu\" của tháng gán cho lớp. Có dấu: bằng Σ `amount` của `revenue_ledger` có `entry_date` trong tháng, gồm cả dòng đảo do hủy thanh toán (hủy thanh toán của tháng trước làm tháng này giảm), nên hiếm khi âm"
+          },
+          "attendancePercent": {
+            "description": "Chuyên cần của lớp trong tháng, % làm tròn một chữ số thập phân: (có mặt + đi muộn) / tổng lượt của buổi đã dạy (US-8.4 AC1). null khi lớp không có buổi đã dạy trong tháng",
+            "example": 92,
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100
+          }
+        },
+        "required": [
+          "classId",
+          "className",
+          "archived",
+          "collectedAmount",
+          "attendancePercent"
+        ],
+        "additionalProperties": false
+      },
+      "Revenue12m": {
+        "type": "object",
+        "properties": {
+          "months": {
+            "minItems": 12,
+            "maxItems": 12,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "month": {
+                  "type": "string",
+                  "pattern": "^\\d{4}-(0[1-9]|1[0-2])$"
+                },
+                "collectedAmount": {
+                  "type": "integer",
+                  "minimum": -100000000000,
+                  "maximum": 100000000000,
+                  "description": "Đã thu của tháng. Có dấu: bằng Σ `amount` của `revenue_ledger` có `entry_date` trong tháng, gồm cả dòng đảo do hủy thanh toán (hủy thanh toán của tháng trước làm tháng này giảm), nên hiếm khi âm"
+                }
+              },
+              "required": [
+                "month",
+                "collectedAmount"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Đúng 12 phần tử liên tiếp kết thúc ở `month` của query, cũ nhất trước (cột biểu đồ T12); tháng không có dữ liệu là 0"
+          }
+        },
+        "required": [
+          "months"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "months": [
+            {
+              "month": "2025-12",
+              "collectedAmount": 58000000
+            },
+            {
+              "month": "2026-01",
+              "collectedAmount": 61200000
+            }
+          ]
+        }
+      },
+      "PlanUsage": {
+        "type": "object",
+        "properties": {
+          "plan": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "description": "`pro` khi `status` là `trialing` hoặc `active`; `free` với `free` và `expired`",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/PlanCode"
+                  }
+                ]
+              },
+              "status": {
+                "$ref": "#/components/schemas/SubscriptionStatus"
+              },
+              "source": {
+                "description": "Nơi thu phí; null khi `free`, `expired` chưa từng trả, hoặc `trialing`",
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/SubscriptionSource"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "currentPeriodEnd": {
+                "description": "Hết hạn dùng thử (`trialing`) hoặc hết hạn Pro (`active`); null khi `free`. Dùng cho chip \"Pro · còn N ngày\" ở tab Thêm",
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              },
+              "daysLeft": {
+                "description": "Số ngày còn lại tới `currentPeriodEnd` (làm tròn lên, theo múi giờ tenant); null khi không có `currentPeriodEnd`",
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "trialUsedAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              },
+              "trialAvailable": {
+                "type": "boolean",
+                "description": "`true` khi tenant chưa từng dùng thử (`trialUsedAt` null) và đang `free`; `false` thì màn T14 ẩn nút \"Dùng thử 14 ngày\" (biến thể \"Đã dùng thử\")"
+              }
+            },
+            "required": [
+              "code",
+              "status",
+              "source",
+              "currentPeriodEnd",
+              "daysLeft",
+              "trialUsedAt",
+              "trialAvailable"
+            ],
+            "additionalProperties": false
+          },
+          "limits": {
+            "type": "object",
+            "properties": {
+              "maxActiveClasses": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "maxActiveStudents": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "maxActiveClasses",
+              "maxActiveStudents"
+            ],
+            "additionalProperties": false,
+            "description": "Giới hạn của gói đang áp dụng (`plans.limits`); null = không giới hạn (Pro). Miễn phí: 3 lớp, 20 học sinh (US-0.7). Lớp đã lưu trữ và học sinh tạm nghỉ/đã nghỉ không tính (US-0.8 AC4)"
+          },
+          "usage": {
+            "type": "object",
+            "properties": {
+              "activeClasses": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "activeStudents": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "activeClasses",
+              "activeStudents"
+            ],
+            "additionalProperties": false
+          },
+          "readOnly": {
+            "type": "object",
+            "properties": {
+              "classCount": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "studentCount": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "classCount",
+              "studentCount"
+            ],
+            "additionalProperties": false,
+            "description": "Số lớp và học sinh đang ở chế độ chỉ đọc vì vượt giới hạn sau khi hết dùng thử/hết hạn (US-0.8 AC4); 0 khi chưa vượt hoặc đang Pro. Chọn theo thời điểm tạo sớm nhất giữ lại, phần còn lại chỉ đọc"
+          },
+          "features": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlanFeature"
+            },
+            "description": "Feature flag đang bật/tắt cho tenant (gói + ghi đè); thực thi ở backend, client chỉ dùng để hiện nhãn \"Pro\" và khóa (US-0.7 AC3, AC4). Tính năng khóa trả 402 `FEATURE_REQUIRES_PRO`"
+          },
+          "proPriceVnd": {
+            "description": "Giá hiển thị ở T14 cho kênh chuyển khoản; null khi chưa có (giá VNĐ chờ PO chốt). Giá App Store/Google Play lấy từ RevenueCat ở app, không qua API này",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100000000000
+          },
+          "pendingBankTransferOrder": {
+            "description": "Đơn chuyển khoản đang chờ xác nhận (màn T14a \"Chờ xác nhận\"); null nếu không có",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubscriptionBankTransferOrder"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "plan",
+          "limits",
+          "usage",
+          "readOnly",
+          "features",
+          "proPriceVnd",
+          "pendingBankTransferOrder"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "plan": {
+            "code": "pro",
+            "status": "trialing",
+            "source": null,
+            "currentPeriodEnd": "2027-03-15T10:15:00+07:00",
+            "daysLeft": 14,
+            "trialUsedAt": "2027-03-01T10:15:00+07:00",
+            "trialAvailable": false
+          },
+          "limits": {
+            "maxActiveClasses": null,
+            "maxActiveStudents": null
+          },
+          "usage": {
+            "activeClasses": 4,
+            "activeStudents": 23
+          },
+          "readOnly": {
+            "classCount": 0,
+            "studentCount": 0
+          },
+          "features": [
+            {
+              "key": "compliance.form02",
+              "enabled": true
+            },
+            {
+              "key": "revenue.export",
+              "enabled": true
+            }
+          ],
+          "proPriceVnd": null,
+          "pendingBankTransferOrder": null
+        }
+      },
+      "PlanCode": {
+        "type": "string",
+        "enum": [
+          "free",
+          "pro"
+        ]
+      },
+      "SubscriptionStatus": {
+        "type": "string",
+        "enum": [
+          "free",
+          "trialing",
+          "active",
+          "expired"
+        ],
+        "description": "`free` = chưa từng nâng cấp; `trialing` = đang dùng thử Pro; `active` = Pro đã trả phí còn hạn; `expired` = hết dùng thử hoặc hết hạn Pro, về giới hạn Miễn phí (phần vượt chỉ đọc, US-0.8 AC4)"
+      },
+      "SubscriptionSource": {
+        "type": "string",
+        "enum": [
+          "app_store",
+          "play_store",
+          "bank_transfer"
+        ]
+      },
+      "PlanFeature": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "Khóa feature flag theo Spec §4.4 (`plan_features` + `tenant_feature_overrides`), vd `compliance.form02`, `compliance.form03`, `revenue.export`, `reports.export`. Client chỉ đọc khóa mình biết, bỏ qua khóa lạ",
+            "example": "revenue.export"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "key",
+          "enabled"
+        ],
+        "additionalProperties": false
+      },
+      "SubscriptionBankTransferOrder": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "planCode": {
+            "$ref": "#/components/schemas/PlanCode"
+          },
+          "amount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "VND, số tiền phải chuyển cho gói Pro một năm"
+          },
+          "transferNote": {
+            "type": "string",
+            "pattern": "^[A-Z0-9 ]{1,25}$",
+            "description": "Nội dung chuyển khoản, chỉ `[A-Z0-9 ]`, ≤ 25 ký tự (cùng quy tắc `transferNote` hóa đơn); quản trị đối chiếu theo nội dung này",
+            "example": "TEACHHUB PRO CO LAN"
+          },
+          "payee": {
+            "type": "object",
+            "properties": {
+              "bankBin": {
+                "type": "string",
+                "pattern": "^\\d{6}$"
+              },
+              "bankName": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "accountNo": {
+                "type": "string"
+              },
+              "accountName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "bankBin",
+              "bankName",
+              "accountNo",
+              "accountName"
+            ],
+            "additionalProperties": false,
+            "description": "Tài khoản nhận tiền của TeachHub (cấu hình hệ thống), đủ để chép tay khi quét QR không được"
+          },
+          "qrPayload": {
+            "type": "string",
+            "maxLength": 512,
+            "description": "Chuỗi VietQR sinh bằng `buildVietQrPayload`, đã chứa số tiền và nội dung; client chỉ vẽ mã QR (màn T14a)"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SubscriptionOrderStatus"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          }
+        },
+        "required": [
+          "id",
+          "planCode",
+          "amount",
+          "transferNote",
+          "payee",
+          "qrPayload",
+          "status",
+          "createdAt"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "id": "019d0a10-0001-7c40-8d01-000000000001",
+          "planCode": "pro",
+          "amount": 250000,
+          "transferNote": "TEACHHUB PRO CO LAN",
+          "payee": {
+            "bankBin": "970436",
+            "bankName": "Vietcombank",
+            "accountNo": "0011004123456",
+            "accountName": "CONG TY TEACHHUB"
+          },
+          "qrPayload": "000201010212…6304ABCD",
+          "status": "pending",
+          "createdAt": "2027-03-01T10:15:00+07:00"
+        }
+      },
+      "SubscriptionOrderStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "confirmed"
+        ],
+        "description": "`pending` = chờ quản trị TeachHub xác nhận đã nhận tiền; `confirmed` = đã xác nhận (đơn đã kích hoạt Pro, không còn hiện ở `pendingBankTransferOrder`)"
+      },
+      "CreateSubscriptionBankTransferOrderRequest": {
+        "type": "object",
+        "properties": {
+          "planCode": {
+            "type": "string",
+            "enum": [
+              "pro"
+            ]
+          }
+        },
+        "required": [
+          "planCode"
+        ],
+        "example": {
+          "planCode": "pro"
+        }
+      },
+      "RevenueCatWebhookRequest": {
+        "type": "object",
+        "properties": {
+          "api_version": {
+            "type": "string",
+            "maxLength": 20
+          },
+          "event": {
+            "$ref": "#/components/schemas/RevenueCatEvent"
+          }
+        },
+        "required": [
+          "event"
+        ],
+        "additionalProperties": {},
+        "description": "Thân webhook RevenueCat giữ nguyên tên trường snake_case của họ; trường không khai báo bị bỏ qua",
+        "example": {
+          "api_version": "1.0",
+          "event": {
+            "id": "e2b1c7a0-4b3d-4f3e-9c2a-6f1d0a9b8c7d",
+            "type": "INITIAL_PURCHASE",
+            "app_user_id": "019b2c10-0001-7a10-8a01-000000000001",
+            "product_id": "teachhub_pro_yearly",
+            "store": "APP_STORE",
+            "environment": "PRODUCTION",
+            "expiration_at_ms": 1803000000000,
+            "event_timestamp_ms": 1771464000000
+          }
+        }
+      },
+      "RevenueCatEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "`event.id` của RevenueCat: khóa idempotency, lưu ở `subscription_events`"
+          },
+          "type": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 60,
+            "description": "Loại sự kiện RevenueCat. Cập nhật gói: `INITIAL_PURCHASE`, `RENEWAL`, `PRODUCT_CHANGE`, `UNCANCELLATION`, `NON_RENEWING_PURCHASE` → `active`; `EXPIRATION` → `expired`; `CANCELLATION`, `BILLING_ISSUE` chỉ ghi sự kiện, gói giữ tới hết kỳ. Loại khác và `TEST` → `ignored`",
+            "example": "INITIAL_PURCHASE"
+          },
+          "app_user_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "`tenant_id` (UUID), app đặt khi đăng nhập RevenueCat; không PII (Spec §2.9). Không phải UUID tenant có thật → `ignored` (vẫn 200 để RevenueCat không thử lại)"
+          },
+          "product_id": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "store": {
+            "description": "`APP_STORE` → `source = app_store`, `PLAY_STORE` → `play_store`; kho khác → `ignored`",
+            "type": "string",
+            "maxLength": 40
+          },
+          "environment": {
+            "description": "Môi trường production bỏ qua sự kiện `SANDBOX` (`ignored`); staging dùng project RevenueCat sandbox riêng (Spec §9.1)",
+            "type": "string",
+            "enum": [
+              "SANDBOX",
+              "PRODUCTION"
+            ]
+          },
+          "expiration_at_ms": {
+            "description": "Mili giây epoch; thành `currentPeriodEnd`",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "event_timestamp_ms": {
+            "description": "Mili giây epoch; sự kiện cũ hơn sự kiện đã xử lý của cùng tenant không ghi đè gói (`ignored`), vì RevenueCat có thể giao sai thứ tự",
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "app_user_id"
+        ],
+        "additionalProperties": {}
+      },
+      "RevenueCatWebhookResult": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "processed",
+              "duplicate",
+              "ignored"
+            ],
+            "description": "`processed` = đã cập nhật `subscriptions`; `duplicate` = `event.id` đã xử lý, không làm gì; `ignored` = hợp lệ nhưng không áp dụng (loại/kho/môi trường/tenant lạ, sự kiện cũ)"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "status": "processed"
+        }
       }
     }
   }
