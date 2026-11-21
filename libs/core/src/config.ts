@@ -6,12 +6,16 @@ const csv = (v: string) =>
     .map((s) => s.trim())
     .filter(Boolean);
 
-// Client ID Android debug (khóa ký debug ai cũng dựng được) của dev/staging/production: không bao giờ được vào production.
-const GOOGLE_DEBUG_CLIENT_IDS = [
-  '305225338991-r640djv4j04rhv3uqq8g4m56bs3n901a',
-  '753323722874-at7jre1ehfam9pt140oar0d3k3dqbnd2',
-  '432762025168-3i1f3r2a7oelb9hg7pusr9uqc48umcdh',
-].map((id) => `${id}.apps.googleusercontent.com`);
+// Mỗi môi trường chỉ nhận client của đúng project Google của nó (danh sách trắng theo số project).
+const GOOGLE_PROJECT_PREFIX: Record<string, string> = {
+  development: '305225338991-', // dayhoc-dev
+  staging: '753323722874-', // dayhoc-stg
+  production: '432762025168-', // dayhoc-4c6db
+};
+// Client Android debug của production (khóa ký debug ai cũng dựng được): không bao giờ được vào production.
+const GOOGLE_PROD_DEBUG_CLIENT_ID =
+  '432762025168-3i1f3r2a7oelb9hg7pusr9uqc48umcdh.apps.googleusercontent.com';
+const GOOGLE_JWKS_DEFAULT_URL = 'https://www.googleapis.com/oauth2/v3/certs';
 const GOOGLE_CLIENT_ID_FORMAT = /^\d+-[a-z0-9]+\.apps\.googleusercontent\.com$/;
 
 const isLocalOrTest = (v: string | undefined) => v === 'local' || v === 'test';
@@ -55,9 +59,7 @@ export const envSchema = z
     /** Client ID OAuth Google (Web, iOS, Android upload), ngăn cách bởi dấu phẩy — `aud` hợp lệ của id_token. Bắt buộc ngoài local/test; trống = từ chối mọi id_token. */
     GOOGLE_CLIENT_IDS: z.string().default('').transform(csv),
     /** Khóa công khai của Google; test trỏ về JWKS giả. */
-    GOOGLE_JWKS_URL: z
-      .url()
-      .default('https://www.googleapis.com/oauth2/v3/certs'),
+    GOOGLE_JWKS_URL: z.url().default(GOOGLE_JWKS_DEFAULT_URL),
     /** Bundle ID (ngăn cách bởi dấu phẩy) — `aud` hợp lệ của identityToken Apple. Trống = từ chối mọi token Apple. */
     APPLE_BUNDLE_ID: z.string().default('').transform(csv),
     /** Khóa công khai của Apple; test trỏ về JWKS giả. */
@@ -129,11 +131,24 @@ export const envSchema = z
           );
         } else if (
           e.NODE_ENV === 'production' &&
-          GOOGLE_DEBUG_CLIENT_IDS.includes(id)
+          id === GOOGLE_PROD_DEBUG_CLIENT_ID
         ) {
           issue('Production không nhận client Android debug');
+        } else if (
+          GOOGLE_PROJECT_PREFIX[e.NODE_ENV ?? ''] &&
+          !id.startsWith(GOOGLE_PROJECT_PREFIX[e.NODE_ENV!]!)
+        ) {
+          issue(
+            `${e.NODE_ENV} chỉ nhận client của project ${GOOGLE_PROJECT_PREFIX[e.NODE_ENV!]}*`,
+          );
         }
       }
+      if (e.GOOGLE_JWKS_URL !== GOOGLE_JWKS_DEFAULT_URL)
+        ctx.addIssue({
+          code: 'custom',
+          path: ['GOOGLE_JWKS_URL'],
+          message: 'Ngoài local/test chỉ nhận URL JWKS mặc định của Google',
+        });
     }
     if (e.NODE_ENV !== 'staging' && e.NODE_ENV !== 'production') return;
     for (const k of ['APPLE_BUNDLE_ID'] as const) {

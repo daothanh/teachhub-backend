@@ -224,12 +224,45 @@ describe('validateEnv', () => {
       ).toEqual([web]);
     });
 
+    it('mỗi môi trường chỉ nhận client của project mình', () => {
+      const dev = `305225338991-7vf98anmjogm9jksgd9kdije4ah8ncgk${sfx}`;
+      for (const [NODE_ENV, ids] of [
+        ['production', dev],
+        ['staging', web],
+        ['development', web],
+        ['production', `${web},${dev}`],
+      ] as const)
+        expect(() =>
+          validateEnv(base({ NODE_ENV, GOOGLE_CLIENT_IDS: ids })),
+        ).toThrow(/chỉ nhận client của project/);
+    });
+
+    it('ngoài local/test chỉ nhận JWKS mặc định của Google', () => {
+      expect(() =>
+        validateEnv(
+          base({
+            NODE_ENV: 'production',
+            GOOGLE_CLIENT_IDS: web,
+            GOOGLE_JWKS_URL: 'https://evil.example.com/certs',
+          }),
+        ),
+      ).toThrow(/JWKS mặc định/);
+      expect(
+        validateEnv(
+          base({
+            NODE_ENV: 'test',
+            GOOGLE_JWKS_URL: 'http://127.0.0.1:1/certs',
+          }),
+        ).GOOGLE_JWKS_URL,
+      ).toBe('http://127.0.0.1:1/certs');
+    });
+
     it('client debug vẫn dùng được ở development', () => {
       expect(
         validateEnv(
           base({
             NODE_ENV: 'development',
-            GOOGLE_CLIENT_IDS: `${web},${devDebug}`,
+            GOOGLE_CLIENT_IDS: `305225338991-7vf98anmjogm9jksgd9kdije4ah8ncgk${sfx},${devDebug}`,
           }),
         ).GOOGLE_CLIENT_IDS,
       ).toHaveLength(2);
