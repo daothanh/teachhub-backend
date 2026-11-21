@@ -6,11 +6,14 @@ const csv = (v: string) =>
     .map((s) => s.trim())
     .filter(Boolean);
 
+const isLocalOrTest = (v: string | undefined) => v === 'local' || v === 'test';
+
 export const envSchema = z
   .object({
     NODE_ENV: z
       .enum(['local', 'development', 'staging', 'production', 'test'])
-      .default('local'),
+      // Thiếu = không phải local: không bao giờ rơi về khóa mặc định `dev-only-...`.
+      .optional(),
     PORT: z.coerce.number().int().default(3000),
     LOG_LEVEL: z
       .enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal'])
@@ -81,7 +84,7 @@ export const envSchema = z
   })
   .superRefine((e, ctx) => {
     // Fail closed: chỉ local/test được dùng khóa tạm; development và mọi môi trường khác phải cấp khóa thật.
-    if (!['local', 'test'].includes(e.NODE_ENV)) {
+    if (!isLocalOrTest(e.NODE_ENV)) {
       const keys = [
         'CONSENT_IP_HMAC_KEY',
         'INVITE_CODE_HMAC_KEY',
@@ -106,7 +109,7 @@ export const envSchema = z
         });
       }
     }
-    if (!['staging', 'production'].includes(e.NODE_ENV)) return;
+    if (e.NODE_ENV !== 'staging' && e.NODE_ENV !== 'production') return;
     for (const k of ['GOOGLE_CLIENT_IDS', 'APPLE_BUNDLE_ID'] as const) {
       if (e[k].length === 0) {
         ctx.addIssue({
@@ -117,7 +120,7 @@ export const envSchema = z
       }
     }
   })
-  .refine((e) => e.JWT_PRIVATE_KEY || ['local', 'test'].includes(e.NODE_ENV), {
+  .refine((e) => e.JWT_PRIVATE_KEY || isLocalOrTest(e.NODE_ENV), {
     path: ['JWT_PRIVATE_KEY'],
     message: 'Bắt buộc ngoài local/test',
   });
@@ -127,7 +130,7 @@ export type Env = z.infer<typeof envSchema>;
 /** Khóa bí mật của `name`. Thiếu thì chỉ local/test dùng khóa tạm cố định; môi trường khác ném lỗi (fail closed). */
 export const secretKey = (value: string | undefined, name: string): string => {
   if (value) return value;
-  if (['local', 'test'].includes(process.env.NODE_ENV ?? 'local')) {
+  if (isLocalOrTest(process.env.NODE_ENV)) {
     return `dev-only-${name}-khong-dung-o-staging-production`;
   }
   throw new Error(`Thiếu khóa bí mật ${name}`);

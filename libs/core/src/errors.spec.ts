@@ -159,6 +159,7 @@ describe('validateEnv', () => {
     const env = validateEnv({
       DATABASE_URL: 'postgres://a@b/c',
       REDIS_URL: 'redis://x',
+      NODE_ENV: 'local',
       CORS_ORIGINS: 'a, b',
       S3_REGION: 'us-east-1',
       S3_FORCE_PATH_STYLE: 'true',

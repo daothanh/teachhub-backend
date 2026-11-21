@@ -147,6 +147,8 @@ describe('JwtKeysService (S1-BE-03)', () => {
       /JWT_PRIVATE_KEY/,
     );
     expect(() => validateEnv({ ...base, NODE_ENV: 'test' })).not.toThrow();
+    // Thiếu NODE_ENV không được coi là local: bắt buộc khóa.
+    expect(() => validateEnv({ ...base })).toThrow(/JWT_PRIVATE_KEY/);
   });
 
   it('staging/production bắt buộc GOOGLE_CLIENT_IDS và APPLE_BUNDLE_ID; APPLE_BUNDLE_ID nhận danh sách', () => {
@@ -198,11 +200,14 @@ describe('JwtKeysService (S1-BE-03)', () => {
     try {
       process.env.NODE_ENV = 'development';
       expect(() => secretKey(undefined, 'X')).toThrow(/Thiếu khóa/);
+      delete process.env.NODE_ENV;
+      expect(() => secretKey(undefined, 'X')).toThrow(/Thiếu khóa/);
       process.env.NODE_ENV = 'test';
       expect(secretKey(undefined, 'X')).toContain('dev-only');
       expect(secretKey('v', 'X')).toBe('v');
     } finally {
-      process.env.NODE_ENV = prev;
+      if (prev === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = prev;
     }
   });
 });
