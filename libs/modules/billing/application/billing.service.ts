@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { and, asc, desc, eq, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import {
   AppException,
   MAX_VND,
@@ -11,9 +11,12 @@ import {
   billingPeriods,
   invoiceLines,
   invoices,
+  outboxEvents,
+  payoutAccounts,
   students,
   tenants,
   type Tx,
+  writeAudit,
 } from '@teachhub/db';
 import { formatInZone } from '@teachhub/modules/schedule';
 import type {
@@ -24,7 +27,18 @@ import type {
   BillingPeriodPage,
   CreateAdjustmentRequest,
   Invoice,
+  IssueInvoicesRequest,
+  IssueInvoicesResult,
+  VoidInvoiceRequest,
+  VoidInvoiceResult,
 } from '../http/billing.schemas.js';
+import {
+  generateInvoiceCode,
+  INVOICE_ISSUED,
+  type InvoiceIssuedPayload,
+  transferNoteOf,
+} from '../domain/invoice-issue.js';
+import { buildVietQrPayload } from '../domain/vietqr.js';
 
 const MAX_ADJUSTMENTS = 20;
 const DEFAULT_TZ = 'Asia/Ho_Chi_Minh';
@@ -219,6 +233,258 @@ export class BillingService {
         })}::jsonb)`,
     );
     return this.getInvoice(tx, actor.tenantId, id);
+  }
+
+  /**
+   * Phát hành hóa đơn nháp của kỳ trong MỘT giao dịch (US-7.2 AC4, US-7.3). Khóa kỳ rồi khóa hóa đơn `order by id for update`
+   * (cùng thứ tự với trigger `invoice_lines_guard`, comment 0024) nên hai request song song cùng kỳ nối đuôi nhau: request sau
+   * đọc lại trạng thái đã commit, không phát hành trùng. Hóa đơn 0 đ giữ nguyên bản nháp, không phát sinh outbox (US-1.3 AC3).
+   * shortcut: `payout.bankName` luôn null vì chưa có bảng BIN NAPAS; thêm bảng tra khi có nguồn dữ liệu.
+   * Khóa advisory theo tenant (lấy đầu giao dịch, trước khóa kỳ) tuần tự hóa cấp mã nên không trùng mã giữa các kỳ song song.
+   */
+  async issue(
+    tx: Tx,
+    actor: Actor,
+    periodId: string,
+    body: IssueInvoicesRequest,
+  ): Promise<IssueInvoicesResult> {
+    const { tenantId } = actor;
+    // Tuần tự hóa phát hành trong tenant: cấp mã không trùng giữa các kỳ chạy song song. Luôn lấy trước khóa kỳ.
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${tenantId}))`);
+    const [period] = await tx
+      .select()
+      .from(billingPeriods)
+      .where(
+        and(
+          eq(billingPeriods.tenantId, tenantId),
+          eq(billingPeriods.id, periodId),
+        ),
+      )
+      .for('update');
+    if (!period) throw new AppException('NOT_FOUND');
+
+    const [account] = await tx
+      .select()
+      .from(payoutAccounts)
+      .where(
+        and(
+          eq(payoutAccounts.tenantId, tenantId),
+          eq(payoutAccounts.isPrimary, true),
+        ),
+      );
+    if (!account) throw new AppException('PAYOUT_ACCOUNT_MISSING');
+
+    const wanted = body.invoiceIds ? [...new Set(body.invoiceIds)] : null;
+    const rows = await tx
+      .select()
+      .from(invoices)
+      .where(
+        and(
+          eq(invoices.tenantId, tenantId),
+          eq(invoices.periodId, periodId),
+          wanted ? inArray(invoices.id, wanted) : eq(invoices.status, 'draft'),
+        ),
+      )
+      .orderBy(asc(invoices.id))
+      .for('update');
+    if (wanted && rows.length !== wanted.length)
+      throw new AppException('NOT_FOUND');
+
+    const names = new Map(
+      (
+        await tx
+          .select({ id: students.id, name: students.fullName })
+          .from(students)
+          .where(
+            and(
+              eq(students.tenantId, tenantId),
+              inArray(students.id, [...new Set(rows.map((r) => r.studentId))]),
+            ),
+          )
+      ).map((r) => [r.id, r.name]),
+    );
+    const nameOf = (id: string) => names.get(id) ?? '';
+
+    const skipped: IssueInvoicesResult['skipped'] = [];
+    const todo: InvoiceRow[] = [];
+    for (const r of rows) {
+      if (r.status !== 'draft')
+        skipped.push({
+          invoiceId: r.id,
+          studentName: nameOf(r.studentId),
+          reason: 'NOT_DRAFT',
+        });
+      else if (r.totalAmount <= 0)
+        skipped.push({
+          invoiceId: r.id,
+          studentName: nameOf(r.studentId),
+          reason: 'ZERO_AMOUNT',
+        });
+      else todo.push(r);
+    }
+
+    const codes = await this.freshCodes(tx, tenantId, todo.length);
+    const payout = {
+      bankBin: account.bankBin,
+      bankName: null,
+      accountNo: account.accountNo,
+      accountName: account.accountName,
+    };
+    const issued: IssueInvoicesResult['invoices'] = [];
+    const events: (typeof outboxEvents.$inferInsert)[] = [];
+    const audits: { id: string; before: object; after: object }[] = [];
+    for (const [i, inv] of todo.entries()) {
+      const code = codes[i]!;
+      const transferNote = transferNoteOf(code);
+      const qrPayload = buildVietQrPayload({
+        bankBin: account.bankBin,
+        accountNo: account.accountNo,
+        amount: inv.totalAmount,
+        transferNote,
+      });
+      await tx
+        .update(invoices)
+        .set({
+          status: 'issued',
+          code,
+          transferNote,
+          qrPayload,
+          payout,
+          issuedAt: new Date(),
+        })
+        .where(and(eq(invoices.tenantId, tenantId), eq(invoices.id, inv.id)));
+      events.push({
+        id: uuidv7(),
+        tenantId,
+        type: INVOICE_ISSUED,
+        payload: {
+          invoiceId: inv.id,
+          studentId: inv.studentId,
+          periodMonth: period.periodMonth,
+          totalAmount: inv.totalAmount,
+          dueDate: period.dueDate,
+        } satisfies InvoiceIssuedPayload,
+      });
+      audits.push({
+        id: inv.id,
+        before: { status: 'draft', totalAmount: inv.totalAmount },
+        // Không đưa số tài khoản vào audit_logs.
+        after: { status: 'issued', code, totalAmount: inv.totalAmount },
+      });
+      issued.push({
+        id: inv.id,
+        code,
+        studentId: inv.studentId,
+        studentName: nameOf(inv.studentId),
+        totalAmount: inv.totalAmount,
+        dueDate: period.dueDate,
+        transferNote,
+        qrPayload,
+      });
+    }
+
+    if (events.length) {
+      await tx.insert(outboxEvents).values(events);
+      await tx.execute(
+        sql`select app_private.audit_insert(${tenantId}::uuid, 'invoice', v.id::uuid, 'update', v.b::jsonb, v.a::jsonb)
+          from (values ${sql.join(
+            audits.map(
+              (a) =>
+                sql`(${a.id}, ${JSON.stringify(a.before)}, ${JSON.stringify(a.after)})`,
+            ),
+            sql`, `,
+          )}) as v(id, b, a)`,
+      );
+    }
+
+    // Kỳ đóng khi không còn bản nháp nào có tiền để phát hành (bản nháp 0 đ không chặn).
+    const [left] = await tx
+      .select({ n: sql<number>`count(*)::int` })
+      .from(invoices)
+      .where(
+        and(
+          eq(invoices.tenantId, tenantId),
+          eq(invoices.periodId, periodId),
+          eq(invoices.status, 'draft'),
+          sql`${invoices.totalAmount} > 0`,
+        ),
+      );
+    if (!left?.n && period.status !== 'closed')
+      await tx
+        .update(billingPeriods)
+        .set({ status: 'closed' })
+        .where(
+          and(
+            eq(billingPeriods.tenantId, tenantId),
+            eq(billingPeriods.id, periodId),
+          ),
+        );
+
+    return {
+      issuedCount: issued.length,
+      skipped,
+      totalAmount: issued.reduce((s, i) => s + i.totalAmount, 0),
+      invoices: issued,
+    };
+  }
+
+  /**
+   * Hủy hóa đơn đã phát hành (US-7.3 AC4), có lý do và ghi audit; không đụng số tiền (trigger cũng chặn). Đã hủy gọi lại → trả
+   * bản hiện tại. `draft` và các trạng thái đã có thanh toán → 409 CONFLICT_STALE.
+   * shortcut: `createReplacementDraft = true` chờ TL xác nhận nên trả 422 thay vì tạo bản nháp thay thế; làm khi TL chốt.
+   */
+  async voidInvoice(
+    tx: Tx,
+    actor: Actor,
+    id: string,
+    body: VoidInvoiceRequest,
+  ): Promise<VoidInvoiceResult> {
+    if (body.createReplacementDraft)
+      throw new AppException('VALIDATION_FAILED', undefined, {
+        createReplacementDraft: ['Chưa hỗ trợ tạo bản nháp thay thế.'],
+      });
+    const inv = await this.loadInvoice(tx, actor.tenantId, id, true);
+    if (inv.status === 'void')
+      return {
+        invoice: await this.toInvoice(tx, actor.tenantId, inv),
+        replacementInvoiceId: null,
+      };
+    if (inv.status !== 'issued') throw new AppException('CONFLICT_STALE');
+    await tx
+      .update(invoices)
+      .set({ status: 'void', voidedAt: new Date(), voidReason: body.reason })
+      .where(and(eq(invoices.tenantId, actor.tenantId), eq(invoices.id, id)));
+    await writeAudit(tx, {
+      tenantId: actor.tenantId,
+      entity: 'invoice',
+      entityId: id,
+      action: 'update',
+      before: { status: 'issued', code: inv.code },
+      after: { status: 'void', code: inv.code, reason: body.reason },
+    });
+    return {
+      invoice: await this.getInvoice(tx, actor.tenantId, id),
+      replacementInvoiceId: null,
+    };
+  }
+
+  /** `n` mã chưa dùng trong tenant (đọc trước, ràng buộc unique là lớp cuối). */
+  private async freshCodes(tx: Tx, tenantId: string, n: number) {
+    const codes = new Set<string>();
+    while (codes.size < n) {
+      while (codes.size < n) codes.add(generateInvoiceCode());
+      const taken = await tx
+        .select({ code: invoices.code })
+        .from(invoices)
+        .where(
+          and(
+            eq(invoices.tenantId, tenantId),
+            inArray(invoices.code, [...codes]),
+          ),
+        );
+      for (const r of taken) codes.delete(r.code!);
+    }
+    return [...codes];
   }
 
   private async loadInvoice(
