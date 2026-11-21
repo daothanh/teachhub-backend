@@ -24,7 +24,7 @@ interface Row extends Record<string, unknown> {
  * Job 03:00 đối soát tiền thu theo từng tenant, chỉ đọc (S6-BE-06). Chạy bằng role worker (BYPASSRLS) nên mọi truy vấn
  * gộp theo `tenant_id`. Kiểm: (1) Σ thanh toán chưa hủy = Σ sổ doanh thu; (2) từng thanh toán khớp dòng sổ doanh thu
  * (chưa hủy: 1 dòng thu; đã hủy: thu + đảo, tổng 0); (3) `paid_amount` hóa đơn = Σ thanh toán chưa hủy; (4) phần trả thừa
- * (paid − total) = Σ(credit − debit) `overpayment`/`payment_void` của hóa đơn trong sổ học viên.
+ * (paid − total) = Σ(credit − debit) `overpayment`/`payment_void` của hóa đơn trong sổ học viên; (5) `carried_amount` = Σ debit `unpaid_carried` của hóa đơn.
  * Lệch: log lỗi có cấu trúc + webhook (nếu có `ALERT_WEBHOOK_URL`); không sửa dữ liệu, không làm hỏng job.
  * Trả số tenant lệch. shortcut: chưa kiểm B − P = R + L theo học viên, thêm khi có cách tính dùng chung.
  */
@@ -87,7 +87,7 @@ export class BillingReconcileJob {
       'payment_ledger',
       await q(sql`
         select p.tenant_id, count(*) as n, sum(abs(coalesce(r.s, 0) - case when p.voided_at is null then p.amount else 0 end)) as diff,
-          (array_agg(p.id))[1:${sample}] as ids
+          (array_agg(p.id order by p.id))[1:${sample}] as ids
         from payments p
         left join (select payment_id, count(*) filter (where kind = 'payment') as pc,
                      count(*) filter (where kind = 'reversal') as rc, sum(amount) as s
@@ -101,7 +101,7 @@ export class BillingReconcileJob {
       'invoice_paid',
       await q(sql`
         select i.tenant_id, count(*) as n, sum(abs(i.paid_amount - coalesce(s.s, 0))) as diff,
-          (array_agg(i.id))[1:${sample}] as ids
+          (array_agg(i.id order by i.id))[1:${sample}] as ids
         from invoices i
         left join (select invoice_id, sum(amount) as s from payments where voided_at is null group by invoice_id) s
           on s.invoice_id = i.id
@@ -113,11 +113,22 @@ export class BillingReconcileJob {
       await q(sql`
         select i.tenant_id, count(*) as n,
           sum(abs(coalesce(l.b, 0) - greatest(0, i.paid_amount - i.total_amount))) as diff,
-          (array_agg(i.id))[1:${sample}] as ids
+          (array_agg(i.id order by i.id))[1:${sample}] as ids
         from invoices i
         left join (select invoice_id, sum(credit - debit) as b from student_ledger
                    where kind in ('overpayment', 'payment_void') group by invoice_id) l on l.invoice_id = i.id
         where coalesce(l.b, 0) <> greatest(0, i.paid_amount - i.total_amount)
+        group by i.tenant_id`),
+    );
+    add(
+      'invoice_carried',
+      await q(sql`
+        select i.tenant_id, count(*) as n, sum(abs(i.carried_amount - coalesce(l.c, 0))) as diff,
+          (array_agg(i.id order by i.id))[1:${sample}] as ids
+        from invoices i
+        left join (select invoice_id, sum(debit) as c from student_ledger
+                   where kind = 'unpaid_carried' group by invoice_id) l on l.invoice_id = i.id
+        where i.carried_amount <> coalesce(l.c, 0)
         group by i.tenant_id`),
     );
     return out;
