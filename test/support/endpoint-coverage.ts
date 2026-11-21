@@ -258,12 +258,12 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
       'hợp đồng S4-FL-10, thân hàm trả 501 tới S5-BE-07; test chéo tenant/học viên làm cùng task đó',
   },
   'GET /v1/family/invoices': {
-    notApplicable:
-      'hợp đồng S4-FL-10, thân hàm trả 501 tới S5-BE-08; test chéo tenant/học viên làm cùng task đó',
+    file: 'family-invoices.e2e-spec.ts',
+    test: 'danh sách gộp con ở mọi tenant',
   },
   'GET /v1/family/invoices/{id}': {
-    notApplicable:
-      'hợp đồng S4-FL-10, thân hàm trả 501 tới S5-BE-08; test chéo tenant/học viên làm cùng task đó',
+    file: 'family-invoices.e2e-spec.ts',
+    test: 'cô lập: phụ huynh Y không xem được',
   },
   'PUT /v1/enrollments/{id}/fee-override': {
     file: 'class-fees.e2e-spec.ts',
