@@ -5,8 +5,10 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
-import { ApiErrors, AppException } from '@teachhub/core';
+import { ApiErrors, Ctx, type RequestContext } from '@teachhub/core';
+import { TxService } from '@teachhub/db';
 import { RequiresRole } from '@teachhub/modules/identity';
+import { ReportsService } from '../application/reports.service.js';
 import {
   type MonthOverview,
   monthOverviewSchema,
@@ -30,6 +32,11 @@ import {
 @ApiErrors('UNAUTHENTICATED', 'TOKEN_EXPIRED', 'FORBIDDEN')
 @Controller('reports')
 export class ReportsController {
+  constructor(
+    private readonly tx: TxService,
+    private readonly reports: ReportsService,
+  ) {}
+
   @Get('month-overview')
   @ApiOperation({
     summary:
@@ -40,9 +47,12 @@ export class ReportsController {
   @ApiOkResponse({ standardSchema: monthOverviewSchema })
   @ApiErrors('VALIDATION_FAILED')
   monthOverview(
-    @Query({ schema: reportMonthQuerySchema }) _query: ReportMonthQuery,
-  ): MonthOverview {
-    throw new AppException('NOT_IMPLEMENTED');
+    @Ctx() ctx: RequestContext,
+    @Query({ schema: reportMonthQuerySchema }) query: ReportMonthQuery,
+  ): Promise<MonthOverview> {
+    return this.tx.run(ctx, (t) =>
+      this.reports.monthOverview(t, ctx.tenantId!, query),
+    );
   }
 
   @Get('payments')
@@ -55,9 +65,12 @@ export class ReportsController {
   @ApiOkResponse({ standardSchema: revenueEntriesSchema })
   @ApiErrors('VALIDATION_FAILED')
   payments(
-    @Query({ schema: revenueEntriesQuerySchema }) _query: RevenueEntriesQuery,
-  ): RevenueEntries {
-    throw new AppException('NOT_IMPLEMENTED');
+    @Ctx() ctx: RequestContext,
+    @Query({ schema: revenueEntriesQuerySchema }) query: RevenueEntriesQuery,
+  ): Promise<RevenueEntries> {
+    return this.tx.run(ctx, (t) =>
+      this.reports.payments(t, ctx.tenantId!, query),
+    );
   }
 
   @Get('revenue-by-class')
@@ -69,9 +82,12 @@ export class ReportsController {
   @ApiOkResponse({ standardSchema: revenueByClassSchema })
   @ApiErrors('VALIDATION_FAILED')
   revenueByClass(
-    @Query({ schema: reportMonthQuerySchema }) _query: ReportMonthQuery,
-  ): RevenueByClass {
-    throw new AppException('NOT_IMPLEMENTED');
+    @Ctx() ctx: RequestContext,
+    @Query({ schema: reportMonthQuerySchema }) query: ReportMonthQuery,
+  ): Promise<RevenueByClass> {
+    return this.tx.run(ctx, (t) =>
+      this.reports.revenueByClass(t, ctx.tenantId!, query),
+    );
   }
 
   @Get('revenue-12m')
@@ -83,8 +99,11 @@ export class ReportsController {
   @ApiOkResponse({ standardSchema: revenue12mSchema })
   @ApiErrors('VALIDATION_FAILED')
   revenue12m(
-    @Query({ schema: reportMonthQuerySchema }) _query: ReportMonthQuery,
-  ): Revenue12m {
-    throw new AppException('NOT_IMPLEMENTED');
+    @Ctx() ctx: RequestContext,
+    @Query({ schema: reportMonthQuerySchema }) query: ReportMonthQuery,
+  ): Promise<Revenue12m> {
+    return this.tx.run(ctx, (t) =>
+      this.reports.revenue12m(t, ctx.tenantId!, query),
+    );
   }
 }

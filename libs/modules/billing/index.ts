@@ -25,3 +25,5 @@ export {
   JOB_BILLING_RECONCILE,
 } from './application/billing-reconcile.job.js';
 export { DunningJob, JOB_BILLING_DUNNING } from './application/dunning.job.js';
+export { ReceivablesService } from './application/receivables.service.js';
+export { receivablesQuerySchema } from './http/receivables.schemas.js';
