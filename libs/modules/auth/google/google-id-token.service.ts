@@ -1,7 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createRemoteJWKSet, errors, jwtVerify } from 'jose';
+import { jwtVerify } from 'jose';
 import { AppException, type Env } from '@teachhub/core';
+import {
+  isEmailVerified,
+  mapIdTokenError,
+  remoteKeys,
+} from '../jwks/id-token.util.js';
 
 export interface GoogleIdentity {
   subject: string;
@@ -23,11 +28,11 @@ const ISSUERS = ['https://accounts.google.com', 'accounts.google.com'];
 @Injectable()
 export class GoogleIdTokenService {
   private readonly audiences: string[];
-  private readonly keys: ReturnType<typeof createRemoteJWKSet>;
+  private readonly keys: ReturnType<typeof remoteKeys>;
 
   constructor(config: ConfigService<Env, true>) {
     this.audiences = config.get('GOOGLE_CLIENT_IDS');
-    this.keys = createRemoteJWKSet(new URL(config.get('GOOGLE_JWKS_URL')));
+    this.keys = remoteKeys(config.get('GOOGLE_JWKS_URL'));
   }
 
   async verify(idToken: string): Promise<GoogleIdentity> {
@@ -41,10 +46,7 @@ export class GoogleIdTokenService {
       });
       const email =
         typeof payload.email === 'string' ? payload.email.toLowerCase() : null;
-      // Một số id_token cũ trả email_verified dạng chuỗi.
-      const verified =
-        payload.email_verified === true || payload.email_verified === 'true';
-      if (!email || !verified) {
+      if (!email || !isEmailVerified(payload.email_verified)) {
         throw new AppException('UNAUTHENTICATED');
       }
       const domain = email.split('@').pop()!;
@@ -58,15 +60,7 @@ export class GoogleIdTokenService {
             payload.hd.toLowerCase() === domain),
       };
     } catch (e) {
-      if (e instanceof AppException) throw e;
-      // Không lấy được khóa của Google ≠ token sai.
-      if (e instanceof errors.JWKSTimeout) {
-        throw new AppException('SERVICE_UNAVAILABLE');
-      }
-      if (e instanceof errors.JOSEError) {
-        throw new AppException('UNAUTHENTICATED');
-      }
-      throw e;
+      throw mapIdTokenError(e);
     }
   }
 }

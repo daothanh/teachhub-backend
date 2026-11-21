@@ -148,4 +148,24 @@ describe('JwtKeysService (S1-BE-03)', () => {
     );
     expect(() => validateEnv({ ...base, NODE_ENV: 'test' })).not.toThrow();
   });
+
+  it('staging/production bắt buộc GOOGLE_CLIENT_IDS và APPLE_BUNDLE_ID; APPLE_BUNDLE_ID nhận danh sách', () => {
+    const base = {
+      DATABASE_URL: 'postgres://a@b/c',
+      REDIS_URL: 'redis://a',
+      S3_REGION: 'x',
+      S3_ACCESS_KEY_ID: 'x',
+      S3_SECRET_ACCESS_KEY: 'x',
+      S3_BUCKET_PRIVATE: 'x',
+      JWT_PRIVATE_KEY: 'k',
+      NODE_ENV: 'staging',
+    };
+    expect(() => validateEnv(base)).toThrow(/APPLE_BUNDLE_ID/);
+    const ok = validateEnv({
+      ...base,
+      GOOGLE_CLIENT_IDS: 'g',
+      APPLE_BUNDLE_ID: 'a.b, c.d',
+    });
+    expect(ok.APPLE_BUNDLE_ID).toEqual(['a.b', 'c.d']);
+  });
 });

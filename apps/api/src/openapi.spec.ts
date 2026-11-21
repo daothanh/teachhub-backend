@@ -1,4 +1,6 @@
 import { readFileSync, writeFileSync } from 'node:fs';
+import { HTTP_CODE_METADATA } from '@nestjs/common/constants';
+import { DiscoveryService, ModulesContainer } from '@nestjs/core';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 
 const FILE = 'contracts/openapi.json';
@@ -33,5 +35,35 @@ describe('contracts/openapi.json', () => {
       readFileSync(FILE, 'utf8'),
       'contracts/openapi.json lệch với mã — chạy `pnpm openapi:gen` rồi commit',
     ).toBe(generated);
+  });
+
+  // POST mặc định 201: route khai thành công 200/204 mà quên @HttpCode thì hợp đồng nói dối.
+  it('mã thành công khai trong hợp đồng khớp @HttpCode của route POST', () => {
+    const wrong: string[] = [];
+    for (const { instance } of new DiscoveryService(
+      app.get(ModulesContainer),
+    ).getControllers()) {
+      if (!instance) continue;
+      const proto = Object.getPrototypeOf(instance) as object;
+      for (const name of Object.getOwnPropertyNames(proto)) {
+        const handler = (proto as Record<string, unknown>)[name];
+        if (typeof handler !== 'function') continue;
+        if (Reflect.getMetadata('method', handler) !== 1 /* POST */) continue;
+        const declared = Object.keys(
+          (Reflect.getMetadata('swagger/apiResponse', handler) ?? {}) as object,
+        ).filter((c) => c.startsWith('2'));
+        // Có cả 200 và 201: thân hàm tự đặt status qua reply.
+        if (declared.length !== 1) continue;
+        const actual = String(
+          Reflect.getMetadata(HTTP_CODE_METADATA, handler) ?? 201,
+        );
+        if (actual !== declared[0]) {
+          wrong.push(
+            `${proto.constructor.name}.${name}: khai ${declared[0]}, chạy ${actual}`,
+          );
+        }
+      }
+    }
+    expect(wrong).toEqual([]);
   });
 });

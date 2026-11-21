@@ -37,15 +37,51 @@ export function ApiErrors(...codes: ErrorCode[]) {
   );
 }
 
+/** Lỗi có `details` kiểu cố định: khai một mã lỗi kèm schema của `details` (vd. 402 hết hạn mức gói). */
+export function ApiErrorWithDetails(
+  code: ErrorCode,
+  id: string,
+  details: z.ZodType,
+) {
+  return ApiResponse({
+    status: ERROR_CODES[code].http,
+    description: code,
+    standardSchema: errorBodySchema.extend({ details }).meta({ id }),
+  });
+}
+
+/** 402 `PLAN_LIMIT_EXCEEDED` (Mục 5.6): `details` cho client biết đang vượt mức nào. */
+export const planLimitDetailsSchema = z.object({
+  limit: z.int().min(0),
+  current: z.int().min(0),
+  attempted: z.int().min(1),
+  feature: z.string().meta({ example: 'max_active_students' }),
+});
+export const ApiPlanLimitExceeded = () =>
+  ApiErrorWithDetails(
+    'PLAN_LIMIT_EXCEEDED',
+    'PlanLimitErrorBody',
+    planLimitDetailsSchema,
+  );
+
 /** Lệnh ghi nhận `Idempotency-Key` (Mục 5.1): một khóa cho một ý định, giữ nguyên khi retry. */
-export function ApiIdempotencyKey() {
+export function ApiIdempotencyKey(required = true) {
   return applyDecorators(
     ApiHeader({
       name: 'Idempotency-Key',
-      required: true,
+      required,
       description: 'UUID, giữ nguyên khi thử lại hoặc phát lại từ outbox',
       schema: { type: 'string', format: 'uuid' },
     }),
     ApiErrors('IDEMPOTENCY_KEY_REUSED', 'IDEMPOTENCY_IN_PROGRESS'),
   );
 }
+
+/** Thân danh sách phân trang offset (Mục 5.5): `{ items, total, page, pageSize }`. */
+export const paginatedSchema = <T extends z.ZodType>(item: T) =>
+  z.object({
+    items: z.array(item),
+    total: z.int().min(0),
+    page: z.int().min(1),
+    pageSize: z.int().min(1),
+  });

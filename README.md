@@ -13,7 +13,7 @@ apps/worker/src/     main.ts, worker.module.ts
 libs/core/           config (zod), CoreModule (config + pino), AppException, GlobalExceptionFilter, validationPipe, request id, RequestContext, phân trang
 libs/db/             DbModule (pg Pool + Drizzle), TxService (BEGIN + SET LOCAL app.user_id), schema/, migrations/
 libs/infra/          RedisModule, ObjectStorage (kho S3: MinIO/R2); sau này: FCM, Web Push, SES, PDF, Excel
-libs/modules/        auth, identity, tenancy (hợp đồng Sprint 1, thân hàm trả 501 tới S1-BE-*), … — mỗi module: http/ application/ domain/ infrastructure/ jobs/ index.ts
+libs/modules/        auth, identity, tenancy (Sprint 1); classes, students, schedule, admin và onboarding/center-waitlist trong tenancy (hợp đồng Sprint 2, thân hàm trả 501 tới S2-BE-*); attendance, notifications (hợp đồng Sprint 3, 501 tới S3-BE-*), … — mỗi module: http/ application/ domain/ infrastructure/ jobs/ index.ts
 docs/adr/            quyết định kiến trúc backend (ADR-TH-BE-xxx)
 contracts/           error_codes.json (nguồn duy nhất cho API, web, app)
 docker/              Dockerfile (api + worker + target migrate), postgres-init/ (vai trò DB local)
@@ -49,6 +49,7 @@ API đang chạy (`pnpm start:api`) + Mailpit (docker compose):
 ```sh
 pnpm seed:dev            # giáo viên A, B (mỗi người một không gian), phụ huynh X, Y — qua API thật
 pnpm seed:dev --reset    # xóa dữ liệu seed rồi tạo lại
+pnpm seed:link-guardians --student <uuid> --parent-x <email> --parent-y <email>   # liên kết phụ huynh X/Y với một học viên (ghi thẳng DB, chỉ dev)
 ```
 
 | Actor | Email | Vai trò |
@@ -94,4 +95,5 @@ Dùng colima: đặt `DOCKER_HOST=unix://$HOME/.colima/default/docker.sock` và 
 - Lệnh ghi chạy trong `txService.run(ctx, async (tx) => …)` để RLS có `app.user_id`; `ctx` lấy bằng `@Ctx() ctx: RequestContext`.
 - Danh sách có tổng: query `pageQuerySchema` → `toLimitOffset` → trả `paginated(items, total, query)` = `{ items, total, page, pageSize }` (Mục 5.5).
 - Bảng nghiệp vụ mới: `enable` + `force row level security` và policy cho `teachhub_app` (mẫu ở `test/rls.e2e-spec.ts`). Bảng mới cần test chéo tenant bằng `test/support/isolation.ts` (`makeActors`, `expectRowIsolated`, `expectInsertRejected`; mẫu ở `test/tenant-isolation.e2e-spec.ts`); `test/rls-coverage.e2e-spec.ts` fail nếu bảng `public` thiếu `enable`/`force` RLS. Quy ước migration đầy đủ: [ADR-TH-BE-001](docs/adr/ADR-TH-BE-001-migration-va-csdl-lon-dan.md).
+- Outbox: `recordOutboxEvent(tx, …)` (`@teachhub/db`) trong cùng `txService.run` với lệnh nghiệp vụ; relay ở `apps/worker/src/outbox`. Giao ít nhất một lần, không bảo đảm thứ tự giữa các sự kiện: consumer phải idempotent theo `eventId`.
 - File `kebab-case.<loại>.ts`, route `/v1/<tài-nguyên-số-nhiều>`, JSON `camelCase`, SQL `snake_case` (Mục 8.5).

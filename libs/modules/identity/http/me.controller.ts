@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   Post,
@@ -26,12 +27,21 @@ import {
   type RequestContext,
   uuidv7,
 } from '@teachhub/core';
-import { memberships, tenants, TxService, users } from '@teachhub/db';
+import {
+  idempotencyKeys,
+  memberships,
+  tenants,
+  TxService,
+  users,
+} from '@teachhub/db';
 import { Idempotency } from '@teachhub/infra';
+import { OtpService, SessionService } from '@teachhub/modules/auth';
 import { MembershipCache } from '../membership-cache.service.js';
 import {
   type ActiveMembershipRequest,
   activeMembershipRequestSchema,
+  type DeleteAccountRequest,
+  deleteAccountRequestSchema,
   type AddRoleRequest,
   addRoleRequestSchema,
   type MembershipCreated,
@@ -61,6 +71,8 @@ export class MeController {
     private readonly tx: TxService,
     private readonly idem: Idempotency,
     private readonly cache: MembershipCache,
+    private readonly otp: OtpService,
+    private readonly session: SessionService,
   ) {}
 
   @Get('memberships')
@@ -189,5 +201,62 @@ export class MeController {
     // Vai trò mới phải có hiệu lực ngay với token đang dùng (S1-BE-07b).
     await this.cache.invalidate(ctx.userId!);
     return result;
+  }
+
+  // Hợp đồng Sprint 4 (S3-FL-12); S4-BE-09.
+  @Delete()
+  @HttpCode(204)
+  @ApiOperation({
+    summary: 'Xóa tài khoản (US-0.9, App Store 5.1.1(v))',
+    description:
+      'Xác nhận lại bằng OTP đã gửi với `purpose = delete_account`. OTP sai → 401 `OTP_INVALID`, sai nhiều lần → 429 `OTP_LOCKED` (cùng bộ đếm với đăng nhập). ' +
+      'Theo Spec §4.8: thu hồi mọi refresh token và membership, xóa tệp và dữ liệu cá nhân, ẩn danh hóa (vd. `students.full_name` → "Học viên đã xóa #xxxx") trong 30 ngày; ' +
+      'giữ `invoices`, `payments`, `revenue_ledger`, `audit_logs` tài chính 5 năm rồi xóa hẳn bằng job. Sau khi xóa, đăng nhập lại bằng email cũ tạo tài khoản mới, không thấy dữ liệu cũ. ' +
+      'Thời hạn giữ chứng từ còn chờ kế toán và luật sư rà. ' +
+      'Chủ không gian còn nhân sự khác → 409 `CONFLICT_STALE` (`details.reason = OWNER_HAS_STAFF`, phải chuyển quyền trước). Nhân sự duy nhất của không gian còn lớp đang hoạt động → 409 (`TENANT_HAS_ACTIVE_CLASSES`): lưu trữ hết lớp rồi xóa lại. ' +
+      'Nhân sự duy nhất không còn lớp hoạt động: không gian được đánh dấu xóa và học viên, phụ huynh trong đó bị ẩn danh ngay. Access token cũ bị từ chối 401 sau khi xóa.',
+  })
+  @ApiNoContentResponse()
+  @ApiIdempotencyKey()
+  @ApiErrors('VALIDATION_FAILED', 'OTP_INVALID', 'OTP_LOCKED', 'CONFLICT_STALE')
+  async deleteAccount(
+    @Ctx() ctx: RequestContext,
+    @Req() req: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @Body({ schema: deleteAccountRequestSchema }) body: DeleteAccountRequest,
+  ): Promise<void> {
+    const userId = ctx.userId!;
+    await this.idem.run(req, reply, ctx, async (t) => {
+      const [u] = await t
+        .select({ email: users.email })
+        .from(users)
+        .where(eq(users.id, userId));
+      // Không có email thì không có hộp thư nhận OTP.
+      if (!u?.email) throw new AppException('OTP_INVALID');
+
+      // Khóa user + tenant và kiểm điều kiện chặn trước khi tiêu OTP: bị chặn thì mã còn dùng lại được.
+      const check = async (checkOnly: boolean) =>
+        (
+          await t.execute<{ r: string | null }>(
+            sql`select app_private.delete_account(${checkOnly}) as r`,
+          )
+        ).rows[0]!.r;
+      const blocked = await check(true);
+      if (blocked) {
+        throw new AppException('CONFLICT_STALE', { reason: blocked });
+      }
+
+      // OTP đã tiêu ở Redis: giao dịch DB rollback sau đó thì người dùng phải xin mã mới.
+      await this.otp.verify(u.email, body.otp, 'delete_account');
+      // Khóa idempotency cũ giữ phản hồi (có thể chứa dữ liệu cá nhân); khóa của chính lệnh này được ghi sau.
+      await t.delete(idempotencyKeys).where(eq(idempotencyKeys.userId, userId));
+      // Khóa giữ từ lần kiểm trên (cùng giao dịch) nên điều kiện không đổi giữa hai lần gọi.
+      const again = await check(false);
+      if (again) throw new AppException('CONFLICT_STALE', { reason: again });
+      return { status: 204, body: undefined };
+    });
+    // Mọi token cũ mất vai trò ngay và bị guard từ chối 401 cho tới khi hết hạn.
+    await this.cache.invalidate(userId);
+    await this.session.markDeleted(userId);
   }
 }

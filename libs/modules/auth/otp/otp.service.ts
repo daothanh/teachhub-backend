@@ -15,6 +15,9 @@ export const OTP = {
 
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 
+/** Mục đích mã (khớp `purpose` của `POST /auth/otp/send`): mã mục đích này không dùng được cho mục đích kia. */
+export type OtpPurpose = 'login' | 'delete_account' | 'payout_account';
+
 /** So và tiêu mã trong một bước: mã đổi giữa chừng (gửi mã mới) không bị request cũ tiêu nhầm. */
 const CONSUME_IF_MATCH = `if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end return 0`;
 
@@ -23,15 +26,25 @@ const CONSUME_IF_MATCH = `if redis.call('GET', KEYS[1]) == ARGV[1] then return r
 export class OtpService {
   constructor(@Inject(REDIS) private readonly redis: Redis) {}
 
+  /**
+   * `code` và `cooldown` tách theo mục đích (khóa `login` giữ nguyên dạng cũ); `hour`, `fail`, `lock` dùng chung theo email:
+   * giới hạn gửi 5 lần/giờ và khóa sai mã tính chung cho mọi mục đích.
+   */
   private key(
     kind: 'code' | 'cooldown' | 'hour' | 'fail' | 'lock',
     email: string,
+    purpose: OtpPurpose = 'login',
   ) {
-    return `otp:${kind}:${sha256(email)}`;
+    const scoped =
+      (kind === 'code' || kind === 'cooldown') && purpose !== 'login';
+    return `otp:${kind}${scoped ? `:${purpose}` : ''}:${sha256(email)}`;
   }
 
-  private hash(email: string, code: string) {
-    return sha256(`${email}:${code}`);
+  /** Băm có mục đích: dù khóa Redis bị đọc nhầm, mã `login` không khớp mã `delete_account`. */
+  private hash(email: string, code: string, purpose: OtpPurpose) {
+    return sha256(
+      purpose === 'login' ? `${email}:${code}` : `${purpose}:${email}:${code}`,
+    );
   }
 
   private async rateLimited(key: string): Promise<never> {
@@ -41,11 +54,11 @@ export class OtpService {
   }
 
   /** Sinh và lưu mã mới (thay mã cũ); trả mã để gửi email. */
-  async issue(email: string): Promise<string> {
+  async issue(email: string, purpose: OtpPurpose = 'login'): Promise<string> {
     // Đang khóa thì không cấp mã mới: mã mới không mở khóa, chỉ thêm đường cho request đoán mã đang chạy dở.
     const lock = this.key('lock', email);
     if ((await this.redis.ttl(lock)) > 0) return this.rateLimited(lock);
-    const cooldown = this.key('cooldown', email);
+    const cooldown = this.key('cooldown', email, purpose);
     if (!(await this.redis.set(cooldown, '1', 'EX', OTP.cooldownSec, 'NX'))) {
       return this.rateLimited(cooldown);
     }
@@ -56,8 +69,8 @@ export class OtpService {
 
     const code = randomInt(0, 1_000_000).toString().padStart(6, '0');
     await this.redis.set(
-      this.key('code', email),
-      this.hash(email, code),
+      this.key('code', email, purpose),
+      this.hash(email, code, purpose),
       'EX',
       OTP.ttlSec,
     );
@@ -68,7 +81,11 @@ export class OtpService {
    * Đúng → mã bị hủy (dùng một lần). Sai/hết hạn → OTP_INVALID; lần thứ 5 sai → khóa 15 phút, OTP_LOCKED.
    * Đếm lượt TRƯỚC khi so (INCR nguyên tử): request đoán mã gửi song song cũng chỉ được so tối đa 5 lần.
    */
-  async verify(email: string, code: string): Promise<void> {
+  async verify(
+    email: string,
+    code: string,
+    purpose: OtpPurpose = 'login',
+  ): Promise<void> {
     const lock = this.key('lock', email);
     const ensureUnlocked = async () => {
       const locked = await this.redis.ttl(lock);
@@ -77,7 +94,7 @@ export class OtpService {
       }
     };
     await ensureUnlocked();
-    const codeKey = this.key('code', email);
+    const codeKey = this.key('code', email, purpose);
     // Không có mã thì không có gì để dò: không đếm, để người lạ không khóa được email của người khác.
     if (!(await this.redis.exists(codeKey))) {
       throw new AppException('OTP_INVALID');
@@ -99,7 +116,7 @@ export class OtpService {
       CONSUME_IF_MATCH,
       1,
       codeKey,
-      this.hash(email, code),
+      this.hash(email, code, purpose),
     );
     if (consumed === 1) {
       await this.redis.del(attemptKey);

@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { LoggerModule } from 'nestjs-pino';
 import { type Env, validateEnv } from './config.js';
+import { reqLogSerializer } from './log-serializer.js';
 
 /** Cấu hình (zod) + log JSON (pino) dùng chung cho `api` và `worker`. */
 @Module({
@@ -18,6 +19,7 @@ import { type Env, validateEnv } from './config.js';
       useFactory: (config: ConfigService<Env, true>) => ({
         pinoHttp: {
           level: config.get('LOG_LEVEL'),
+          serializers: { req: reqLogSerializer },
           transport:
             config.get('NODE_ENV') === 'local'
               ? { target: 'pino-pretty' }

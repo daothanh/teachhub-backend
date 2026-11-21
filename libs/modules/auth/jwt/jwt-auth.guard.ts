@@ -1,11 +1,15 @@
 import {
   type CanActivate,
+  Inject,
   type ExecutionContext,
   Injectable,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { FastifyRequest } from 'fastify';
+import type { Redis } from 'ioredis';
 import { AppException, IS_PUBLIC } from '@teachhub/core';
+import { REDIS } from '@teachhub/infra';
+import { deletedKey } from '../session/session.service.js';
 import { JwtKeysService } from './jwt-keys.service.js';
 
 /**
@@ -17,6 +21,7 @@ export class JwtAuthGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
     private readonly jwt: JwtKeysService,
+    @Inject(REDIS) private readonly redis: Redis,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -34,6 +39,10 @@ export class JwtAuthGuard implements CanActivate {
       throw new AppException('UNAUTHENTICATED');
     }
     const claims = await this.jwt.verify(token);
+    // Tài khoản đã xóa: một GET Redis mỗi request. Redis lỗi → bỏ qua (chốt thứ hai nằm ở CSDL: deleted_at).
+    if (await this.redis.exists(deletedKey(claims.userId)).catch(() => 0)) {
+      throw new AppException('UNAUTHENTICATED');
+    }
     req.ctx = {
       requestId: req.id,
       userId: claims.userId,

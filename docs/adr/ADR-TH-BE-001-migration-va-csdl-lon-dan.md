@@ -104,6 +104,18 @@ nếu chuyển đổi gốc thiếu tính năng.
 - Job CI `openapi-breaking` chạy `oasdiff breaking` so với nhánh đích, lỗi mức ERR → PR đỏ.
 - Route ngoài hợp đồng (health) gắn `@ApiExcludeController()`.
 
+### 8. Trạng thái onboarding lưu trong `tenants.settings` (bổ sung ở S2-BE-10)
+
+Trạng thái 5 bước onboarding (US-0.2) nằm ở `tenants.settings.onboarding.steps`, dạng `{ "<bước>": "done" | "skipped" }`.
+Bước chưa có khóa = `pending`; `currentStep` tính lúc đọc (bước `pending` đầu tiên), không lưu.
+
+- Lý do: onboarding thuộc về tenant (một tenant một trạng thái), chỉ có 5 giá trị, không truy vấn chéo tenant.
+  Một bảng riêng cần migration, RLS và audit mà không có thêm lợi ích; `settings` là jsonb đã có RLS theo tenant.
+- Ghi bằng một lệnh `update … settings || jsonb_build_object(…)` sau `select … for update`: hai PATCH đồng thời
+  không đè khóa của nhau, các khóa khác trong `settings` được giữ nguyên.
+- Khi cần báo cáo (tỷ lệ hoàn tất onboarding), đọc từ sự kiện analytics (`onboarding_step_completed`,
+  `onboarding_skipped`), không quét `settings`. Nếu sau này cần truy vấn theo bước thì tách bảng, kèm backfill.
+
 ## Hệ quả
 
 - Mỗi sprint có migration nhỏ, review được; ERD vẫn là đích nên tên bảng ổn định cho client.

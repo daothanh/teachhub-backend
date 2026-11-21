@@ -139,3 +139,21 @@ export const memberships = pgTable(
     ),
   ],
 );
+
+/** Đăng ký sớm Chủ trung tâm (US-0.10 AC4). Thuộc user (chưa có tenant trung tâm), nên RLS theo `user_id`. */
+export const centerWaitlist = pgTable(
+  'center_waitlist',
+  {
+    id: uuid().primaryKey(),
+    userId: uuid()
+      .notNull()
+      .references(() => users.id),
+    centerName: text().notNull(),
+    teacherCount: integer().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index('center_waitlist_user_id_idx').on(t.userId),
+    check('center_waitlist_teacher_count_check', sql`${t.teacherCount} > 0`),
+  ],
+);

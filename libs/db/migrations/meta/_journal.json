@@ -78,6 +78,104 @@
       "when": 1795013785041,
       "tag": "0010_create_workspace_fn",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1795073192841,
+      "tag": "0011_classes",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1795073392357,
+      "tag": "0012_students",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1795073917008,
+      "tag": "0013_schedule",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1795074410101,
+      "tag": "0014_center_waitlist",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1795075249563,
+      "tag": "0015_guardians_limit_lock",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1795075666521,
+      "tag": "0016_drop_students_trgm_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1795076191545,
+      "tag": "0017_outbox_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1795076195160,
+      "tag": "0018_outbox_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1795076437082,
+      "tag": "0019_attendance",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1795076808061,
+      "tag": "0020_attendance_history_fn",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1795076939565,
+      "tag": "0021_notifications",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1795077955056,
+      "tag": "0022_review_round1",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1795079569930,
+      "tag": "0023_schedule_changes_delete_account",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1795084442699,
+      "tag": "0024_billing_schema",
+      "breakpoints": true
     }
   ]
 }
