@@ -43,6 +43,8 @@ import {
   closablePeriods,
   studentPeriodState,
 } from '../domain/billing-period.js';
+import { minutesUntilSendWindow } from '../domain/dunning.js';
+import { minuteOfDay } from './dunning.job.js';
 import {
   planCarryOver,
   prevAdjustmentDescription,
@@ -122,7 +124,7 @@ export class BillingCloseJob {
               parseBillingSettings(tenant.settings),
               last?.m ?? null,
             ))
-              n += await this.closeTenant(t, tenant.id, tenant.tz, period);
+              n += await this.closeTenant(t, tenant.id, tenant.tz, period, now);
             return n;
           });
         } catch (e) {
@@ -203,6 +205,7 @@ export class BillingCloseJob {
     tenantId: string,
     tz: string,
     period: PeriodDates,
+    now: Date,
   ): Promise<number> {
     const periodWhere = and(
       eq(billingPeriods.tenantId, tenantId),
@@ -565,10 +568,14 @@ export class BillingCloseJob {
       draftCount: readyCount,
       draftTotalAmount: readyTotalAmount,
     };
+    // Giờ yên lặng (Spec §6.7): job chạy 02:00 nên push "học phí đã sẵn sàng" hẹn tới 07:00 giờ tenant (ngoài khung 07:00–21:30 thì tới
+    // 07:00 kế tiếp). Hẹn qua `next_attempt_at` của outbox: một sự kiện, một thông báo (khóa theo eventId) nên không gửi trùng.
+    const waitMin = minutesUntilSendWindow(minuteOfDay(now, tz));
     await recordOutboxEvent(t, {
       tenantId,
       type: BILLING_DRAFTS_READY,
       payload,
+      ...(waitMin && { deliverAt: new Date(now.getTime() + waitMin * 60_000) }),
     });
     return draftCount;
   }

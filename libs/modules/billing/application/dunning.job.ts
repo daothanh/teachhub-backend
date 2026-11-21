@@ -30,7 +30,7 @@ const errorCode = (e: unknown): string => {
 };
 
 /** Phút trong ngày của `at` theo giờ tenant. */
-const minuteOfDay = (at: Date, tz: string): number => {
+export const minuteOfDay = (at: Date, tz: string): number => {
   const t = formatInZone(at, tz);
   return Number(t.slice(11, 13)) * 60 + Number(t.slice(14, 16));
 };

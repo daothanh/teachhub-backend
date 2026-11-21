@@ -49,6 +49,17 @@ export function parseDunningSettings(settings: unknown): DunningSettings {
 export const inSendWindow = (minuteOfDay: number): boolean =>
   minuteOfDay >= WINDOW_START_MIN && minuteOfDay <= WINDOW_END_MIN;
 
+/**
+ * Số phút phải chờ từ `minuteOfDay` (giờ tenant) tới khi vào khung gửi: 0 trong khung 07:00–21:30, trước 07:00 chờ tới 07:00 cùng
+ * ngày, sau 21:30 chờ tới 07:00 hôm sau. shortcut: bỏ qua ngày đổi giờ (múi giờ VN không có).
+ */
+export const minutesUntilSendWindow = (minuteOfDay: number): number =>
+  inSendWindow(minuteOfDay)
+    ? 0
+    : minuteOfDay < WINDOW_START_MIN
+      ? WINDOW_START_MIN - minuteOfDay
+      : 24 * 60 - minuteOfDay + WINDOW_START_MIN;
+
 /** Hóa đơn còn đáng nhắc: đã phát hành, chưa thu đủ và còn nợ thật (`total − paid − carried > 0`). */
 export const isDunnable = (inv: {
   status: string;

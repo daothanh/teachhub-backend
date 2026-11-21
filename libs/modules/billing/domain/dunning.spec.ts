@@ -3,6 +3,7 @@ import {
   DEFAULT_OFFSETS_DAYS,
   inSendWindow,
   isDunnable,
+  minutesUntilSendWindow,
   parseDunningSettings,
   reminderCopy,
   splitDue,
@@ -41,6 +42,21 @@ describe('inSendWindow (07:00–21:30)', () => {
     [21 * 60 + 45, false],
     [0, false],
   ])('phút %i → %s', (m, ok) => expect(inSendWindow(m)).toBe(ok));
+});
+
+describe('minutesUntilSendWindow: hẹn tới 07:00 kế tiếp khi ngoài khung', () => {
+  it.each([
+    [2 * 60, 5 * 60], // 02:00 → 07:00 cùng ngày
+    [0, 7 * 60],
+    [6 * 60 + 59, 1],
+    [7 * 60, 0],
+    [12 * 60, 0],
+    [21 * 60 + 30, 0],
+    [21 * 60 + 31, 9 * 60 + 29], // 21:31 → 07:00 hôm sau
+    [23 * 60 + 59, 7 * 60 + 1],
+  ])('phút %i → chờ %i phút', (m, wait) =>
+    expect(minutesUntilSendWindow(m)).toBe(wait),
+  );
 });
 
 describe('isDunnable: nợ thật = tổng − đã thu − đã chuyển kỳ', () => {

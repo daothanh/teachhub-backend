@@ -384,8 +384,12 @@ describe('billing: job billing.close + API kỳ thu, hóa đơn, điều chỉnh
 
   it('AC-3: ghi đúng một sự kiện outbox billing_drafts_ready cùng giao dịch; consumer tạo thông báo + push data-only cho chủ tenant, xử lý lại không gửi trùng', async () => {
     const [ev] = await q(
-      `select id, payload from outbox_events where tenant_id = $1 and type = 'billing_drafts_ready'`,
+      `select id, payload, next_attempt_at from outbox_events where tenant_id = $1 and type = 'billing_drafts_ready'`,
       [A.tenantId],
+    );
+    // Giờ yên lặng: job chạy 02:00 VN (19:00Z) → sự kiện hẹn 07:00 VN ngày 01/01/2027 (00:00Z).
+    expect(new Date(ev.next_attempt_at).toISOString()).toBe(
+      '2027-01-01T00:00:00.000Z',
     );
     const [period] = await periodsOf(A);
     expect(ev.payload).toEqual({

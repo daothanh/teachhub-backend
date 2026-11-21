@@ -10,6 +10,8 @@
 
 - Trọn khóa (US-7.1 AC5): tổng buổi của khóa lấy theo cấu hình lớp (quy tắc lặp hằng tuần trong [`startDate`, `endDate`]), buổi còn lại = các buổi từ ngày học viên vào, thay vì đếm buổi đã sinh cuốn chiếu. Vd. khóa 24 buổi 3.600.000 đ, vào khi còn 16 buổi → 2.400.000 đ. `PATCH /classes/{id}` đã bắt `course` phải có `endDate` và quy tắc lịch nên đủ cấu hình; lớp cũ thiếu cấu hình (hoặc khóa dài hơn 731 ngày) giữ cách đếm buổi hiện có và job ghi cảnh báo.
 
+- Push và thông báo `billing_ready` ("Học phí tháng X đã sẵn sàng") tôn trọng giờ yên lặng như nhắc nợ: khung gửi 07:00–21:30 giờ tenant; job chốt kỳ chạy 02:00 nên sự kiện được hẹn tới 07:00 (ngoài khung thì tới 07:00 kế tiếp). Thông báo chỉ tạo (và hiện trong `GET /notifications`) lúc gửi; mỗi kỳ một thông báo, không gửi trùng. Không đổi schema thông báo.
+
 ## Ngoại lệ một lần: hợp nhất thông báo và not_marked
 
 Hai thay đổi `oasdiff breaking` báo ERR, được Owner/TL chấp nhận MỘT LẦN vì chưa có bản app nào phát hành ra ngoài (xem "Đã chốt khi duyệt" ở Sprint 7). Sau PR này mọi thay đổi lại phải sạch `oasdiff` mà không cần ngoại lệ.
