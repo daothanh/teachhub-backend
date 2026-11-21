@@ -18,6 +18,7 @@ import {
   exceedsLimit,
   overLimit,
   planCodeOf,
+  type PlanCode,
   type SubscriptionStatus,
 } from '../domain/plan.js';
 import type {
@@ -111,10 +112,12 @@ export class PlanService {
       });
   }
 
-  async usage(tx: Tx, tenantId: string, now = new Date()): Promise<PlanUsage> {
-    const { sub, status, code, limits } = await this.load(tx, tenantId, now);
-    const counts = await this.activeCounts(tx, tenantId);
-
+  /** Feature flag hiệu lực: cờ theo gói, tenant ghi đè (US-0.7 AC4). Khóa không có dòng nào coi là tắt. */
+  private async featureMap(
+    tx: Tx,
+    tenantId: string,
+    code: PlanCode,
+  ): Promise<Map<string, boolean>> {
     const flags = await tx
       .select()
       .from(planFeatures)
@@ -126,6 +129,20 @@ export class PlanService {
       .where(eq(tenantFeatureOverrides.tenantId, tenantId));
     const byKey = new Map(flags.map((f) => [f.featureKey, f.enabled]));
     for (const o of overrides) byKey.set(o.featureKey, o.enabled);
+    return byKey;
+  }
+
+  /** Tenant có dùng được tính năng `key` không (gói hiệu lực tại lúc gọi: Pro hết hạn là về cờ của Free ngay). */
+  async hasFeature(tx: Tx, tenantId: string, key: string): Promise<boolean> {
+    const { code } = await this.load(tx, tenantId, new Date());
+    return (await this.featureMap(tx, tenantId, code)).get(key) ?? false;
+  }
+
+  async usage(tx: Tx, tenantId: string, now = new Date()): Promise<PlanUsage> {
+    const { sub, status, code, limits } = await this.load(tx, tenantId, now);
+    const counts = await this.activeCounts(tx, tenantId);
+
+    const byKey = await this.featureMap(tx, tenantId, code);
 
     const [pending] = await tx
       .select()
