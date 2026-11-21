@@ -25,6 +25,7 @@
     "openapi:gen": "UPDATE_OPENAPI=1 vitest run apps/api/src/openapi.spec.ts",
     "seed:dev": "node --env-file=.env scripts/seed-dev.mjs",
     "db:check": "node scripts/check-migrations.mjs",
+    "seed:link-guardians": "node --env-file=.env scripts/seed-link-guardians.mjs",
     "mock": "docker compose --profile mock up mock"
   },
   "dependencies": {

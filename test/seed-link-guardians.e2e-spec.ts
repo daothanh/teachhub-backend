@@ -4,12 +4,12 @@ import {
   assertDevEnvironment,
   assertLocalDatabase,
   linkParents,
-} from '../scripts/seed-dev.mjs';
+} from '../scripts/seed-link-guardians.mjs';
 import { startTestDb, type TestDb } from './containers.js';
 import { seedTenant } from './support/seed.js';
 
-// S3-BE-07: seed:dev liên kết phụ huynh X/Y với học viên, chặn cứng ngoài môi trường dev.
-describe('seed:dev', () => {
+// S3-BE-07: seed:link-guardians liên kết phụ huynh X/Y với học viên, chặn cứng ngoài môi trường dev.
+describe('seed:link-guardians', () => {
   let db: TestDb;
   let worker: pg.Pool;
 

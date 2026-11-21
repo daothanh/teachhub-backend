@@ -42,6 +42,26 @@ pnpm start:worker
 
 Vai trò CSDL (Mục 2.5): `teachhub_owner` (migration), `teachhub_app` (api, không BYPASSRLS), `teachhub_worker` (worker, BYPASSRLS), `teachhub_readonly`. Local tạo bằng `docker/postgres-init/01-roles.sql`; staging/production tạo bằng Ansible **trước** khi chạy migration.
 
+## Dữ liệu dùng chung (seed)
+
+API đang chạy (`pnpm start:api`) + Mailpit (docker compose):
+
+```sh
+pnpm seed:dev            # giáo viên A, B (mỗi người một không gian), phụ huynh X, Y — qua API thật
+pnpm seed:dev --reset    # xóa dữ liệu seed rồi tạo lại
+pnpm seed:link-guardians --student <uuid> --parent-x <email> --parent-y <email>   # liên kết phụ huynh X/Y với một học viên (ghi thẳng DB, chỉ dev)
+```
+
+| Actor | Email | Vai trò |
+| --- | --- | --- |
+| A | `gv.a@teachhub.test` | Giáo viên, không gian "Cô Lan" |
+| B | `gv.b@teachhub.test` | Giáo viên, không gian "Thầy Nam" |
+| X | `ph.x@teachhub.test` | Phụ huynh |
+| Y | `ph.y@teachhub.test` | Phụ huynh |
+
+Đăng nhập app/web bằng email trên; mã OTP xem ở Mailpit http://localhost:8025. Chạy lại an toàn (dùng
+lại user và không gian đã có). Script từ chối chạy vào API không phải local/dev.
+
 ## Mock API cho client (Prism)
 
 ```bash

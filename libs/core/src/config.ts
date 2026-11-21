@@ -40,7 +40,7 @@ export const envSchema = z
       ),
     /** SMTP gửi email (OTP…): Mailpit ở local/dev (smtp://127.0.0.1:1025), SES SMTP ở staging/production. */
     SMTP_URL: z.url().default('smtp://127.0.0.1:1025'),
-    EMAIL_FROM: z.string().min(1).default('TeachHub <no-reply@teachhub.vn>'),
+    EMAIL_FROM: z.string().min(1).default('DayHoc <no-reply@dayhoc.app>'),
     /** Client ID OAuth Google (iOS, Android, web), ngăn cách bởi dấu phẩy — `aud` hợp lệ của id_token. Trống = từ chối mọi id_token. */
     GOOGLE_CLIENT_IDS: z.string().default('').transform(csv),
     /** Khóa công khai của Google; test trỏ về JWKS giả. */
