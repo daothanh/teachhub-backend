@@ -4,6 +4,7 @@ import { AppException } from '@teachhub/core';
 import { type Tx, TxService } from '@teachhub/db';
 import { ConsentsService } from '@teachhub/modules/identity';
 import { formatInZone } from '@teachhub/modules/schedule';
+import { remainingOf } from '../domain/payment.js';
 import {
   decodeInvoiceCursor,
   InvalidCursorError,
@@ -36,6 +37,7 @@ type Row = {
   status: FamilyInvoice['status'];
   student_id: string;
   total_amount: string;
+  paid_amount: string;
   period_month: string;
   due_date: string;
   issued_at: Date;
@@ -46,7 +48,7 @@ type Row = {
   voided_at: Date | null;
 };
 
-const COLS = sql`i.id, i.code, i.status, i.student_id, i.total_amount::text as total_amount,
+const COLS = sql`i.id, i.code, i.status, i.student_id, i.total_amount::text as total_amount, i.paid_amount::text as paid_amount,
   p.period_month::text as period_month, p.due_date::text as due_date, i.issued_at,
   to_char(i.issued_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as issued_cursor,
   i.transfer_note, i.qr_payload, i.payout, i.voided_at`;
@@ -134,12 +136,36 @@ export class FamilyInvoicesService {
            where i.id = ${id}::uuid
            order by l.position`)
       ).rows;
+      // Biên nhận: chỉ cột phụ huynh được thấy (không ghi chú, người ghi, lý do hủy); RLS `payments_parent_read` là lớp 2.
+      const payments = (
+        await t.execute<{
+          id: string;
+          amount: string;
+          method: FamilyInvoice['payments'][number]['method'];
+          paid_on: string;
+          recorded_at: Date;
+          voided_at: Date | null;
+        }>(sql`
+          select p.id, p.amount::text as amount, p.method, p.paid_on::text as paid_on, p.recorded_at, p.voided_at
+            from payments p join invoices i on i.tenant_id = p.tenant_id and i.id = p.invoice_id
+           where i.id = ${id}::uuid
+           order by p.recorded_at desc, p.id desc`)
+      ).rows;
       const tz = await this.timezones(t, [r]);
       const zone = tz.get(r.student_id)!;
       const void_ = r.status === 'void';
       return {
         ...this.summary(r, children, tz),
-        payments: [], // S6-BE-02: đọc từ `payments`
+        payments: payments.map((p) => ({
+          id: p.id,
+          amount: Number(p.amount),
+          method: p.method,
+          paidOn: p.paid_on,
+          recordedAt: formatInZone(new Date(p.recorded_at), zone),
+          voidedAt: p.voided_at
+            ? formatInZone(new Date(p.voided_at), zone)
+            : null,
+        })),
         lines: lines.map((l) => ({
           kind: l.kind,
           className: l.class_name,
@@ -200,9 +226,11 @@ export class FamilyInvoicesService {
       teacherName: c.teacher,
       periodMonth: r.period_month,
       totalAmount: Number(r.total_amount),
-      // Sprint 5 chưa có thanh toán nên đúng là 0; S6-BE-02 thay bằng Σ payments chưa hủy.
-      paidAmount: 0,
-      remainingAmount: r.status === 'void' ? 0 : Number(r.total_amount),
+      paidAmount: Number(r.paid_amount),
+      remainingAmount:
+        r.status === 'void'
+          ? 0
+          : remainingOf(Number(r.total_amount), Number(r.paid_amount)),
       dueDate: r.due_date,
       issuedAt: formatInZone(new Date(r.issued_at), tz.get(r.student_id)!),
     };

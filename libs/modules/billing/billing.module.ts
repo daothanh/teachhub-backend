@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { FamilyInvoicesService } from './application/family-invoices.service.js';
+import { PaymentsService } from './application/payments.service.js';
 import { BillingService } from './application/billing.service.js';
 import { BillingController } from './http/billing.controller.js';
 import { DunningController } from './http/dunning.controller.js';
@@ -15,6 +16,6 @@ import { ReceivablesController } from './http/receivables.controller.js';
     DunningController,
     ReceivablesController,
   ],
-  providers: [BillingService, FamilyInvoicesService],
+  providers: [BillingService, FamilyInvoicesService, PaymentsService],
 })
 export class BillingModule {}

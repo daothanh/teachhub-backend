@@ -1,4 +1,13 @@
-import { Body, Controller, Get, HttpCode, Param, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Req,
+  Res,
+} from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import {
   ApiBearerAuth,
@@ -7,9 +16,18 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { ApiErrors, ApiIdempotencyKey, AppException } from '@teachhub/core';
+import {
+  ApiErrors,
+  ApiIdempotencyKey,
+  Ctx,
+  type RequestContext,
+} from '@teachhub/core';
+import { TxService } from '@teachhub/db';
+import { Idempotency } from '@teachhub/infra';
 import { RequiresRole } from '@teachhub/modules/identity';
+import { PaymentsService } from '../application/payments.service.js';
 import {
   type PaymentList,
   paymentListSchema,
@@ -23,7 +41,7 @@ import {
 
 const idParam = z.uuid();
 
-// Hợp đồng Sprint 6 (S5-FL-09, S5-CT-01); thân hàm ở S6-BE-02. Chỉ `tenant_owner` (MVP: giáo viên là chủ tenant).
+// Hợp đồng Sprint 6 (S5-FL-09, S5-CT-01); S6-BE-02. Chỉ `tenant_owner` (MVP: giáo viên là chủ tenant).
 // Id của tenant khác → 404. Ghi tiền giới hạn 20 lần/phút/user.
 @ApiTags('billing')
 @ApiBearerAuth('bearer')
@@ -31,6 +49,12 @@ const idParam = z.uuid();
 @ApiErrors('UNAUTHENTICATED', 'TOKEN_EXPIRED', 'FORBIDDEN')
 @Controller()
 export class PaymentsController {
+  constructor(
+    private readonly tx: TxService,
+    private readonly idem: Idempotency,
+    private readonly payments: PaymentsService,
+  ) {}
+
   @Post('invoices/:id/payments')
   @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @ApiOperation({
@@ -52,10 +76,21 @@ export class PaymentsController {
     'RATE_LIMITED',
   )
   record(
-    @Param('id', { schema: idParam }) _id: string,
-    @Body({ schema: recordPaymentRequestSchema }) _body: RecordPaymentRequest,
-  ): PaymentResult {
-    throw new AppException('NOT_IMPLEMENTED');
+    @Ctx() ctx: RequestContext,
+    @Req() req: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @Param('id', { schema: idParam }) id: string,
+    @Body({ schema: recordPaymentRequestSchema }) body: RecordPaymentRequest,
+  ): Promise<PaymentResult> {
+    return this.idem.run(req, reply, ctx, async (t) => ({
+      status: 201,
+      body: await this.payments.record(
+        t,
+        { tenantId: ctx.tenantId!, userId: ctx.userId! },
+        id,
+        body,
+      ),
+    }));
   }
 
   @Get('invoices/:id/payments')
@@ -66,8 +101,11 @@ export class PaymentsController {
   })
   @ApiOkResponse({ standardSchema: paymentListSchema })
   @ApiErrors('NOT_FOUND')
-  list(@Param('id', { schema: idParam }) _id: string): PaymentList {
-    throw new AppException('NOT_IMPLEMENTED');
+  list(
+    @Ctx() ctx: RequestContext,
+    @Param('id', { schema: idParam }) id: string,
+  ): Promise<PaymentList> {
+    return this.tx.run(ctx, (t) => this.payments.list(t, ctx.tenantId!, id));
   }
 
   @Post('payments/:id/void')
@@ -84,9 +122,20 @@ export class PaymentsController {
   @ApiIdempotencyKey()
   @ApiErrors('VALIDATION_FAILED', 'NOT_FOUND', 'RATE_LIMITED')
   voidPayment(
-    @Param('id', { schema: idParam }) _id: string,
-    @Body({ schema: voidPaymentRequestSchema }) _body: VoidPaymentRequest,
-  ): PaymentResult {
-    throw new AppException('NOT_IMPLEMENTED');
+    @Ctx() ctx: RequestContext,
+    @Req() req: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @Param('id', { schema: idParam }) id: string,
+    @Body({ schema: voidPaymentRequestSchema }) body: VoidPaymentRequest,
+  ): Promise<PaymentResult> {
+    return this.idem.run(req, reply, ctx, async (t) => ({
+      status: 200,
+      body: await this.payments.void(
+        t,
+        { tenantId: ctx.tenantId!, userId: ctx.userId! },
+        id,
+        body,
+      ),
+    }));
   }
 }

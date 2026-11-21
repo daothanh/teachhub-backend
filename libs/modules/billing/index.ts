@@ -1,6 +1,7 @@
 export * from './domain/invoice-calculator.js';
 export * from './domain/vietqr.js';
 export * from './domain/invoice-issue.js';
+export * from './domain/payment.js';
 export * from './billing.module.js';
 export {
   feeAmountSchema,

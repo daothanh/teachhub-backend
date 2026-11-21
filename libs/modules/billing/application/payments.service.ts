@@ -1,0 +1,365 @@
+import { Injectable } from '@nestjs/common';
+import { and, desc, eq, sql } from 'drizzle-orm';
+import { AppException, MAX_VND, uuidv7 } from '@teachhub/core';
+import {
+  invoices,
+  payments,
+  recordOutboxEvent,
+  revenueLedger,
+  studentLedger,
+  tenants,
+  type Tx,
+  writeAudit,
+} from '@teachhub/db';
+import { formatInZone, localDate } from '@teachhub/modules/schedule';
+import type {
+  Payment,
+  PaymentList,
+  PaymentResult,
+  RecordPaymentRequest,
+  VoidPaymentRequest,
+} from '../http/payments.schemas.js';
+import {
+  isPayable,
+  overpaidOf,
+  overpaymentDelta,
+  PAYMENT_RECORDED,
+  type PaymentRecordedPayload,
+  remainingOf,
+  statusAfter,
+} from '../domain/payment.js';
+import type { Actor } from './billing.service.js';
+
+const DEFAULT_TZ = 'Asia/Ho_Chi_Minh';
+
+type InvoiceRow = typeof invoices.$inferSelect;
+type PaymentRow = typeof payments.$inferSelect;
+
+/**
+ * Thu tiền (S6-BE-02, US-7.4, US-9.5 AC1). Mọi thao tác khóa hàng hóa đơn `FOR UPDATE` trước khi đọc/ghi số đã thu, nên hai
+ * request song song cùng hóa đơn nối đuôi nhau (request sau đọc lại số đã commit). Mọi truy vấn lọc `tenant_id` tường minh,
+ * RLS là lớp thứ hai; id của tenant khác → 404. Không log ghi chú hay lý do (văn bản tự do của giáo viên).
+ * shortcut: `dunningCancelled` luôn false vì `dunning_jobs` chưa có (S6-BE-04 hủy lời nhắc chưa gửi khi thu đủ, lập lại khi hủy).
+ */
+@Injectable()
+export class PaymentsService {
+  async record(
+    tx: Tx,
+    actor: Actor,
+    invoiceId: string,
+    body: RecordPaymentRequest,
+  ): Promise<PaymentResult> {
+    const { tenantId } = actor;
+    const inv = await this.lockInvoice(tx, tenantId, invoiceId);
+    if (!isPayable(inv.status)) throw new AppException('INVOICE_NOT_PAYABLE');
+
+    const tz = await this.timezone(tx, tenantId);
+    const today = localDate(new Date(), tz);
+    const paidOn = body.paidOn ?? today;
+    if (paidOn > today)
+      throw new AppException('VALIDATION_FAILED', undefined, {
+        paidOn: ['Ngày thu không được sau hôm nay.'],
+      });
+    const paidAmount = inv.paidAmount + body.amount;
+    if (paidAmount > MAX_VND)
+      throw new AppException('VALIDATION_FAILED', undefined, {
+        amount: ['Tổng đã thu vượt giới hạn cho phép.'],
+      });
+
+    const [row] = await tx
+      .insert(payments)
+      .values({
+        id: uuidv7(),
+        tenantId,
+        invoiceId,
+        amount: body.amount,
+        method: body.method,
+        paidOn,
+        note: body.note || null,
+        recordedBy: actor.userId,
+      })
+      .returning();
+    const p = row!;
+    await tx.insert(revenueLedger).values({
+      id: uuidv7(),
+      tenantId,
+      paymentId: p.id,
+      kind: 'payment',
+      amount: p.amount,
+      entryDate: p.paidOn,
+      fiscalYear: yearOf(p.paidOn),
+    });
+    const delta = overpaymentDelta(inv.totalAmount, inv.paidAmount, paidAmount);
+    if (delta > 0)
+      await tx.insert(studentLedger).values({
+        id: uuidv7(),
+        tenantId,
+        studentId: inv.studentId,
+        invoiceId,
+        paymentId: p.id,
+        kind: 'overpayment',
+        credit: delta,
+        description: `Trả thừa hóa đơn ${inv.code}`,
+      });
+
+    const status = statusAfter(inv.totalAmount, paidAmount);
+    await this.setPaid(tx, tenantId, invoiceId, status, paidAmount);
+    const remainingAmount = remainingOf(inv.totalAmount, paidAmount);
+    await recordOutboxEvent(tx, {
+      tenantId,
+      type: PAYMENT_RECORDED,
+      payload: {
+        invoiceId,
+        paymentId: p.id,
+        studentId: inv.studentId,
+        amount: p.amount,
+        paidOn: p.paidOn,
+        status: status as PaymentRecordedPayload['status'],
+        remainingAmount,
+      } satisfies PaymentRecordedPayload,
+    });
+    await writeAudit(tx, {
+      tenantId,
+      entity: 'payment',
+      entityId: p.id,
+      action: 'insert',
+      before: null,
+      after: {
+        invoiceId,
+        amount: p.amount,
+        method: p.method,
+        paidOn: p.paidOn,
+        invoiceStatus: status,
+        paidAmount,
+      },
+    });
+    await writeAudit(tx, {
+      tenantId,
+      entity: 'invoice',
+      entityId: invoiceId,
+      action: 'update',
+      before: { status: inv.status, paidAmount: inv.paidAmount },
+      after: { status, paidAmount },
+    });
+    return this.result(tx, tenantId, p, tz, {
+      status,
+      paidAmount,
+      total: inv.totalAmount,
+    });
+  }
+
+  /** Danh sách mọi thanh toán của hóa đơn (kể cả đã hủy), mới ghi trước; bản nháp → 404. */
+  async list(
+    tx: Tx,
+    tenantId: string,
+    invoiceId: string,
+  ): Promise<PaymentList> {
+    const [inv] = await tx
+      .select({ status: invoices.status })
+      .from(invoices)
+      .where(and(eq(invoices.tenantId, tenantId), eq(invoices.id, invoiceId)));
+    if (!inv || inv.status === 'draft') throw new AppException('NOT_FOUND');
+    const rows = await tx
+      .select()
+      .from(payments)
+      .where(
+        and(eq(payments.tenantId, tenantId), eq(payments.invoiceId, invoiceId)),
+      )
+      .orderBy(desc(payments.recordedAt), desc(payments.id));
+    const tz = await this.timezone(tx, tenantId);
+    const names = await this.names(tx, tenantId, rows);
+    return { items: rows.map((r) => toPayment(r, tz, names)) };
+  }
+
+  /**
+   * Hủy thanh toán (US-7.4 AC4): đặt `voided_*`, bút toán đảo ở hai sổ, tính lại trạng thái từ Σ còn hiệu lực. Đã hủy → trả
+   * bản hiện tại, giữ lý do và người hủy đầu tiên, không ghi bút toán thứ hai.
+   */
+  async void(
+    tx: Tx,
+    actor: Actor,
+    paymentId: string,
+    body: VoidPaymentRequest,
+  ): Promise<PaymentResult> {
+    const { tenantId } = actor;
+    const [found] = await tx
+      .select({ invoiceId: payments.invoiceId })
+      .from(payments)
+      .where(and(eq(payments.tenantId, tenantId), eq(payments.id, paymentId)));
+    if (!found) throw new AppException('NOT_FOUND');
+    const inv = await this.lockInvoice(tx, tenantId, found.invoiceId);
+    const tz = await this.timezone(tx, tenantId);
+    // Đọc lại sau khi giữ khóa: request hủy song song đã commit thì thấy `voided_at`.
+    const [p] = await tx
+      .select()
+      .from(payments)
+      .where(and(eq(payments.tenantId, tenantId), eq(payments.id, paymentId)));
+    if (p!.voidedAt)
+      return this.result(tx, tenantId, p!, tz, {
+        status: inv.status,
+        paidAmount: inv.paidAmount,
+        total: inv.totalAmount,
+      });
+
+    const [voided] = await tx
+      .update(payments)
+      .set({
+        voidedAt: new Date(),
+        voidReason: body.reason,
+        voidedBy: actor.userId,
+      })
+      .where(and(eq(payments.tenantId, tenantId), eq(payments.id, paymentId)))
+      .returning();
+    // Dòng đảo mang ngày và năm của dòng thu gốc: hủy là sửa sai, doanh thu năm đó không còn khoản này.
+    await tx.insert(revenueLedger).values({
+      id: uuidv7(),
+      tenantId,
+      paymentId,
+      kind: 'reversal',
+      amount: -p!.amount,
+      entryDate: p!.paidOn,
+      fiscalYear: yearOf(p!.paidOn),
+    });
+    const paidAmount = inv.paidAmount - p!.amount;
+    const delta = overpaymentDelta(inv.totalAmount, inv.paidAmount, paidAmount);
+    if (delta < 0)
+      await tx.insert(studentLedger).values({
+        id: uuidv7(),
+        tenantId,
+        studentId: inv.studentId,
+        invoiceId: inv.id,
+        paymentId,
+        kind: 'payment_void',
+        debit: -delta,
+        description: `Hủy thanh toán, đảo phần trả thừa hóa đơn ${inv.code}`,
+      });
+    const status = statusAfter(inv.totalAmount, paidAmount);
+    await this.setPaid(tx, tenantId, inv.id, status, paidAmount);
+    await writeAudit(tx, {
+      tenantId,
+      entity: 'payment',
+      entityId: paymentId,
+      action: 'update',
+      before: { voidedAt: null },
+      after: { voidedAt: voided!.voidedAt, reason: body.reason, paidAmount },
+    });
+    await writeAudit(tx, {
+      tenantId,
+      entity: 'invoice',
+      entityId: inv.id,
+      action: 'update',
+      before: { status: inv.status, paidAmount: inv.paidAmount },
+      after: { status, paidAmount },
+    });
+    return this.result(tx, tenantId, voided!, tz, {
+      status,
+      paidAmount,
+      total: inv.totalAmount,
+    });
+  }
+
+  private async lockInvoice(
+    tx: Tx,
+    tenantId: string,
+    id: string,
+  ): Promise<InvoiceRow> {
+    const [row] = await tx
+      .select()
+      .from(invoices)
+      .where(and(eq(invoices.tenantId, tenantId), eq(invoices.id, id)))
+      .for('update');
+    if (!row) throw new AppException('NOT_FOUND');
+    return row;
+  }
+
+  private async setPaid(
+    tx: Tx,
+    tenantId: string,
+    id: string,
+    status: string,
+    paidAmount: number,
+  ) {
+    await tx
+      .update(invoices)
+      .set({ status, paidAmount })
+      .where(and(eq(invoices.tenantId, tenantId), eq(invoices.id, id)));
+  }
+
+  private async timezone(tx: Tx, tenantId: string): Promise<string> {
+    const [t] = await tx
+      .select({ tz: tenants.timezone })
+      .from(tenants)
+      .where(eq(tenants.id, tenantId));
+    return t?.tz ?? DEFAULT_TZ;
+  }
+
+  private async result(
+    tx: Tx,
+    tenantId: string,
+    p: PaymentRow,
+    tz: string,
+    s: { status: string; paidAmount: number; total: number },
+  ): Promise<PaymentResult> {
+    const names = await this.names(tx, tenantId, [p]);
+    return {
+      payment: toPayment(p, tz, names),
+      status: s.status as PaymentResult['status'],
+      paidAmount: s.paidAmount,
+      remainingAmount: remainingOf(s.total, s.paidAmount),
+      overpaidAmount: overpaidOf(s.total, s.paidAmount),
+      dunningCancelled: false,
+    };
+  }
+
+  /** Tên người ghi/hủy qua hàm security definer (users chỉ cho đọc dòng của chính mình). Đã xóa tài khoản → không có. */
+  private async names(
+    tx: Tx,
+    tenantId: string,
+    rows: PaymentRow[],
+  ): Promise<Map<string, string>> {
+    const ids = [
+      ...new Set(
+        rows.flatMap((r) => [r.recordedBy, r.voidedBy].filter((x) => !!x)),
+      ),
+    ] as string[];
+    const out = new Map<string, string>();
+    if (!ids.length) return out;
+    const res = await tx.execute<{
+      user_id: string;
+      display_name: string | null;
+      deleted: boolean;
+    }>(
+      sql`select user_id, display_name, deleted from app_private.tenant_user_names(${tenantId}::uuid, array[${sql.join(
+        ids.map((i) => sql`${i}::uuid`),
+        sql`, `,
+      )}])`,
+    );
+    for (const r of res.rows)
+      if (!r.deleted) out.set(r.user_id, r.display_name ?? '');
+    return out;
+  }
+}
+
+const yearOf = (date: string) => Number(date.slice(0, 4));
+
+const toPayment = (
+  r: PaymentRow,
+  tz: string,
+  names: Map<string, string>,
+): Payment => {
+  const actor = (id: string | null) =>
+    id && names.has(id) ? { id, name: names.get(id)! } : null;
+  return {
+    id: r.id,
+    invoiceId: r.invoiceId,
+    amount: r.amount,
+    method: r.method as Payment['method'],
+    paidOn: r.paidOn,
+    note: r.note,
+    recordedAt: formatInZone(r.recordedAt, tz),
+    recordedBy: actor(r.recordedBy),
+    voidedAt: r.voidedAt ? formatInZone(r.voidedAt, tz) : null,
+    voidedBy: actor(r.voidedBy),
+    voidReason: r.voidReason,
+  };
+};
