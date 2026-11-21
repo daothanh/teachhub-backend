@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { calculateInvoice } from '../libs/modules/billing/domain/invoice-calculator.js';
 import { startTestApp, type TestApp } from './support/app.js';
 import { seedMember, seedTenant, type SeededTenant } from './support/seed.js';
 
@@ -438,5 +439,148 @@ describe('[money][tenant-isolation] học phí lớp + mức riêng học viên'
       {},
     );
     expect(r2.statusCode).toBe(403);
+  });
+
+  const overrideOf = async (enrollmentId: string) =>
+    (
+      await t.worker.query(`select fee_override from enrollments where id=$1`, [
+        enrollmentId,
+      ])
+    ).rows[0].fee_override as Record<string, unknown> | null;
+
+  it('M1: PATCH lớp với body {} → 200, không 500', async () => {
+    const id = await newClass(A, { name: 'Rỗng' });
+    const res = await patch(A, id, {});
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json().id).toBe(id);
+  });
+
+  it('M2: đổi kiểu học phí xóa feeAmount/installments của mức riêng, giữ công tắc vắng và miễn giảm; tiền tính ra theo lớp', async () => {
+    const classId = await newClass(A, { name: 'Đổi kiểu' });
+    await patch(A, classId, { feeType: 'per_session', feeAmount: 150000 });
+    const { enrollmentId } = await enrollNew(A, classId);
+    const put = (body: object) =>
+      call(A, 'PUT', `/enrollments/${enrollmentId}/fee-override`, body);
+    expect(
+      (
+        await put({
+          feeAmount: 120000,
+          chargeExcused: false,
+          discounts: [{ kind: 'amount', description: 'Hỗ trợ', amount: 1000 }],
+        })
+      ).statusCode,
+    ).toBe(200);
+
+    const r = await patch(A, classId, {
+      feeType: 'monthly',
+      feeAmount: 1000000,
+    });
+    expect(r.statusCode, r.body).toBe(200);
+    const o = await overrideOf(enrollmentId);
+    expect(o).toMatchObject({
+      feeAmount: null,
+      installments: null,
+      chargeExcused: false,
+      discounts: [{ kind: 'amount', amount: 1000 }],
+    });
+    // Tính bằng InvoiceCalculator: học phí tháng của lớp, không còn 120.000 của kiểu cũ.
+    const roster = (await call(A, 'GET', `/classes/${classId}/roster`)).json()
+      .items[0].feeOverride as Record<string, number | boolean | null>;
+    const result = calculateInvoice({
+      feeType: 'monthly',
+      feeAmount: 1_000_000,
+      override: {
+        ...(roster.feeAmount != null && {
+          feeAmount: roster.feeAmount as number,
+        }),
+      },
+      periodStart: '2026-12-01',
+      periodEnd: '2026-12-31',
+      joinedOn: '2026-12-01',
+      sessions: [],
+      plannedSessions: 8,
+    });
+    expect(result.lines.find((l) => l.kind === 'monthly')!.amount).toBe(
+      1_000_000,
+    );
+
+    // chỉ còn feeAmount thì xóa học phí lớp làm mức riêng thành null
+    await patch(A, classId, { feeType: 'per_session', feeAmount: 150000 });
+    await put({ feeAmount: 90000 });
+    expect(
+      (await patch(A, classId, { feeType: null, feeAmount: null })).statusCode,
+    ).toBe(200);
+    expect(await overrideOf(enrollmentId)).toBeNull();
+  });
+
+  it('M2: đổi số tiền cùng kiểu không đụng mức riêng', async () => {
+    const classId = await newClass(A, { name: 'Cùng kiểu' });
+    await patch(A, classId, { feeType: 'per_session', feeAmount: 150000 });
+    const { enrollmentId } = await enrollNew(A, classId);
+    await call(A, 'PUT', `/enrollments/${enrollmentId}/fee-override`, {
+      feeAmount: 120000,
+    });
+    await patch(A, classId, { feeAmount: 160000 });
+    expect(await overrideOf(enrollmentId)).toMatchObject({ feeAmount: 120000 });
+  });
+
+  it('M1 security: PUT fee-override ghi audit_logs (before/after) với actor', async () => {
+    const classId = await newClass(A, { name: 'Audit' });
+    await patch(A, classId, { feeType: 'per_session', feeAmount: 150000 });
+    const { enrollmentId } = await enrollNew(A, classId);
+    await call(A, 'PUT', `/enrollments/${enrollmentId}/fee-override`, {
+      feeAmount: 120000,
+    });
+    const { rows } = await t.worker.query(
+      `select actor_user_id, before_data, after_data from audit_logs
+       where tenant_id=$1 and entity='enrollments' and entity_id=$2 and action='update' order by id desc limit 1`,
+      [A.tenantId, enrollmentId],
+    );
+    expect(rows[0].actor_user_id).toBe(A.userId);
+    expect(rows[0].before_data).toEqual({ feeOverride: null });
+    expect(rows[0].after_data).toMatchObject({
+      feeOverride: { feeAmount: 120000 },
+    });
+  });
+
+  it('S2: đổi từ course (nhiều đợt) sang monthly không gửi feeRules → 200, số đợt về 1', async () => {
+    const id = await newClass(A, {
+      name: 'Course sang tháng',
+      endDate: '2027-03-31',
+    });
+    await call(A, 'PUT', `/classes/${id}/schedule-rules`, {
+      rules: [{ weekday: 2, startTime: '18:00', durationMin: 90 }],
+    });
+    const c = await patch(A, id, {
+      feeType: 'course',
+      feeAmount: 9000000,
+      feeRules: { installments: 3 },
+    });
+    expect(c.statusCode, c.body).toBe(200);
+    const m = await patch(A, id, { feeType: 'monthly', feeAmount: 1000000 });
+    expect(m.statusCode, m.body).toBe(200);
+    expect(m.json().feeRules.installments).toBe(1);
+  });
+
+  it('S1: xóa hết quy tắc lịch của lớp trọn khóa → 422; lớp không phải trọn khóa vẫn xóa được', async () => {
+    const id = await newClass(A, {
+      name: 'Course giữ lịch',
+      endDate: '2027-03-31',
+    });
+    const rule = { weekday: 2, startTime: '18:00', durationMin: 90 };
+    await call(A, 'PUT', `/classes/${id}/schedule-rules`, { rules: [rule] });
+    await patch(A, id, { feeType: 'course', feeAmount: 9000000 });
+    const res = await call(A, 'PUT', `/classes/${id}/schedule-rules`, {
+      rules: [],
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().code).toBe('VALIDATION_FAILED');
+    const other = await newClass(A, { name: 'Tháng', endDate: '2027-03-31' });
+    await call(A, 'PUT', `/classes/${other}/schedule-rules`, { rules: [rule] });
+    await patch(A, other, { feeType: 'monthly', feeAmount: 1000000 });
+    expect(
+      (await call(A, 'PUT', `/classes/${other}/schedule-rules`, { rules: [] }))
+        .statusCode,
+    ).toBe(200);
   });
 });

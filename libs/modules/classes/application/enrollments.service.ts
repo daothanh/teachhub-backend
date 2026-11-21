@@ -8,6 +8,7 @@ import {
   students,
   tenants,
   type Tx,
+  writeAudit,
 } from '@teachhub/db';
 import { localDate } from '@teachhub/modules/schedule';
 import type {
@@ -166,22 +167,27 @@ export class EnrollmentsService {
     enrollmentId: string,
     body: PutFeeOverrideRequest,
   ): Promise<FeeOverrideResult> {
-    const [en] = await tx
-      .select()
-      .from(enrollments)
-      .where(
-        and(
-          eq(enrollments.tenantId, tenantId),
-          eq(enrollments.id, enrollmentId),
-        ),
-      )
-      .for('update');
-    if (!en) throw new AppException('NOT_FOUND');
-    if (en.leftOn) throw new AppException('CONFLICT_STALE');
+    const find = () =>
+      tx
+        .select()
+        .from(enrollments)
+        .where(
+          and(
+            eq(enrollments.tenantId, tenantId),
+            eq(enrollments.id, enrollmentId),
+          ),
+        );
+    const [probe] = await find();
+    if (!probe) throw new AppException('NOT_FOUND');
+    // Cùng thứ tự khóa với PATCH lớp (lớp trước, ghi danh sau): đọc `feeType` không bị đổi giữa chừng.
     const [cls] = await tx
       .select({ feeType: classes.feeType })
       .from(classes)
-      .where(and(eq(classes.tenantId, tenantId), eq(classes.id, en.classId)));
+      .where(and(eq(classes.tenantId, tenantId), eq(classes.id, probe.classId)))
+      .for('share');
+    const [en] = await find().for('update');
+    if (!en) throw new AppException('NOT_FOUND');
+    if (en.leftOn) throw new AppException('CONFLICT_STALE');
 
     const fee: FeeOverride = {
       feeAmount: body.feeAmount ?? null,
@@ -208,6 +214,14 @@ export class EnrollmentsService {
     const empty = Object.values(fee).every((v) =>
       Array.isArray(v) ? v.length === 0 : v === null,
     );
+    await writeAudit(tx, {
+      tenantId,
+      entity: 'enrollments',
+      entityId: enrollmentId,
+      action: 'update',
+      before: { feeOverride: en.feeOverride },
+      after: { feeOverride: empty ? null : fee },
+    });
     await tx
       .update(enrollments)
       .set({ feeOverride: empty ? null : fee })

@@ -1,5 +1,15 @@
 import { Injectable } from '@nestjs/common';
-import { and, count, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
+import {
+  and,
+  count,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  ne,
+  sql,
+} from 'drizzle-orm';
 import {
   AppException,
   type PageQuery,
@@ -14,13 +24,19 @@ import {
   enrollments,
   students,
   type Tx,
+  writeAudit,
 } from '@teachhub/db';
 import {
   ScheduleRulesReader,
   ScheduleService,
 } from '@teachhub/modules/schedule';
 import type { FeeRules, FeeType } from '@teachhub/modules/billing';
-import { classFeeErrors, resolveFeeRules } from '../domain/class-fee.js';
+import {
+  classFeeErrors,
+  dropTypeBoundFields,
+  type OverrideShape,
+  resolveFeeRules,
+} from '../domain/class-fee.js';
 import { classDraftErrors } from '../domain/class-rules.js';
 import type {
   Class,
@@ -30,6 +46,13 @@ import type {
 } from '../http/classes.schemas.js';
 
 type ClassRow = typeof classes.$inferSelect;
+
+/** Quy tắc đã lưu khi PATCH không gửi `feeRules`: chỉ trọn khóa giữ số đợt, kiểu khác đưa về 1 trước khi kiểm. */
+const keepStoredRules = (
+  stored: Partial<FeeRules> | null,
+  type: FeeType | null,
+): Partial<FeeRules> | null =>
+  stored && type !== 'course' ? { ...stored, installments: 1 } : stored;
 
 /**
  * Lớp của tenant (US-1.1). RLS (`classes_staff_all`) là lớp phòng thủ thứ hai; mọi truy vấn vẫn lọc `tenant_id`
@@ -153,7 +176,7 @@ export class ClassesService {
         ? feeRules
         : nextType === null
           ? null
-          : (cur.feeRules as Partial<FeeRules> | null);
+          : keepStoredRules(cur.feeRules as Partial<FeeRules> | null, nextType);
     if (nextType !== null || nextAmount !== null || nextRules !== null) {
       Object.assign(
         errors,
@@ -180,11 +203,19 @@ export class ClassesService {
           feeRules: resolveFeeRules(nextType, nextRules),
         }
       : {};
-    const [row] = await tx
-      .update(classes)
-      .set({ ...patch, ...feePatch })
-      .where(and(eq(classes.tenantId, tenantId), eq(classes.id, id)))
-      .returning();
+    const set = { ...patch, ...feePatch };
+    // Patch rỗng: Drizzle không nhận `set({})`, không có gì để ghi thì giữ nguyên dòng.
+    const [row] = Object.keys(set).length
+      ? await tx
+          .update(classes)
+          .set(set)
+          .where(and(eq(classes.tenantId, tenantId), eq(classes.id, id)))
+          .returning()
+      : [cur];
+    // Đổi hoặc bỏ kiểu học phí: số tiền / số đợt riêng của học viên mang nghĩa theo kiểu cũ, bỏ để không tính sai im lặng.
+    if (cur.feeType !== null && nextType !== cur.feeType) {
+      await this.dropOverrideFee(tx, tenantId, id);
+    }
     // Đổi kỳ hạn lớp → buổi dự kiến tương lai phải khớp lại (cắt phần quá hạn, sinh phần mở rộng).
     if (row!.startDate !== cur.startDate || row!.endDate !== cur.endDate) {
       await this.schedule.reconcile(
@@ -196,6 +227,44 @@ export class ClassesService {
       );
     }
     return (await this.hydrate(tx, tenantId, [row!]))[0]!;
+  }
+
+  /** Xóa `feeAmount`, `installments` khỏi mức riêng của ghi danh mở; mức riêng thành rỗng thì về null. */
+  private async dropOverrideFee(
+    tx: Tx,
+    tenantId: string,
+    classId: string,
+  ): Promise<void> {
+    const rows = await tx
+      .select({ id: enrollments.id, feeOverride: enrollments.feeOverride })
+      .from(enrollments)
+      .where(
+        and(
+          eq(enrollments.tenantId, tenantId),
+          eq(enrollments.classId, classId),
+          isNull(enrollments.leftOn),
+          isNotNull(enrollments.feeOverride),
+        ),
+      );
+    for (const r of rows) {
+      const before = r.feeOverride as OverrideShape;
+      const after = dropTypeBoundFields(before);
+      if (before.feeAmount === null && before.installments === null) continue;
+      await tx
+        .update(enrollments)
+        .set({ feeOverride: after })
+        .where(
+          and(eq(enrollments.tenantId, tenantId), eq(enrollments.id, r.id)),
+        );
+      await writeAudit(tx, {
+        tenantId,
+        entity: 'enrollments',
+        entityId: r.id,
+        action: 'update',
+        before: { feeOverride: before },
+        after: { feeOverride: after },
+      });
+    }
   }
 
   /** Gọi lại trên lớp đã lưu trữ vẫn trả lớp hiện tại (không đổi `archivedAt`). */

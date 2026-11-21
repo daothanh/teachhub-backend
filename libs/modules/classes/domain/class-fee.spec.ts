@@ -1,4 +1,8 @@
-import { classFeeErrors, resolveFeeRules } from './class-fee.js';
+import {
+  classFeeErrors,
+  dropTypeBoundFields,
+  resolveFeeRules,
+} from './class-fee.js';
 
 const base = {
   feeType: 'per_session',
@@ -86,5 +90,29 @@ describe('classFeeErrors', () => {
     expect(
       Object.keys(classFeeErrors({ ...base, feeRules: { installments: 2 } })),
     ).toEqual(['feeRules.installments']);
+  });
+});
+
+describe('dropTypeBoundFields', () => {
+  const o = {
+    feeAmount: 120000,
+    chargeExcused: null,
+    chargeUnexcused: null,
+    deductCancelled: null,
+    installments: 3,
+    discounts: [],
+  };
+
+  it('bỏ feeAmount và installments; hết gì thì null', () => {
+    expect(dropTypeBoundFields(o)).toBeNull();
+  });
+
+  it('giữ công tắc vắng và miễn giảm', () => {
+    expect(dropTypeBoundFields({ ...o, chargeExcused: false })).toEqual({
+      ...o,
+      chargeExcused: false,
+      feeAmount: null,
+      installments: null,
+    });
   });
 });

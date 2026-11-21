@@ -56,3 +56,25 @@ export function classFeeErrors(c: FeeDraft): Record<string, string[]> {
   }
   return errors;
 }
+
+/** Mức riêng như `FeeOverride` của hợp đồng (trường `null` = kế thừa lớp). */
+export interface OverrideShape {
+  feeAmount: number | null;
+  chargeExcused: boolean | null;
+  chargeUnexcused: boolean | null;
+  deductCancelled: boolean | null;
+  installments: number | null;
+  discounts: unknown[];
+}
+
+/** Mọi trường rỗng → không còn mức riêng. */
+export const isEmptyOverride = (o: OverrideShape): boolean =>
+  Object.values(o).every((v) =>
+    Array.isArray(v) ? v.length === 0 : v === null,
+  );
+
+/** Đổi kiểu học phí: `feeAmount` và `installments` mang nghĩa theo kiểu cũ nên bỏ; công tắc vắng và miễn giảm giữ. */
+export function dropTypeBoundFields<T extends OverrideShape>(o: T): T | null {
+  const next = { ...o, feeAmount: null, installments: null };
+  return isEmptyOverride(next) ? null : next;
+}
