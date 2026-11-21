@@ -28,8 +28,9 @@ create or replace function app_private.students_status_history() returns trigger
 language plpgsql security definer set search_path = '' as $$
 begin
   if new.status is distinct from old.status then
-    insert into public.student_status_history (id, tenant_id, student_id, from_status, to_status)
-    values (gen_random_uuid(), new.tenant_id, new.id, old.status, new.status);
+    -- clock_timestamp(): hai lần đổi trong cùng giao dịch vẫn có thứ tự (now() trả cùng một giờ).
+    insert into public.student_status_history (id, tenant_id, student_id, from_status, to_status, changed_at)
+    values (gen_random_uuid(), new.tenant_id, new.id, old.status, new.status, clock_timestamp());
   end if;
   return null;
 end;
