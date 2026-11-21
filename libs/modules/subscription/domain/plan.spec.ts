@@ -43,7 +43,9 @@ describe('effectiveStatus / planCodeOf', () => {
 describe('daysLeft / giới hạn', () => {
   it('làm tròn lên, không âm', () => {
     expect(daysLeft(at(14 * 86_400_000), now)).toBe(14);
-    expect(daysLeft(at(86_400_000 + 1), now)).toBe(2);
+    expect(daysLeft(at(86_400_000 + 60_001), now)).toBe(2);
+    // Lệch đồng hồ DB/app vài giây không làm 14 ngày thành 15.
+    expect(daysLeft(at(14 * 86_400_000 + 5_000), now)).toBe(14);
     expect(daysLeft(at(-5), now)).toBe(0);
   });
   it('exceedsLimit: null = không giới hạn; 3/3 thêm 1 là vượt, 2/3 thêm 1 thì không', () => {
