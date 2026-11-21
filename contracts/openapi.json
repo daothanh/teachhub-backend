@@ -14221,7 +14221,7 @@
           "summary"
         ],
         "additionalProperties": false,
-        "description": "Công nợ của tenant (T11): mỗi dòng một học viên còn nợ, sắp theo số nợ giảm dần mặc định, kèm tổng theo nhóm tuổi nợ (US-8.3 AC1, AC2). Nợ ròng của học viên = max(0, Σ `remainingAmount` các hóa đơn `issued`/`partially_paid` + số dư sổ học viên): số dư âm (trả thừa) giảm nợ, số dư dương (nợ ở sổ, vd. hủy thanh toán sau khi trả thừa đã được trừ) tăng nợ; khoản đã nằm trong dòng `carry_over` của hóa đơn kỳ sau chỉ tính ở hóa đơn kỳ sau, không tính hai lần. Nhóm tuổi nợ và `summary` theo nợ ròng. Học viên có nợ ròng 0 không có dòng",
+        "description": "Công nợ của tenant (T11): mỗi dòng một học viên còn nợ, sắp theo số nợ giảm dần mặc định, kèm tổng theo nhóm tuổi nợ (US-8.3 AC1, AC2). Nợ ròng của học viên = max(0, Σ `remainingAmount` các hóa đơn `issued`/`partially_paid` + số dư sổ học viên): số dư âm (trả thừa) giảm nợ, số dư dương (nợ ở sổ, vd. hủy thanh toán sau khi trả thừa đã được trừ) tăng nợ; khoản đã nằm trong dòng `carry_over` của hóa đơn kỳ sau chỉ tính ở hóa đơn kỳ sau, không tính hai lần. Số dư âm bù vào hóa đơn cũ nhất trước (FIFO): `oldestDueDate`, tuổi nợ và `openInvoiceCount` tính theo các hóa đơn còn nợ SAU khi bù (ít nhất 1 khi nợ ròng > 0 chỉ nằm ở sổ). Nhóm tuổi nợ và `summary` theo nợ ròng. Học viên có nợ ròng 0 không có dòng",
         "example": {
           "items": [
             {

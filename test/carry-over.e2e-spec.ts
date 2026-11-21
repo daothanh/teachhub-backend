@@ -1083,6 +1083,201 @@ describe('carry-over: chuyển kỳ lúc phát hành, sổ học viên, công n�
     });
   });
 
+  it('kỳ đóng theo giá trị tính lại khi chốt: (a) điều chỉnh lưu +50k nhưng điểm danh sửa về như cũ → bỏ qua, kỳ đóng; (b) nháp lưu 0 nhưng tính lại ra +50k → kỳ KHÔNG đóng, chốt được ở lệnh sau', async () => {
+    const mkTenant = async () => {
+      const T = await seedTenant(t.worker);
+      const Tt = { ...T, token: await t.tokenFor(T.userId) };
+      await q(
+        `insert into payout_accounts (id, tenant_id, bank_bin, account_no, account_name, is_primary) values ($1, $2, '970436', '0011001234567', 'GV', true)`,
+        [randomUUID(), T.tenantId],
+      );
+      const cls = randomUUID();
+      await addClass(T, cls, 'T Lý', 'per_session', 50_000, {
+        chargeUnexcused: false,
+      });
+      const mkSession = async (d: string) => {
+        const sid = randomUUID();
+        await q(
+          `insert into sessions (id, tenant_id, class_id, session_date, starts_at, ends_at, status) values ($1, $2, $3, $4, $5, $6, 'taught')`,
+          [sid, T.tenantId, cls, d, `${d}T11:00:00Z`, `${d}T12:00:00Z`],
+        );
+        return sid;
+      };
+      const mkAtt = (sess: string, stu: string, status: string) =>
+        q(
+          `insert into attendance (id, tenant_id, session_id, student_id, status, client_updated_at) values ($1, $2, $3, $4, $5, now())`,
+          [randomUUID(), T.tenantId, sess, stu, status],
+        );
+      // Học viên P: hóa đơn cũ 06/2026 đã phát hành 0 đ (buổi vắng không tính); buổi tháng 3/2027 cũng vắng không tính (nháp 0 đ).
+      const P = randomUUID();
+      await addStudent(T, P, 'Học Viên P');
+      await q(
+        `insert into enrollments (id, tenant_id, class_id, student_id, joined_on) values ($1, $2, $3, $4, '2026-06-01')`,
+        [randomUUID(), T.tenantId, cls, P],
+      );
+      const s1 = await mkSession('2026-06-10');
+      await mkAtt(s1, P, 'unexcused');
+      const sMar = await mkSession('2027-03-10');
+      await mkAtt(sMar, P, 'unexcused');
+      const [per, inv] = [randomUUID(), randomUUID()];
+      await q(
+        `insert into billing_periods (id, tenant_id, period_month, close_date, due_date) values ($1, $2, '2026-06-01', '2026-07-01', '2026-07-11')`,
+        [per, T.tenantId],
+      );
+      await q(
+        `insert into invoices (id, tenant_id, period_id, student_id, total_amount) values ($1, $2, $3, $4, 0)`,
+        [inv, T.tenantId, per, P],
+      );
+      await q(
+        `insert into invoice_lines (id, tenant_id, invoice_id, position, kind, description, amount, session_id, session_date, class_name)
+         values ($1, $2, $3, 1, 'session', 'Buổi 2026-06-10 (không tính)', 0, $4, '2026-06-10', 'T Lý')`,
+        [randomUUID(), T.tenantId, inv, s1],
+      );
+      await q(
+        `update invoices set status = 'issued', code = $2, transfer_note = $3, payout = '{"a":1}'::jsonb, issued_at = '2026-07-01T00:00:00Z' where id = $1`,
+        [inv, generateInvoiceCode(), 'TH ABCDEF'],
+      );
+      return { T, Tt, P, cls, s1, mkAtt, mkSession };
+    };
+    const periodOf = async (T: SeededTenant) =>
+      (
+        await q(
+          `select id, status from billing_periods where tenant_id = $1 and period_month = '2027-03-01'`,
+          [T.tenantId],
+        )
+      )[0];
+
+    // (a): lúc tạo nháp, buổi tháng 6 được sửa thành có mặt → điều chỉnh +50k lưu trong nháp; trước khi chốt sửa về vắng.
+    const D = await mkTenant();
+    await q(
+      `update attendance set status = 'present' where session_id = $1 and student_id = $2`,
+      [D.s1, D.P],
+    );
+    // (b): nháp tạo ra 0 đ (chưa sửa); học viên Q có nháp 100k thường.
+    const E = await mkTenant();
+    const [cm, Q] = [randomUUID(), randomUUID()];
+    await addClass(E.T, cm, 'T Văn', 'monthly', 100_000);
+    await addStudent(E.T, Q, 'Học Viên Q');
+    await q(
+      `insert into enrollments (id, tenant_id, class_id, student_id, joined_on) values ($1, $2, $3, $4, '2026-11-01')`,
+      [randomUUID(), E.T.tenantId, cm, Q],
+    );
+
+    expect(await job.run(CLOSE_MAR)).toBeGreaterThanOrEqual(3);
+    const draftOf = async (T: SeededTenant, sid: string) =>
+      (
+        await q(
+          `select * from invoices where tenant_id = $1 and student_id = $2 and status = 'draft'`,
+          [T.tenantId, sid],
+        )
+      )[0];
+    const dD = await draftOf(D.T, D.P);
+    expect(Number(dD.total_amount)).toBe(50_000); // lưu +50k lúc tạo
+    expect(
+      (await linesOf(dD.id)).some(
+        (l) => l.kind === 'prev_adjustment' && l.amount === 50_000,
+      ),
+    ).toBe(true);
+    const dE = await draftOf(E.T, E.P);
+    expect(Number(dE.total_amount)).toBe(0);
+
+    // (a) sửa về như cũ rồi chốt: tính lại 0 → ZERO_AMOUNT; không còn nháp chốt được → kỳ đóng.
+    await q(
+      `update attendance set status = 'unexcused' where session_id = $1 and student_id = $2`,
+      [D.s1, D.P],
+    );
+    const pa = await periodOf(D.T);
+    const ra = await call(D.Tt, 'POST', `/billing-periods/${pa.id}/issue`, {
+      invoiceIds: null,
+    });
+    expect(ra.statusCode, ra.body).toBe(200);
+    expect(ra.json()).toMatchObject({
+      issuedCount: 0,
+      skipped: [{ reason: 'ZERO_AMOUNT' }],
+    });
+    expect((await periodOf(D.T)).status).toBe('closed');
+    expect(Number((await draftOf(D.T, D.P)).total_amount)).toBe(0);
+    expect(
+      (await linesOf((await draftOf(D.T, D.P)).id)).some(
+        (l) => l.kind === 'prev_adjustment',
+      ),
+    ).toBe(false);
+
+    // (b) điểm danh sửa thành có mặt sau khi tạo nháp: chốt chỉ Q → P còn chốt được → kỳ KHÔNG đóng.
+    await q(
+      `update attendance set status = 'present' where session_id = $1 and student_id = $2`,
+      [E.s1, E.P],
+    );
+    const dQ = await draftOf(E.T, Q);
+    const pb = await periodOf(E.T);
+    const rb = await call(E.Tt, 'POST', `/billing-periods/${pb.id}/issue`, {
+      invoiceIds: [dQ.id],
+    });
+    expect(rb.statusCode, rb.body).toBe(200);
+    expect(rb.json().issuedCount).toBe(1);
+    expect((await periodOf(E.T)).status).not.toBe('closed');
+    expect(Number((await draftOf(E.T, E.P)).total_amount)).toBe(50_000); // đã làm mới theo số mới
+    // Lệnh sau chốt P (chỉ còn điều chỉnh +50k) → đóng kỳ.
+    const rc = await call(E.Tt, 'POST', `/billing-periods/${pb.id}/issue`, {
+      invoiceIds: null,
+    });
+    expect(rc.statusCode, rc.body).toBe(200);
+    expect(rc.json()).toMatchObject({ issuedCount: 1, totalAmount: 50_000 });
+    expect((await periodOf(E.T)).status).toBe('closed');
+  });
+
+  it('S2 FIFO: số dư âm bù vào hóa đơn cũ nhất trước; tuổi nợ theo hóa đơn cũ nhất còn nợ SAU bù, đếm hóa đơn còn nợ sau bù', async () => {
+    const G = await seedTenant(t.worker);
+    const Gt = { ...G, token: await t.tokenFor(G.userId) };
+    const sid = randomUUID();
+    await addStudent(G, sid, 'Gx Bù Trừ');
+    // A 100k hạn cũ nhất, B 300k hạn sau, Z đã thu thừa 300k (sổ −300k).
+    await mkOldInvoice(sid, '2026-04-01', shift(60), 100_000, G.tenantId);
+    await mkOldInvoice(sid, '2026-05-01', shift(30), 300_000, G.tenantId);
+    const z = await mkOldInvoice(
+      sid,
+      '2026-03-01',
+      shift(90),
+      100_000,
+      G.tenantId,
+    );
+    const pz = await call(Gt, 'POST', `/invoices/${z}/payments`, {
+      amount: 400_000,
+      method: 'bank_transfer',
+    });
+    expect(pz.statusCode, pz.body).toBe(201);
+    const rec = await get<Receivables>(Gt, '/receivables?pageSize=100');
+    // Nợ ròng 100k; A được bù hết, B còn 100k → tuổi nợ theo hạn B (30 ngày, nhóm 0–30), 1 hóa đơn.
+    expect(rec.items).toHaveLength(1);
+    expect(rec.items[0]).toMatchObject({
+      studentId: sid,
+      outstandingAmount: 100_000,
+      openInvoiceCount: 1,
+      overdueDays: 30,
+      agingBucket: '0-30',
+    });
+    expect(rec.summary.totalAmount).toBe(100_000);
+    expect(
+      rec.summary.buckets.map((b) => [b.agingBucket, b.studentCount]),
+    ).toEqual([
+      ['0-30', 1],
+      ['31-60', 0],
+      ['over-60', 0],
+    ]);
+    expect(
+      (await get<Receivables>(Gt, '/receivables?agingBucket=0-30')).total,
+    ).toBe(1);
+    expect(
+      (await get<Receivables>(Gt, '/receivables?agingBucket=31-60')).items,
+    ).toEqual([]);
+    const h = await get<StudentReceivableHistory>(Gt, `/receivables/${sid}`);
+    expect(h).toMatchObject({
+      invoiceOutstandingAmount: 400_000,
+      ledgerBalanceAmount: -300_000,
+      outstandingAmount: 100_000,
+    });
+  });
+
   it('S1 tuổi nợ: nợ chuyển qua 3 kỳ vẫn tính từ hạn gốc → nhóm over-60; /receivables và Σ đối soát', async () => {
     for (const m of ['2026-12-01', '2027-01-01', '2027-02-01'])
       expect((await invoiceOf(id.sO, m)).oldest_due_date, m).toBe(

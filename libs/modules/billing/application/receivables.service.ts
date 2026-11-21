@@ -56,16 +56,30 @@ export class ReceivablesService {
     ];
     // Một dòng mỗi học viên còn nợ; tuổi nợ tính từ hạn của hóa đơn cũ nhất còn nợ (múi giờ tenant).
     const base = sql`
-      with open_inv as (
-        select i.student_id,
-               sum(i.total_amount - i.paid_amount - i.carried_amount)::bigint as amount,
-               count(*)::int as invoice_count,
-               min(coalesce(i.oldest_due_date, p.due_date)) as due
+      with inv as (
+        select i.student_id, i.id, coalesce(i.oldest_due_date, p.due_date) as due,
+               (i.total_amount - i.paid_amount - i.carried_amount) as rem
           from invoices i join billing_periods p on p.tenant_id = i.tenant_id and p.id = i.period_id
          where i.tenant_id = ${tenantId}::uuid and i.status in ${OPEN}
            and i.total_amount - i.paid_amount - i.carried_amount > 0
-         group by i.student_id
-      ), led as (
+      ), led0 as (
+        select l.student_id, sum(l.debit - l.credit)::bigint as balance
+          from student_ledger l where l.tenant_id = ${tenantId}::uuid
+         group by l.student_id
+      ), fifo as (
+        -- Số dư sổ âm (trả thừa) bù vào hóa đơn cũ nhất trước (hạn, rồi id); phần còn nợ sau bù mới tính tuổi nợ và số hóa đơn.
+        select v.student_id, v.due, v.rem,
+               greatest(0, -coalesce(g.balance, 0)) as credit,
+               coalesce(sum(v.rem) over (partition by v.student_id order by v.due, v.id
+                 rows between unbounded preceding and 1 preceding), 0) as before
+          from inv v left join led0 g on g.student_id = v.student_id
+      ), left_inv as (
+        select student_id, due, rem - least(rem, greatest(0, credit - before)) as after from fifo
+      ), open_inv as (
+        select student_id, sum(after)::bigint as amount,
+               (count(*) filter (where after > 0))::int as invoice_count,
+               min(due) filter (where after > 0) as due
+          from left_inv group by student_id      ), led as (
         select l.student_id, sum(l.debit - l.credit)::bigint as balance
           from student_ledger l where l.tenant_id = ${tenantId}::uuid
          group by l.student_id
@@ -77,14 +91,14 @@ export class ReceivablesService {
          where l.tenant_id = ${tenantId}::uuid and l.debit > 0
          group by l.student_id
       ), debt as (
-        -- Nợ ròng = max(0, Σ còn nợ hóa đơn + số dư sổ): sổ âm (trả thừa) giảm nợ, sổ dương (nợ ở sổ) tăng nợ; nợ ròng 0 thì không có dòng.
+        -- Nợ ròng = max(0, Σ còn nợ hóa đơn + số dư sổ) = Σ còn nợ sau bù FIFO + max(0, số dư sổ); nợ ròng 0 thì không có dòng.
         select coalesce(o.student_id, g.student_id) as student_id,
-               coalesce(o.amount, 0) + coalesce(g.balance, 0) as amount,
+               coalesce(o.amount, 0) + greatest(0, coalesce(g.balance, 0)) as amount,
                greatest(1, coalesce(o.invoice_count, 0))::int as invoice_count,
                coalesce(least(o.due, case when g.balance is not null then d.due end), ${today}::date) as oldest_due
           from open_inv o full join led g on g.student_id = o.student_id
           left join led_due d on d.student_id = coalesce(o.student_id, g.student_id)
-         where coalesce(o.amount, 0) + coalesce(g.balance, 0) > 0
+         where coalesce(o.amount, 0) + greatest(0, coalesce(g.balance, 0)) > 0
       ), base as (
         select d.student_id, s.full_name, d.amount, d.invoice_count, d.oldest_due::text as oldest_due,
                greatest(0, ${today}::date - d.oldest_due)::int as overdue,

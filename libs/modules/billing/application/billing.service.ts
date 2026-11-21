@@ -507,21 +507,39 @@ export class BillingService {
       );
     }
 
-    // Kỳ đóng khi không còn bản nháp nào chốt được (còn khoản phát sinh ≠ 0); nháp không có phát sinh không chặn.
-    const [left] = await tx
-      .select({ n: sql<number>`count(*)::int` })
+    // Kỳ đóng khi không còn bản nháp nào chốt được. Quyết định theo giá trị TÍNH LẠI (cùng `issuable` với phần chốt ở trên):
+    // làm mới xem trước (điều chỉnh kỳ trước, chuyển kỳ, tổng) cho mọi nháp còn lại của kỳ, kể cả nháp bị bỏ qua hay không được chọn.
+    const rest = await tx
+      .select({ id: invoices.id, studentId: invoices.studentId })
       .from(invoices)
       .where(
         and(
           eq(invoices.tenantId, tenantId),
           eq(invoices.periodId, periodId),
           eq(invoices.status, 'draft'),
-          sql`coalesce((select sum(l.amount) from invoice_lines l
-                         where l.tenant_id = ${invoices.tenantId} and l.invoice_id = ${invoices.id}
-                           and l.kind <> 'carry_over'), 0) <> 0`,
         ),
-      );
-    if (!left?.n && period.status !== 'closed')
+      )
+      .orderBy(asc(invoices.id))
+      .for('update');
+    const { previews: restPreviews } = await previewDrafts(
+      tx,
+      tenantId,
+      rest,
+      period.periodMonth,
+    );
+    let left = 0;
+    for (const d of rest) {
+      const pv = restPreviews.get(d.id)!;
+      const plan = planCarryOver(pv.charges, pv.carry);
+      await setPrevAdjustmentLines(tx, tenantId, d.id, pv.adjustments);
+      await setCarryLine(tx, tenantId, d.id, pv.carry);
+      await tx
+        .update(invoices)
+        .set({ totalAmount: plan.total, clampedAmount: plan.clamped })
+        .where(and(eq(invoices.tenantId, tenantId), eq(invoices.id, d.id)));
+      if (plan.issuable) left += 1;
+    }
+    if (!left && period.status !== 'closed')
       await tx
         .update(billingPeriods)
         .set({ status: 'closed' })
