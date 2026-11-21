@@ -31,8 +31,9 @@ export const statusAfter = (
 export const overpaidOf = (total: number, paid: number): number =>
   Math.max(0, paid - total);
 
-export const remainingOf = (total: number, paid: number): number =>
-  Math.max(0, total - paid);
+/** Còn nợ = tổng − đã thu − phần đã chuyển sang hóa đơn kỳ sau (`carried`, S6-BE-03): khoản chuyển kỳ chỉ tính ở hóa đơn sau. */
+export const remainingOf = (total: number, paid: number, carried = 0): number =>
+  Math.max(0, total - paid - carried);
 
 /**
  * Thay đổi của sổ học viên khi Σ thanh toán đổi từ `before` sang `after`: > 0 ghi có (`overpayment`), < 0 ghi nợ

@@ -26,13 +26,13 @@ function migrationsBefore0026(): string {
   mkdirSync(join(dir, 'before'));
   const before = join(dir, 'before');
   cpSync(join(dir, 'meta'), join(before, 'meta'), { recursive: true });
-  for (const e of old.entries.filter((x) => !x.tag.startsWith('0026')))
+  for (const e of old.entries.filter((x) => !/^002[67]/.test(x.tag)))
     cpSync(join(dir, `${e.tag}.sql`), join(before, `${e.tag}.sql`));
   writeFileSync(
     join(before, 'meta/_journal.json'),
     JSON.stringify({
       ...old,
-      entries: old.entries.filter((x) => !x.tag.startsWith('0026')),
+      entries: old.entries.filter((x) => !/^002[67]/.test(x.tag)),
     }),
   );
   return before;

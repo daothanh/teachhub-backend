@@ -13,6 +13,7 @@ import {
   invoices,
   outboxEvents,
   payoutAccounts,
+  studentLedger,
   students,
   tenants,
   type Tx,
@@ -451,6 +452,21 @@ export class BillingService {
         replacementInvoiceId: null,
       };
     if (inv.status !== 'issued') throw new AppException('CONFLICT_STALE');
+    // shortcut: hóa đơn đã chuyển nợ sang kỳ sau, hoặc đang mang số dư chuyển kỳ, chưa hủy được (hủy phải trả khoản chuyển kỳ về
+    // sổ/hóa đơn cũ); chặn để không mất nợ, làm khi có yêu cầu.
+    const [carry] = await tx
+      .select({ id: studentLedger.id })
+      .from(studentLedger)
+      .where(
+        and(
+          eq(studentLedger.tenantId, actor.tenantId),
+          eq(studentLedger.invoiceId, id),
+          eq(studentLedger.kind, 'applied_to_invoice'),
+        ),
+      )
+      .limit(1);
+    if (carry || inv.carriedAmount > 0)
+      throw new AppException('CONFLICT_STALE');
     await tx
       .update(invoices)
       .set({ status: 'void', voidedAt: new Date(), voidReason: body.reason })
@@ -554,7 +570,7 @@ export class BillingService {
       remainingAmount:
         inv.status === 'void' || inv.status === 'draft'
           ? 0
-          : remainingOf(inv.totalAmount, inv.paidAmount),
+          : remainingOf(inv.totalAmount, inv.paidAmount, inv.carriedAmount),
       dueDate: period!.dueDate,
       issuedAt: at(inv.issuedAt),
       payout: inv.payout as Invoice['payout'],

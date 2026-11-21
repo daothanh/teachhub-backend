@@ -38,6 +38,7 @@ type Row = {
   student_id: string;
   total_amount: string;
   paid_amount: string;
+  carried_amount: string;
   period_month: string;
   due_date: string;
   issued_at: Date;
@@ -48,7 +49,7 @@ type Row = {
   voided_at: Date | null;
 };
 
-const COLS = sql`i.id, i.code, i.status, i.student_id, i.total_amount::text as total_amount, i.paid_amount::text as paid_amount,
+const COLS = sql`i.id, i.code, i.status, i.student_id, i.total_amount::text as total_amount, i.paid_amount::text as paid_amount, i.carried_amount::text as carried_amount,
   p.period_month::text as period_month, p.due_date::text as due_date, i.issued_at,
   to_char(i.issued_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as issued_cursor,
   i.transfer_note, i.qr_payload, i.payout, i.voided_at`;
@@ -230,7 +231,11 @@ export class FamilyInvoicesService {
       remainingAmount:
         r.status === 'void'
           ? 0
-          : remainingOf(Number(r.total_amount), Number(r.paid_amount)),
+          : remainingOf(
+              Number(r.total_amount),
+              Number(r.paid_amount),
+              Number(r.carried_amount),
+            ),
       dueDate: r.due_date,
       issuedAt: formatInZone(new Date(r.issued_at), tz.get(r.student_id)!),
     };

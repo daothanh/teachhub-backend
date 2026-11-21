@@ -52,7 +52,9 @@ export class PaymentsService {
   ): Promise<PaymentResult> {
     const { tenantId } = actor;
     const inv = await this.lockInvoice(tx, tenantId, invoiceId);
-    if (!isPayable(inv.status)) throw new AppException('INVOICE_NOT_PAYABLE');
+    // Nợ của hóa đơn đã chuyển sang hóa đơn kỳ sau (S6-BE-03): thu ở hóa đơn sau, không thu hai lần.
+    if (!isPayable(inv.status) || inv.carriedAmount > 0)
+      throw new AppException('INVOICE_NOT_PAYABLE');
 
     const tz = await this.timezone(tx, tenantId);
     const today = localDate(new Date(), tz);
@@ -108,7 +110,11 @@ export class PaymentsService {
 
     const status = statusAfter(inv.totalAmount, paidAmount);
     await this.setPaid(tx, tenantId, invoiceId, status, paidAmount);
-    const remainingAmount = remainingOf(inv.totalAmount, paidAmount);
+    const remainingAmount = remainingOf(
+      inv.totalAmount,
+      paidAmount,
+      inv.carriedAmount,
+    );
     await recordOutboxEvent(tx, {
       tenantId,
       type: PAYMENT_RECORDED,
@@ -149,6 +155,7 @@ export class PaymentsService {
       status,
       paidAmount,
       total: inv.totalAmount,
+      carried: inv.carriedAmount,
     });
   }
 
@@ -202,6 +209,7 @@ export class PaymentsService {
         status: inv.status,
         paidAmount: inv.paidAmount,
         total: inv.totalAmount,
+        carried: inv.carriedAmount,
       });
 
     const [voided] = await tx
@@ -263,6 +271,7 @@ export class PaymentsService {
       status,
       paidAmount,
       total: inv.totalAmount,
+      carried: inv.carriedAmount,
     });
   }
 
@@ -304,13 +313,13 @@ export class PaymentsService {
   private result(
     p: PaymentRow,
     tz: string,
-    s: { status: string; paidAmount: number; total: number },
+    s: { status: string; paidAmount: number; total: number; carried: number },
   ): PaymentResult {
     return {
       payment: toPayment(p, tz),
       status: s.status as PaymentResult['status'],
       paidAmount: s.paidAmount,
-      remainingAmount: remainingOf(s.total, s.paidAmount),
+      remainingAmount: remainingOf(s.total, s.paidAmount, s.carried),
       overpaidAmount: overpaidOf(s.total, s.paidAmount),
       dunningCancelled: false,
     };
@@ -328,7 +337,7 @@ export class PaymentsService {
 
 const yearOf = (date: string) => Number(date.slice(0, 4));
 
-const toPayment = (r: PaymentRow, tz: string): Payment => {
+export const toPayment = (r: PaymentRow, tz: string): Payment => {
   return {
     id: r.id,
     invoiceId: r.invoiceId,
