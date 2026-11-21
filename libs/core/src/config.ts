@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MAX_VND } from './money.js';
 
 const csv = (v: string) =>
   v
@@ -17,6 +18,8 @@ const GOOGLE_PROD_DEBUG_CLIENT_ID =
   '432762025168-3i1f3r2a7oelb9hg7pusr9uqc48umcdh.apps.googleusercontent.com';
 const GOOGLE_JWKS_DEFAULT_URL = 'https://www.googleapis.com/oauth2/v3/certs';
 const GOOGLE_CLIENT_ID_FORMAT = /^\d+-[a-z0-9]+\.apps\.googleusercontent\.com$/;
+
+const emptyToUndefined = (v: unknown) => (v === '' ? undefined : v);
 
 const isLocalOrTest = (v: string | undefined) => v === 'local' || v === 'test';
 
@@ -96,6 +99,37 @@ export const envSchema = z
     INVITE_CODE_HMAC_KEY: z.string().min(16).optional(),
     /** Khóa AES-256-GCM mã hóa phản hồi idempotency chứa token/mã mời. Bắt buộc ngoài local/test. */
     IDEMPOTENCY_ENC_KEY: z.string().min(16).optional(),
+    /** Bí mật webhook RevenueCat (header `Authorization`). Thiếu = webhook trả 401 cho mọi request (fail closed). */
+    REVENUECAT_WEBHOOK_SECRET: z.preprocess(
+      emptyToUndefined,
+      z.string().min(16).optional(),
+    ),
+    /** `product_id` RevenueCat được kích hoạt Pro, ngăn cách bởi dấu phẩy. Trống = webhook không kích hoạt gì. */
+    REVENUECAT_PRO_PRODUCT_IDS: z.string().default('').transform(csv),
+    /** Thời lượng (ngày) của sản phẩm mua một lần không có hạn: `product_id:ngày`, ngăn cách bởi dấu phẩy. Trống = bỏ qua loại này. */
+    REVENUECAT_NON_RENEWING_DAYS: z.string().default('').transform(csv),
+    /** Giá Pro một năm (VND) cho chuyển khoản; trống = chưa công bố, tạo đơn chuyển khoản trả 503. */
+    PRO_PRICE_VND: z.preprocess(
+      emptyToUndefined,
+      z.coerce.number().int().min(1).max(MAX_VND).optional(),
+    ),
+    /** Tài khoản nhận tiền chuyển khoản gói Pro. Thiếu BIN/số/tên chủ TK = tạo đơn trả 503. */
+    PAYEE_BANK_BIN: z.preprocess(
+      emptyToUndefined,
+      z
+        .string()
+        .regex(/^\d{6}$/)
+        .optional(),
+    ),
+    PAYEE_BANK_NAME: z.preprocess(emptyToUndefined, z.string().optional()),
+    PAYEE_ACCOUNT_NO: z.preprocess(
+      emptyToUndefined,
+      z
+        .string()
+        .regex(/^\d{6,19}$/)
+        .optional(),
+    ),
+    PAYEE_ACCOUNT_NAME: z.preprocess(emptyToUndefined, z.string().optional()),
   })
   .superRefine((e, ctx) => {
     // Fail closed: chỉ local/test được dùng khóa tạm; development và mọi môi trường khác phải cấp khóa thật.

@@ -74,8 +74,7 @@ export class EnrollmentsService {
 
     // shortcut: không chặn vượt sĩ số tối đa (`classes.capacity`): PRD/Spec không yêu cầu chặn cứng; thêm khi có
     // yêu cầu (khóa FOR UPDATE dòng lớp rồi đếm ghi danh mở trước khi insert).
-    // shortcut: chưa kiểm hạn mức gói khi ghi danh (max_active_students, US-0.7); PlanLimitService vào cùng US-0.7
-    // → kiểm ở đây trước khi insert và ném PLAN_LIMIT_EXCEEDED.
+    // Không kiểm hạn mức gói ở đây: ghi danh không tăng số học sinh đang học (học sinh đã được tính lúc tạo, US-0.7).
     const [row] = await tx
       .insert(enrollments)
       .values({

@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { PlanService } from '@teachhub/modules/subscription';
 import { and, asc, count, eq, inArray, isNull, sql } from 'drizzle-orm';
 import {
   AppException,
@@ -39,6 +40,8 @@ const escapeLike = (v: string) => v.replace(/[\\%_]/g, '\\$&');
  */
 @Injectable()
 export class StudentsService {
+  constructor(private readonly planService: PlanService) {}
+
   async list(
     tx: Tx,
     tenantId: string,
@@ -104,8 +107,8 @@ export class StudentsService {
         throw new AppException('STUDENT_POSSIBLE_DUPLICATE', { candidates });
       }
     }
-    // shortcut: chưa kiểm hạn mức gói (max_active_students, US-0.7); PlanLimitService vào cùng US-0.7 → kiểm ở đây
-    // trước khi insert và ném PLAN_LIMIT_EXCEEDED.
+    // Hạn mức gói (US-0.7 AC2): học sinh đang học vượt max_active_students → 402 PLAN_LIMIT_EXCEEDED.
+    await this.planService.assertCanAdd(tx, ctx.tenantId, 'students');
     const [row] = await tx
       .insert(students)
       .values({

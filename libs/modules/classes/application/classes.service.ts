@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { PlanService } from '@teachhub/modules/subscription';
 import {
   and,
   count,
@@ -63,6 +64,7 @@ export class ClassesService {
   constructor(
     private readonly rules: ScheduleRulesReader,
     private readonly schedule: ScheduleService,
+    private readonly planService: PlanService,
   ) {}
 
   async list(
@@ -105,8 +107,8 @@ export class ClassesService {
     ctx: { tenantId: string; userId: string },
     body: CreateClassRequest,
   ): Promise<ClassCreated> {
-    // shortcut: chưa kiểm hạn mức gói (max_active_classes, US-0.7); PlanLimitService vào cùng US-0.7 → kiểm ở đây
-    // trước khi insert và ném PLAN_LIMIT_EXCEEDED.
+    // Hạn mức gói (US-0.7 AC1): lớp đang hoạt động vượt max_active_classes → 402 PLAN_LIMIT_EXCEEDED.
+    await this.planService.assertCanAdd(tx, ctx.tenantId, 'classes');
     const [branch] = await tx
       .select({ id: branches.id })
       .from(branches)
