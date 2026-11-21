@@ -82,9 +82,10 @@ resource "hcloud_server" "dev" {
   firewall_ids = [hcloud_firewall.dev.id]
   labels       = { env = "development", app = "teachhub" }
 
+  # Khai `network_id` (không `subnet_id`): state chỉ lưu network_id, khai subnet_id làm plan luôn đòi gỡ/gắn lại mạng.
   network {
-    subnet_id = hcloud_network_subnet.app.id
-    ip        = "10.0.1.10"
+    network_id = hcloud_network.this.id
+    ip         = "10.0.1.10"
   }
 
   # Subnet phải có trước khi gắn máy.
