@@ -234,24 +234,24 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
     test: 'phụ huynh xóa tài khoản: gỡ liên kết, thiết bị, thông báo; học viên và không gian của giáo viên không đổi',
   },
   'GET /v1/billing-periods': {
-    notApplicable:
-      'hợp đồng S4-FL-10, thân hàm trả 501 tới S5-BE-06; test chéo tenant/học viên làm cùng task đó',
+    file: 'billing.e2e-spec.ts',
+    test: 'AC-6: tenant B không xem kỳ thu, hóa đơn, điều chỉnh của A (404); id lạ cũng 404',
   },
   'GET /v1/billing-periods/{id}': {
-    notApplicable:
-      'hợp đồng S4-FL-10, thân hàm trả 501 tới S5-BE-06; test chéo tenant/học viên làm cùng task đó',
+    file: 'billing.e2e-spec.ts',
+    test: 'AC-6: tenant B không xem kỳ thu, hóa đơn, điều chỉnh của A (404); id lạ cũng 404',
   },
   'POST /v1/billing-periods/{id}/issue': {
     notApplicable:
       'hợp đồng S4-FL-10, thân hàm trả 501 tới S5-BE-07; test chéo tenant/học viên làm cùng task đó',
   },
   'GET /v1/invoices/{id}': {
-    notApplicable:
-      'hợp đồng S4-FL-10, thân hàm trả 501 tới S5-BE-06; test chéo tenant/học viên làm cùng task đó',
+    file: 'billing.e2e-spec.ts',
+    test: 'AC-6: tenant B không xem kỳ thu, hóa đơn, điều chỉnh của A (404); id lạ cũng 404',
   },
   'POST /v1/invoices/{id}/adjustments': {
-    notApplicable:
-      'hợp đồng S4-FL-10, thân hàm trả 501 tới S5-BE-06; test chéo tenant/học viên làm cùng task đó',
+    file: 'billing.e2e-spec.ts',
+    test: 'AC-6: tenant B không xem kỳ thu, hóa đơn, điều chỉnh của A (404); id lạ cũng 404',
   },
   'POST /v1/invoices/{id}/void': {
     notApplicable:
