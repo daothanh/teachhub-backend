@@ -363,3 +363,10 @@ Gói và dùng thử (`subscription`, chỉ `tenant_owner`):
 Chờ chốt:
 
 - Quy tắc chia doanh thu theo lớp (trên), R6 chuyển khoản trong app, giá Pro VNĐ, và ngoại lệ `oneOf` cho các loại thông báo mới.
+
+Đã chốt khi duyệt (S6-CT-01, điều phối theo ủy quyền của Owner 21/11/2026):
+
+- Doanh thu theo lớp (`revenue-by-class`): chia số đã thu của hóa đơn gộp nhiều lớp theo tỷ lệ các dòng học phí dương, làm tròn theo phần dư lớn nhất; phần không gán được (nợ kỳ trước, điều chỉnh tay) vào dòng "Khác". Tổng các lớp + "Khác" = đúng "đã thu" (US-8.2 AC3).
+- Chuyển khoản mua gói theo R6: chỉ trên web. App (T14) không có lựa chọn "Chuyển khoản", chỉ IAP và nút mở trang web; Figma T14a không phải nguồn nghiệp vụ.
+- `proPriceVnd`: giữ null tới khi PO chốt giá (việc của Owner, không suy từ mockup).
+- Các loại thông báo chưa vào `oneOf` của `Notification` (`schedule_changed`, `billing_ready`, `invoice_issued`, `payment_recorded`, `payment_reminder`, nhắc gia hạn, Pro đã kích hoạt) và giá trị `not_marked`: chấp nhận ngoại lệ `oasdiff` MỘT LẦN vì chưa có bản app nào phát hành ra ngoài; làm ở PR riêng trước khi nộp store, sau đó mọi thay đổi lại phải sạch `oasdiff`.
