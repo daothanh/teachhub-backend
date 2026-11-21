@@ -6,3 +6,4 @@
 !*.tfvars.example
 # Biến sinh từ `tofu output -json ansible_vars` — chứa bí mật.
 ansible/*-vars.json
+backend.hcl
