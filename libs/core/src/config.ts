@@ -77,7 +77,10 @@ export const envSchema = z
     /** Service account Firebase (JSON một dòng) để worker gửi FCM. Trống = tắt gửi push, worker vẫn chạy và log cảnh báo. */
     FCM_SERVICE_ACCOUNT_JSON: z.string().optional(),
     /** Webhook nhóm Lark nhận cảnh báo đối soát lệch (billing.reconcile, S6-BE-06). Trống = chỉ log lỗi. */
-    ALERT_WEBHOOK_URL: z.url().optional(),
+    ALERT_WEBHOOK_URL: z.preprocess(
+      (v) => (v === '' ? undefined : v),
+      z.url().optional(),
+    ),
     /** Phiên bản điều khoản/chính sách hiện hành (consents, S4-BE-05); đổi giá trị = mọi phụ huynh phải đồng ý lại. */
     CURRENT_TERMS_VERSION: z
       .string()
