@@ -9,6 +9,7 @@ const SENT_TYPES = [
   'billing_ready',
   'invoice_issued',
   'payment_recorded',
+  'payment_reminder',
   'schedule_changed',
 ];
 

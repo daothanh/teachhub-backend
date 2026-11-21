@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { FamilyInvoicesService } from './application/family-invoices.service.js';
+import { DunningService } from './application/dunning.service.js';
 import { PaymentsService } from './application/payments.service.js';
 import { ReceivablesService } from './application/receivables.service.js';
 import { BillingService } from './application/billing.service.js';
@@ -19,6 +20,7 @@ import { ReceivablesController } from './http/receivables.controller.js';
   ],
   providers: [
     BillingService,
+    DunningService,
     FamilyInvoicesService,
     PaymentsService,
     ReceivablesService,

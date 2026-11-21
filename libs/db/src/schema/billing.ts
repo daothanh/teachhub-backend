@@ -199,7 +199,9 @@ export const invoices = pgTable(
     // Công nợ T11: chỉ quét hóa đơn còn mở của học viên.
     index('invoices_debt_idx')
       .on(t.tenantId, t.studentId)
-      .where(sql`${t.status} in ('issued', 'partially_paid', 'pending_confirmation')`),
+      .where(
+        sql`${t.status} in ('issued', 'partially_paid', 'pending_confirmation')`,
+      ),
     // Trạng thái khớp số đã thu; `pending_confirmation` (US-7.7, chưa làm) chưa thu đủ. paid_amount = Σ payments chưa hủy do constraint trigger.
     check(
       'invoices_paid_status_check',
@@ -456,6 +458,58 @@ export const revenueLedger = pgTable(
     check(
       'revenue_ledger_year_check',
       sql`${t.fiscalYear} = extract(year from ${t.entryDate})::int`,
+    ),
+  ],
+);
+
+/**
+ * Lịch nhắc nợ của từng hóa đơn (S6-BE-04, US-7.5). Mỗi mốc một dòng: `offset_days` so với hạn thanh toán, `scheduled_for` là
+ * 09:00 giờ tenant của ngày (hạn + offset). Job `billing.dunning` chuyển `pending` → `sent` (kèm sự kiện outbox cùng giao dịch);
+ * thu đủ, hủy hóa đơn, nợ chuyển kỳ, tắt nhắc → `cancelled`; hủy thanh toán làm hóa đơn còn nợ lại thì mốc chưa qua về `pending`.
+ */
+export const dunningJobs = pgTable(
+  'dunning_jobs',
+  {
+    id: uuid().primaryKey(),
+    tenantId: uuid()
+      .notNull()
+      .references(() => tenants.id),
+    invoiceId: uuid().notNull(),
+    offsetDays: integer().notNull(),
+    scheduledFor: timestamp({ withTimezone: true }).notNull(),
+    status: text().notNull().default('pending'),
+    sentAt: timestamp({ withTimezone: true }),
+    /** Lý do hủy: quyết định mốc có được lập lại không (thu đủ/hủy hóa đơn/nợ chuyển kỳ → `settled`; học viên hoặc tenant tắt nhắc). */
+    cancelReason: text(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    foreignKey({
+      name: 'dunning_jobs_tenant_invoice_fk',
+      columns: [t.tenantId, t.invoiceId],
+      foreignColumns: [invoices.tenantId, invoices.id],
+    }),
+    // Một mốc một dòng cho mỗi hóa đơn: lập lịch lặp và chạy job hai lần không sinh nhắc trùng.
+    unique('dunning_jobs_invoice_offset_uq').on(t.invoiceId, t.offsetDays),
+    index('dunning_jobs_tenant_invoice_idx').on(t.tenantId, t.invoiceId),
+    // Job quét theo giờ gửi, chỉ các dòng chưa gửi.
+    index('dunning_jobs_pending_idx')
+      .on(t.scheduledFor)
+      .where(sql`${t.status} = 'pending'`),
+    check(
+      'dunning_jobs_status_check',
+      sql`${t.status} in ('pending', 'sent', 'cancelled')`,
+    ),
+    check('dunning_jobs_offset_check', sql`${t.offsetDays} between -7 and 30`),
+    check(
+      'dunning_jobs_sent_check',
+      sql`(${t.status} = 'sent') = (${t.sentAt} is not null)`,
+    ),
+    check(
+      'dunning_jobs_cancel_reason_check',
+      sql`(${t.status} = 'cancelled') = (${t.cancelReason} is not null)
+        and (${t.cancelReason} is null or ${t.cancelReason} in ('settled', 'void', 'student_disabled', 'tenant_disabled', 'superseded'))`,
     ),
   ],
 );

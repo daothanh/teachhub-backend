@@ -11,6 +11,7 @@ export type PushType =
   | 'student_absent_correction'
   | 'invoice_issued'
   | 'payment_recorded'
+  | 'payment_reminder'
   | 'billing_ready'
   | 'schedule_changed';
 
@@ -39,6 +40,11 @@ export const PUSH_COPY: Record<PushType, PushCopy> = {
   payment_recorded: {
     title: 'Đã ghi nhận thanh toán',
     body: `Khoản thanh toán học phí của bạn đã được ghi nhận. ${OPEN}`,
+    channelId: 'billing',
+  },
+  payment_reminder: {
+    title: 'DayHoc nhắc học phí',
+    body: `DayHoc nhắc: bạn có khoản học phí cần thanh toán. ${OPEN}`,
     channelId: 'billing',
   },
   billing_ready: {

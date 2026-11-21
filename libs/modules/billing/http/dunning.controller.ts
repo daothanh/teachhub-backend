@@ -7,8 +7,10 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { z } from 'zod';
-import { ApiErrors, AppException } from '@teachhub/core';
+import { ApiErrors, Ctx, type RequestContext } from '@teachhub/core';
+import { TxService } from '@teachhub/db';
 import { RequiresRole } from '@teachhub/modules/identity';
+import { DunningService } from '../application/dunning.service.js';
 import {
   type DunningPreview,
   type DunningPreviewQuery,
@@ -28,7 +30,7 @@ import {
 
 const idParam = z.uuid();
 
-// Hợp đồng Sprint 6 (S5-FL-09, S5-CT-01); thân hàm ở S6-BE-04. Chỉ `tenant_owner`. Id của tenant khác → 404.
+// Hợp đồng Sprint 6 (S5-FL-09, S5-CT-01); S6-BE-04. Chỉ `tenant_owner`. Id của tenant khác → 404.
 // Các `PUT` tự lặp được (đặt giá trị) nên không cần `Idempotency-Key`.
 @ApiTags('billing')
 @ApiBearerAuth('bearer')
@@ -36,6 +38,11 @@ const idParam = z.uuid();
 @ApiErrors('UNAUTHENTICATED', 'TOKEN_EXPIRED', 'FORBIDDEN')
 @Controller()
 export class DunningController {
+  constructor(
+    private readonly tx: TxService,
+    private readonly dunning: DunningService,
+  ) {}
+
   @Get('tenant/settings/dunning')
   @ApiOperation({
     summary: 'Xem cài đặt nhắc nợ của tenant (US-7.5 AC4)',
@@ -43,8 +50,8 @@ export class DunningController {
       'Công tắc chung và lịch mốc nhắc. Tenant chưa chỉnh lần nào trả mặc định `enabled = true`, `offsetsDays = [-1, 0, 3, 7]` (US-7.5 AC1).',
   })
   @ApiOkResponse({ standardSchema: dunningSettingsSchema })
-  getSettings(): DunningSettings {
-    throw new AppException('NOT_IMPLEMENTED');
+  getSettings(@Ctx() ctx: RequestContext): Promise<DunningSettings> {
+    return this.tx.run(ctx, (t) => this.dunning.getSettings(t, ctx.tenantId!));
   }
 
   @Put('tenant/settings/dunning')
@@ -57,10 +64,17 @@ export class DunningController {
   @ApiOkResponse({ standardSchema: dunningSettingsSchema })
   @ApiErrors('VALIDATION_FAILED', 'RATE_LIMITED')
   putSettings(
+    @Ctx() ctx: RequestContext,
     @Body({ schema: updateDunningSettingsRequestSchema })
-    _body: UpdateDunningSettingsRequest,
-  ): DunningSettings {
-    throw new AppException('NOT_IMPLEMENTED');
+    body: UpdateDunningSettingsRequest,
+  ): Promise<DunningSettings> {
+    return this.tx.run(ctx, (t) =>
+      this.dunning.putSettings(
+        t,
+        { tenantId: ctx.tenantId!, userId: ctx.userId! },
+        body,
+      ),
+    );
   }
 
   @Get('tenant/settings/dunning/preview')
@@ -73,9 +87,9 @@ export class DunningController {
   @ApiErrors('VALIDATION_FAILED')
   preview(
     @Query({ schema: dunningPreviewQuerySchema })
-    _query: DunningPreviewQuery,
+    query: DunningPreviewQuery,
   ): DunningPreview {
-    throw new AppException('NOT_IMPLEMENTED');
+    return this.dunning.preview(query);
   }
 
   @Put('enrollments/:id/dunning')
@@ -89,11 +103,19 @@ export class DunningController {
   @ApiOkResponse({ standardSchema: enrollmentDunningResultSchema })
   @ApiErrors('VALIDATION_FAILED', 'NOT_FOUND', 'CONFLICT_STALE', 'RATE_LIMITED')
   putEnrollment(
-    @Param('id', { schema: idParam }) _id: string,
+    @Ctx() ctx: RequestContext,
+    @Param('id', { schema: idParam }) id: string,
     @Body({ schema: putEnrollmentDunningRequestSchema })
-    _body: PutEnrollmentDunningRequest,
-  ): EnrollmentDunningResult {
-    throw new AppException('NOT_IMPLEMENTED');
+    body: PutEnrollmentDunningRequest,
+  ): Promise<EnrollmentDunningResult> {
+    return this.tx.run(ctx, (t) =>
+      this.dunning.setEnrollment(
+        t,
+        { tenantId: ctx.tenantId!, userId: ctx.userId! },
+        id,
+        body.enabled,
+      ),
+    );
   }
 
   @Get('invoices/:id/dunning')
@@ -104,7 +126,12 @@ export class DunningController {
   })
   @ApiOkResponse({ standardSchema: invoiceDunningSchema })
   @ApiErrors('NOT_FOUND')
-  invoice(@Param('id', { schema: idParam }) _id: string): InvoiceDunning {
-    throw new AppException('NOT_IMPLEMENTED');
+  invoice(
+    @Ctx() ctx: RequestContext,
+    @Param('id', { schema: idParam }) id: string,
+  ): Promise<InvoiceDunning> {
+    return this.tx.run(ctx, (t) =>
+      this.dunning.forInvoice(t, ctx.tenantId!, id),
+    );
   }
 }
