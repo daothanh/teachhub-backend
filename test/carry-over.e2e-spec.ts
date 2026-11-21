@@ -219,6 +219,12 @@ describe('carry-over: chuyển kỳ lúc phát hành, sổ học viên, công n�
       skipped: { invoiceId: string; reason: string }[];
     };
   };
+  /** Kỳ đã chốt từ trước (không hóa đơn): job catch-up chỉ bù các kỳ SAU kỳ mới nhất đã có, để các kỳ cũ giả lập ở đây không bị bù. */
+  const closedPeriod = (tenantId: string, month: string) =>
+    q(
+      `insert into billing_periods (id, tenant_id, period_month, close_date, due_date, status) values ($1, $2, $3, $3, $3, 'closed')`,
+      [randomUUID(), tenantId, month],
+    );
   /** Hóa đơn cũ đã phát hành, còn nợ, hạn `due` (ghi thẳng DB). */
   const mkOldInvoice = async (
     sid: string,
@@ -382,6 +388,7 @@ describe('carry-over: chuyển kỳ lúc phát hành, sổ học viên, công n�
     }
     // sO: nợ cũ 100.000 của kỳ 06/2026, hạn cách đây 90 ngày.
     await mkOldInvoice(id.sO, '2026-06-01', oldDue, 100_000);
+    await closedPeriod(A.tenantId, '2026-11-01');
 
     await addClass(B, randomUUID(), 'Hóa B', 'monthly', 500_000);
     await addStudent(B, id.bStu, 'Của B');
@@ -1000,6 +1007,7 @@ describe('carry-over: chuyển kỳ lúc phát hành, sổ học viên, công n�
     });
     expect(pv.statusCode, pv.body).toBe(201);
 
+    await closedPeriod(C.tenantId, '2027-02-01');
     expect(await job.run(CLOSE_MAR)).toBeGreaterThanOrEqual(3);
     const row = async (sid: string) =>
       (
@@ -1163,6 +1171,7 @@ describe('carry-over: chuyển kỳ lúc phát hành, sổ học viên, công n�
       [randomUUID(), E.T.tenantId, cm, Q],
     );
 
+    for (const x of [D, E]) await closedPeriod(x.T.tenantId, '2027-02-01');
     expect(await job.run(CLOSE_MAR)).toBeGreaterThanOrEqual(3);
     const draftOf = async (T: SeededTenant, sid: string) =>
       (
