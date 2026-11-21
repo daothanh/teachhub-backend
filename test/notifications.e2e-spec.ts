@@ -172,7 +172,11 @@ describe('thông báo báo vắng', () => {
       'notificationId',
       'type',
     ]);
-    expect(JSON.stringify(sent)).not.toContain('Châu');
+    expect(JSON.stringify(sent)).not.toMatch(/Châu|Toán 9A/);
+    expect(sent[0]).toMatchObject({
+      copy: { title: 'Thông báo vắng học', channelId: 'attendance' },
+      urgent: true,
+    });
     const d = await rows(
       `select status from notification_deliveries where notification_id = $1`,
       [n[0].id],

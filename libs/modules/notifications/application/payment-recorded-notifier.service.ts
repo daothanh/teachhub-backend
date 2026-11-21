@@ -38,7 +38,7 @@ const MAIL_TEXT =
 
 /**
  * Xử lý sự kiện outbox `payment_recorded` (S6-BE-02, US-7.4 AC3): tạo thông báo `payment_recorded` cho phụ huynh đã có tài
- * khoản của học viên, gửi FCM data-only rồi email biên nhận. Idempotent theo `eventId` (khóa `(recipient, dedupe_key)`; lần
+ * khoản của học viên, gửi FCM (chữ khay chung, không PII) rồi email biên nhận. Idempotent theo `eventId` (khóa `(recipient, dedupe_key)`; lần
  * gửi theo `(notification, channel)`), nhận lại dòng `queued` bỏ dở sau 2 phút. Theo mẫu `InvoiceIssuedNotifier`.
  * shortcut: phụ huynh chưa kích hoạt tài khoản không nhận email (không có thông báo để làm khóa chống gửi trùng); chưa tôn
  * trọng giờ yên lặng (US-6.5).

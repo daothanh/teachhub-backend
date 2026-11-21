@@ -2,6 +2,10 @@
 
 `contracts/openapi.json` sinh từ schema zod bằng `pnpm openapi:gen`; file này ghi endpoint thêm mới theo sprint. Chỉ thêm, không đổi endpoint cũ (CI chặn bằng `oasdiff`).
 
+## Push FCM có chữ khay (chỉ đổi mô tả, không đổi schema)
+
+Push FCM gửi thêm khối `notification` (tiêu đề + nội dung tiếng Việt chung theo `type`, không tên con, lớp, số tiền), giữ `data` `{ notificationId, type }`; kênh Android `attendance`, `billing`, `general`. Các dòng "data-only" cũ bên dưới đã sửa theo.
+
 ## Sprint 5 (S4-FL-10, S4-CT-01)
 
 Thân hàm trả 501 `NOT_IMPLEMENTED` tới khi làm task backend tương ứng; schema đã validate thật. Không có bảng hay migration (S5-BE-01 làm cùng task backend).
@@ -67,7 +71,7 @@ Phụ huynh (`/family/invoices`):
 Trọn khóa, thông báo và giới hạn:
 
 - `PATCH` với `feeType = course` mà lớp không xác định được tổng số buổi (thiếu `endDate` hoặc không có quy tắc lịch) → 422 `VALIDATION_FAILED` ở `feeType`. `Invoice` có `installmentNo` và `installmentCount` (null với kiểu khác). Đợt n là kỳ thứ n kể từ kỳ đầu tiên học viên vào lớp; hết số đợt thì không sinh thêm hóa đơn trọn khóa cho ghi danh đó. Trần số đợt 1 đến 36, khớp calculator.
-- Thông báo `billing_ready`, `invoice_issued`: push chỉ data-only (`notificationId`, `type`), text khay cố định, không tên con, không số tiền; email `invoice_issued` có tiêu đề cố định, không chứa tên con.
+- Thông báo `billing_ready`, `invoice_issued`: push FCM có chữ khay chung theo loại, `data` chỉ `notificationId`, `type`, không tên con, không số tiền; email `invoice_issued` có tiêu đề cố định, không chứa tên con.
 - Route ghi tiền (`issue`, `void`, `adjustments`, `fee-override`, ghi `payout-accounts`) giới hạn 20 lần/phút/user, vượt → 429 `RATE_LIMITED`. `OtpPurpose` thêm `payout_account` ở `POST /auth/otp/send`.
 - Phản hồi `Invoice` thêm `replacementInvoiceId`, `installmentNo`, `installmentCount`, `clampedAmount`.
 
@@ -188,7 +192,7 @@ Thông báo và thiết bị:
 
 - Đường dẫn FCM giữ `/push/register` và `/push/unregister` theo Spec G10 (tag `devices`). Body giữ `userId` để khớp gói `tasco_notifications`; server so với user của token, lệch → 403, không dùng `userId` ở body làm danh tính.
 - `Idempotency-Key` của `push/*` là tùy chọn (idempotent theo `deviceToken`); bắt buộc với `attendance/sync` và `notifications/read`.
-- Push FCM là data-only, chỉ có `notificationId` và `type`; không có tên con, lớp hay trạng thái vắng trên khay. App gọi `GET /notifications` sau khi mở.
+- Push FCM có khối `notification` (tiêu đề + nội dung chung theo loại, không tên con, lớp, số tiền) và `data` chỉ có `notificationId`, `type`; kênh Android `attendance`, `billing`, `general`. App gọi `GET /notifications` sau khi mở.
 - Hộp thông báo dùng con trỏ (`limit` tối đa 50). `payload` là discriminated union theo `type` (`student_absent`, `student_absent_correction`), có `deepLink` tùy chọn; client bỏ qua `type` lạ. Payload chỉ có tên con, lớp, giờ buổi và id.
 - `POST /notifications/read` nhận `ids` (tối đa 100); id trùng chỉ tính một lần; id của người khác và id không tồn tại không phân biệt, đều bị bỏ qua. Chưa có "đọc tất cả".
 
@@ -275,7 +279,7 @@ Nhắc nợ:
 - Lịch tính bằng ngày so với hạn: `offsetsDays` mặc định `[-1, 0, 3, 7]` (đúng US-7.5 AC1), tenant đổi được, 1 đến 6 mốc từ -7 đến 30, tăng dần. Lịch mới chỉ áp cho hóa đơn phát hành sau đó. Giờ gửi cố định 07:00 đến 21:30 (job của Spec), chưa có cấu hình riêng; giờ yên lặng chung (US-6.5) chưa có endpoint ở repo này.
 - `PUT /enrollments/{id}/dunning` theo đúng Spec và Plan, nhưng US-7.5 AC3 nói theo học viên mà hóa đơn gộp mọi lớp: học viên chỉ không được nhắc khi mọi ghi danh đang mở đều tắt. App bật/tắt theo học viên bằng cách gọi cho từng ghi danh (danh sách ở `GET /receivables/{studentId}`).
 - Không có endpoint tắt nhắc riêng một hóa đơn (US không đòi); `GET /invoices/{id}/dunning` chỉ đọc trạng thái và lý do không còn nhắc. `GET /tenant/settings/dunning/preview` là thêm ngoài Spec §5.4 cho US-7.5 AC4 ("xem trước mẫu tin", S6-FL-04).
-- Thông báo nhắc là `payment_reminder`, do hệ thống đứng tên, push data-only như các loại tiền khác.
+- Thông báo nhắc là `payment_reminder`, do hệ thống đứng tên, push như các loại tiền khác (chữ khay chung, không số tiền).
 
 Công nợ (T11):
 
