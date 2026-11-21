@@ -54,6 +54,7 @@ CREATE TABLE "student_ledger" (
 --> statement-breakpoint
 -- M3: hóa đơn đã ở trạng thái thu tiền trước khi có bảng payments (không có payment nào) thì không thể suy ra số đã thu: dừng,
 -- không đoán. Hiện chưa luồng nào sinh các trạng thái này nên trên dữ liệu thật điều kiện không xảy ra.
+-- Khối kiểm tra và các bước sau dựa vào việc cả migration chạy trong MỘT giao dịch (drizzle migrator; chạy tay phải dùng `psql -1`).
 -- Vai trò chạy migration (teachhub_owner) cũng bị FORCE RLS và không có policy trên invoices nên không thấy dòng nào: mở policy
 -- đọc tạm trong chính giao dịch migration rồi bỏ.
 CREATE POLICY migration_0026_owner_read ON invoices FOR SELECT TO teachhub_owner USING (true);
@@ -121,11 +122,13 @@ create policy payments_staff_read on payments for select to teachhub_app
   using (tenant_id in (select app_private.staff_tenant_ids()));
 --> statement-breakpoint
 create policy payments_owner_insert on payments for insert to teachhub_app
-  with check (tenant_id in (select app_private.owner_tenant_ids()));
+  with check (tenant_id in (select app_private.owner_tenant_ids())
+    and recorded_by = nullif(current_setting('app.user_id', true), '')::uuid);
 --> statement-breakpoint
 create policy payments_owner_update on payments for update to teachhub_app
   using (tenant_id in (select app_private.owner_tenant_ids()))
-  with check (tenant_id in (select app_private.owner_tenant_ids()));
+  with check (tenant_id in (select app_private.owner_tenant_ids())
+    and (voided_by is null or voided_by = nullif(current_setting('app.user_id', true), '')::uuid));
 --> statement-breakpoint
 -- Phụ huynh và nhân sự dùng chung vai trò DB `teachhub_app` nên không thu quyền theo cột được: policy lọc theo dòng, còn cột
 -- nhạy cảm (note, người ghi/hủy, lý do hủy) do query của `/family/invoices` chỉ chọn cột biên nhận (test khẳng định ở e2e).
@@ -313,7 +316,7 @@ create trigger trg_revenue_ledger_guard before insert on revenue_ledger
 -- trả thừa ghi có (thanh toán chưa hủy), đảo ghi nợ (thanh toán đã hủy). Các kind khác (S6-BE-03) chưa ràng buộc.
 create or replace function app_private.student_ledger_guard() returns trigger
 language plpgsql set search_path = '' as $$
-declare p public.payments; inv public.invoices;
+declare p public.payments; inv public.invoices; net bigint; cap bigint;
 begin
   if new.kind not in ('overpayment', 'payment_void') then
     return new;
@@ -326,11 +329,16 @@ begin
   if p.id is null or inv.id is null or p.invoice_id <> inv.id or inv.student_id <> new.student_id then
     raise exception 'LEDGER_INVALID: % không khớp thanh toán/hóa đơn/học viên cùng tenant', new.kind using errcode = '23514';
   end if;
-  if new.kind = 'overpayment' and (new.debit <> 0 or new.credit > p.amount or p.voided_at is not null) then
-    raise exception 'LEDGER_INVALID: trả thừa phải ghi có, tối đa số tiền thanh toán chưa hủy' using errcode = '23514';
-  end if;
-  if new.kind = 'payment_void' and (new.credit <> 0 or new.debit > p.amount or p.voided_at is null) then
-    raise exception 'LEDGER_INVALID: đảo trả thừa phải ghi nợ, tối đa số tiền thanh toán đã hủy' using errcode = '23514';
+  select coalesce(sum(l.credit - l.debit), 0) into net from public.student_ledger l
+   where l.tenant_id = new.tenant_id and l.invoice_id = inv.id and l.kind in ('overpayment', 'payment_void');
+  if new.kind = 'overpayment' then
+    select greatest(coalesce(sum(x.amount), 0) - inv.total_amount, 0) into cap from public.payments x
+     where x.tenant_id = inv.tenant_id and x.invoice_id = inv.id and x.voided_at is null;
+    if new.debit <> 0 or new.credit > p.amount or p.voided_at is not null or new.credit > cap or net + new.credit > cap then
+      raise exception 'LEDGER_INVALID: trả thừa phải ghi có, ≤ số tiền thanh toán chưa hủy và ≤ phần vượt thật của hóa đơn' using errcode = '23514';
+    end if;
+  elsif new.credit <> 0 or new.debit > p.amount or p.voided_at is null or new.debit > net then
+    raise exception 'LEDGER_INVALID: đảo trả thừa phải ghi nợ, thanh toán đã hủy, ≤ số tiền thanh toán và ≤ phần trả thừa còn lại của hóa đơn' using errcode = '23514';
   end if;
   return new;
 end;
@@ -338,6 +346,10 @@ $$;
 --> statement-breakpoint
 create trigger trg_student_ledger_guard before insert on student_ledger
   for each row execute function app_private.student_ledger_guard();
+--> statement-breakpoint
+-- Mỗi thanh toán tối đa một dòng trả thừa và một dòng đảo.
+create unique index student_ledger_payment_kind_uq on student_ledger (payment_id, kind)
+  where kind in ('overpayment', 'payment_void');
 --> statement-breakpoint
 
 -- M1: invoices.paid_amount luôn = Σ amount payments chưa hủy của hóa đơn, kiểm cuối giao dịch (constraint trigger hoãn) để
@@ -350,11 +362,11 @@ declare
   total bigint;
 begin
   if tg_table_name = 'invoices' then inv := new.id; else inv := new.invoice_id; end if;
-  select i.paid_amount into paid from public.invoices i where i.id = inv;
+  select i.paid_amount into paid from public.invoices i where i.tenant_id = new.tenant_id and i.id = inv;
   if not found then
-    return null;
+    raise exception 'INVOICE_PAID_MISMATCH: không đọc được hóa đơn %', inv using errcode = '23514';
   end if;
-  select coalesce(sum(p.amount), 0) into total from public.payments p where p.invoice_id = inv and p.voided_at is null;
+  select coalesce(sum(p.amount), 0) into total from public.payments p where p.tenant_id = new.tenant_id and p.invoice_id = inv and p.voided_at is null;
   if paid <> total then
     raise exception 'INVOICE_PAID_MISMATCH: hóa đơn % có paid_amount % khác tổng thanh toán chưa hủy %', inv, paid, total
       using errcode = '23514';
@@ -365,10 +377,30 @@ $$;
 --> statement-breakpoint
 create constraint trigger trg_invoices_paid_matches after update on invoices
   deferrable initially deferred for each row
-  when (old.paid_amount is distinct from new.paid_amount or old.status is distinct from new.status)
+  when (old.paid_amount is distinct from new.paid_amount)
   execute function app_private.invoice_paid_matches();
 --> statement-breakpoint
 create constraint trigger trg_payments_paid_matches after insert or update on payments
   deferrable initially deferred for each row
   execute function app_private.invoice_paid_matches();
+--> statement-breakpoint
 
+-- Mỗi thanh toán chưa hủy có đúng một dòng thu ở revenue_ledger; đã hủy thêm đúng một dòng đảo (kiểm cuối giao dịch).
+create or replace function app_private.payment_revenue_matches() returns trigger
+language plpgsql set search_path = '' as $$
+declare n_pay int; n_rev int; want_rev int;
+begin
+  select count(*) filter (where kind = 'payment'), count(*) filter (where kind = 'reversal') into n_pay, n_rev
+    from public.revenue_ledger where tenant_id = new.tenant_id and payment_id = new.id;
+  want_rev := (case when new.voided_at is null then 0 else 1 end);
+  if n_pay <> 1 or n_rev <> want_rev then
+    raise exception 'PAYMENT_LEDGER_MISMATCH: thanh toán % có % dòng thu, % dòng đảo trong sổ doanh thu', new.id, n_pay, n_rev
+      using errcode = '23514';
+  end if;
+  return null;
+end;
+$$;
+--> statement-breakpoint
+create constraint trigger trg_payments_revenue_matches after insert or update on payments
+  deferrable initially deferred for each row
+  execute function app_private.payment_revenue_matches();

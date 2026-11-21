@@ -13837,7 +13837,7 @@
         }
       },
       "PaymentActor": {
-        "description": "`recordedBy` = người ghi, `voidedBy` = người hủy (null khi chưa hủy): id và tên hiển thị; null khi không xác định được (vd. tài khoản đã xóa)",
+        "description": "`recordedBy` = người ghi, `voidedBy` = người hủy (null khi chưa hủy): id và tên hiển thị. Tên là ảnh chụp lúc ghi/hủy, giữ nguyên khi người đó đổi tên hoặc xóa tài khoản (không còn null vì tài khoản đã xóa)",
         "type": [
           "object",
           "null"

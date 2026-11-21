@@ -22,7 +22,7 @@ const actorSchema = z
   .meta({
     id: 'PaymentActor',
     description:
-      '`recordedBy` = người ghi, `voidedBy` = người hủy (null khi chưa hủy): id và tên hiển thị; null khi không xác định được (vd. tài khoản đã xóa)',
+      '`recordedBy` = người ghi, `voidedBy` = người hủy (null khi chưa hủy): id và tên hiển thị. Tên là ảnh chụp lúc ghi/hủy, giữ nguyên khi người đó đổi tên hoặc xóa tài khoản (không còn null vì tài khoản đã xóa)',
   });
 
 export const paymentSchema = z
