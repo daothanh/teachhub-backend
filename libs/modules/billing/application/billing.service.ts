@@ -1,6 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { and, asc, desc, eq, sql } from 'drizzle-orm';
-import { AppException, paginated, toLimitOffset, uuidv7 } from '@teachhub/core';
+import {
+  AppException,
+  MAX_VND,
+  paginated,
+  toLimitOffset,
+  uuidv7,
+} from '@teachhub/core';
 import {
   billingPeriods,
   invoiceLines,
@@ -185,7 +191,14 @@ export class BillingService {
       charged: true,
       adjustmentReason: body.adjustmentReason,
     });
-    const sum = lines.reduce((acc, l) => acc + l.amount, 0) + body.amount;
+    // Tổng = max(0, Σ tổng từng ghi danh đã cắt bởi calculator + Σ dòng điều chỉnh). `total - clamped` chính là tổng chưa
+    // cắt đó (total khi ≥ 0, -clamped khi âm), nên không tính lại từ tổng thô các dòng.
+    const sum = inv.totalAmount - inv.clampedAmount + body.amount;
+    if (Math.abs(sum) > MAX_VND) {
+      throw new AppException('VALIDATION_FAILED', undefined, {
+        amount: ['Tổng hóa đơn vượt giới hạn cho phép.'],
+      });
+    }
     const totalAmount = Math.max(0, sum);
     const clampedAmount = Math.max(0, -sum);
     await tx

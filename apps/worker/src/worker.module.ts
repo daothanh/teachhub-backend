@@ -13,7 +13,7 @@ import {
   OUTBOX_QUEUE_URGENT,
 } from './outbox/outbox-policy.js';
 import { OutboxModule } from './outbox/outbox.module.js';
-import { ScheduleChangedProcessor } from './notify/schedule-changed.processor.js';
+import { EventsProcessor } from './notify/events.processor.js';
 import { UrgentProcessor } from './notify/urgent.processor.js';
 
 // Processor: `cron` (S2-BE-09), outbox relay (S3-BE-04). Notify, billing… thêm theo từng module.
@@ -42,6 +42,6 @@ import { UrgentProcessor } from './notify/urgent.processor.js';
     }),
     OutboxModule,
   ],
-  providers: [CronProcessor, UrgentProcessor, ScheduleChangedProcessor],
+  providers: [CronProcessor, UrgentProcessor, EventsProcessor],
 })
 export class WorkerModule {}

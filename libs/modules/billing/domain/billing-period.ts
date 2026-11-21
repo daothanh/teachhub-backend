@@ -1,5 +1,14 @@
 // Hàm thuần dựng kỳ thu và đầu vào cho InvoiceCalculator (S5-BE-05, US-7.1, US-7.2). Không phụ thuộc Nest/Drizzle.
 // Ngày là chuỗi 'YYYY-MM-DD' (so sánh theo chữ); tiền là số nguyên đồng.
+//
+// Quyết định nghiệp vụ (Owner chốt, vòng sửa sau review):
+// D1 Kỳ M = tháng dương lịch M, chốt vào ngày `billingCloseDay` (1–28, mặc định 1) của tháng M+1: hóa đơn gồm mọi buổi
+//    có ngày thuộc tháng M, kỳ liền kề không hở không chồng. Lỡ ngày chốt thì kỳ vẫn được tạo ở lần chạy sau (catch-up).
+// D2 Hạn thanh toán = ngày chốt + `billingDueDays` (mặc định 10).
+// D3 Buổi theo buổi còn `planned` lúc chốt (chưa điểm danh) không tính tiền nhưng vẫn có dòng 0 đ để giáo viên thấy.
+// D4 Học viên `paused`: vẫn tính buổi theo buổi đã dạy, không thu học phí tháng/đợt trọn khóa; `left` hoặc ghi danh rời
+//    lớp trước kỳ: không tính.
+// D5 Học viên không có dòng nào: không có hóa đơn.
 import {
   type AttendanceStatus,
   calculateInvoice,
@@ -12,7 +21,7 @@ import {
   type SessionInput,
 } from './invoice-calculator.js';
 
-/** Hạn thanh toán mặc định: 10 ngày sau ngày chốt (khớp ví dụ hợp đồng 2026-12-31 → 2027-01-10). */
+/** Hạn thanh toán mặc định: 10 ngày sau ngày chốt. */
 export const DEFAULT_DUE_DAYS = 10;
 const MAX_CLOSE_DAY = 28;
 const MAX_DUE_DAYS = 90;
@@ -40,9 +49,11 @@ export function monthsBetween(from: string, to: string): number {
   return (t[0] - f[0]) * 12 + (t[1] - f[1]);
 }
 
+export const DEFAULT_CLOSE_DAY = 1;
+
 export interface BillingSettings {
-  /** 1..28; null = ngày cuối tháng. */
-  closeDay: number | null;
+  /** 1..28: ngày chốt của tháng liền sau kỳ. */
+  closeDay: number;
   dueDays: number;
 }
 
@@ -62,7 +73,7 @@ export function parseBillingSettings(settings: unknown): BillingSettings {
       (day as number) >= 1 &&
       (day as number) <= MAX_CLOSE_DAY
         ? (day as number)
-        : null,
+        : DEFAULT_CLOSE_DAY,
     dueDays:
       Number.isInteger(due) &&
       (due as number) >= 0 &&
@@ -75,27 +86,39 @@ export function parseBillingSettings(settings: unknown): BillingSettings {
 export interface PeriodDates {
   /** Ngày 1 của tháng thu. */
   periodMonth: string;
+  /** Ngày cuối của tháng thu. */
   periodEnd: string;
   closeDate: string;
   dueDate: string;
+  /** Hôm nay đúng là ngày chốt (khác với lỡ ngày chốt, đang bù). */
+  isCloseDay: boolean;
 }
 
-/** Kỳ thu là tháng dương lịch chứa `today`; chỉ trả về khi `today` đúng là ngày chốt của tháng đó. */
-export function periodClosingOn(
+/**
+ * Kỳ mới nhất đã tới ngày chốt tính đến `today`: tháng liền trước nếu hôm nay đã tới ngày chốt của tháng này, không thì
+ * tháng trước nữa. Ngày chốt = `closeDay` của tháng liền sau kỳ.
+ */
+export function latestClosablePeriod(
   today: string,
   settings: BillingSettings,
-): PeriodDates | null {
-  const periodMonth = monthStart(today);
-  const periodEnd = monthEnd(today);
-  const closeDate = settings.closeDay
-    ? `${today.slice(0, 7)}-${String(settings.closeDay).padStart(2, '0')}`
-    : periodEnd;
-  if (today !== closeDate) return null;
+): PeriodDates {
+  const dd = String(settings.closeDay).padStart(2, '0');
+  const closeThisMonth = `${today.slice(0, 7)}-${dd}`;
+  const prevMonthEnd = addDays(monthStart(today), -1);
+  const periodEnd =
+    today >= closeThisMonth
+      ? prevMonthEnd
+      : addDays(monthStart(prevMonthEnd), -1);
+  const closeDate =
+    today >= closeThisMonth
+      ? closeThisMonth
+      : `${prevMonthEnd.slice(0, 7)}-${dd}`;
   return {
-    periodMonth,
+    periodMonth: monthStart(periodEnd),
     periodEnd,
     closeDate,
     dueDate: addDays(closeDate, settings.dueDays),
+    isCloseDay: today === closeDate,
   };
 }
 
@@ -215,7 +238,10 @@ export function computeEnrollmentInvoice(
   period: Pick<PeriodDates, 'periodMonth' | 'periodEnd'>,
   sessions: ClassSession[],
   attendance: ReadonlyMap<string, string>,
+  opts: { paused?: boolean } = {},
 ): EnrollmentInvoice | null {
+  // D4: học viên tạm nghỉ chỉ còn tiền theo buổi đã dạy; học phí tháng và đợt trọn khóa không thu.
+  if (opts.paused && cls.feeType !== 'per_session') return null;
   const { override, discounts } = parseFeeOverride(enr.feeOverride);
   const classRules = parseFeeRules(cls.feeRules);
   const rules = {
@@ -281,5 +307,38 @@ export function computeEnrollmentInvoice(
       installmentCount: rules.installments,
     };
   }
-  return { result: calculateInvoice(input) };
+  const result = calculateInvoice(input);
+  // D3: buổi còn `planned` lúc chốt (chưa điểm danh) không tính tiền nhưng vẫn hiện thành dòng 0 đ.
+  // shortcut: DB và hợp đồng chưa có lý do không tính "chưa điểm danh" (CHECK chỉ nhận 4 lý do), nên dòng là
+  // `charged = true` với 0 đ và chú thích trong `description`; đổi sang `charged = false` khi thêm lý do (cần migration + hợp đồng).
+  const dateOf = new Map(inPeriod.map((s) => [s.id, s.date]));
+  const unrecorded = inPeriod
+    .filter(
+      (s) =>
+        s.status === 'planned' &&
+        s.date >= enr.joinedOn &&
+        (!enr.leftOn || s.date < enr.leftOn),
+    )
+    .map((s) => ({
+      kind: 'session' as const,
+      amount: 0,
+      sessionId: s.id,
+      charged: true,
+      description: `Buổi ${s.date} (chưa điểm danh, không tính)`,
+    }));
+  if (!unrecorded.length) return { result };
+  const date = (id?: string) => dateOf.get(id ?? '') ?? '';
+  const sessionLines = [
+    ...result.lines.filter((l) => l.kind === 'session'),
+    ...unrecorded,
+  ].sort((a, b) => date(a.sessionId).localeCompare(date(b.sessionId)));
+  return {
+    result: {
+      ...result,
+      lines: [
+        ...sessionLines,
+        ...result.lines.filter((l) => l.kind !== 'session'),
+      ],
+    },
+  };
 }

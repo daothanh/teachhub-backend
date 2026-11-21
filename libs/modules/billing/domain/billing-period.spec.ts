@@ -5,7 +5,7 @@ import {
   computeEnrollmentInvoice,
   parseBillingSettings,
   parseFeeOverride,
-  periodClosingOn,
+  latestClosablePeriod,
   toCalcAttendance,
 } from './billing-period.js';
 
@@ -42,36 +42,53 @@ const att = new Map([
   ['s8', 'unexcused'],
 ]);
 
-describe('periodClosingOn: ngày chốt của kỳ', () => {
+describe('latestClosablePeriod: kỳ M chốt ngày billingCloseDay của tháng M+1 (D1, D2)', () => {
   const def = parseBillingSettings({});
-  it('mặc định chốt ngày cuối tháng, hạn 10 ngày (khớp ví dụ hợp đồng)', () => {
-    expect(periodClosingOn('2026-12-31', def)).toEqual({
+  it('mặc định chốt ngày 1 tháng sau, hạn 10 ngày', () => {
+    expect(latestClosablePeriod('2027-01-01', def)).toEqual({
       periodMonth: '2026-12-01',
       periodEnd: '2026-12-31',
-      closeDate: '2026-12-31',
-      dueDate: '2027-01-10',
+      closeDate: '2027-01-01',
+      dueDate: '2027-01-11',
+      isCloseDay: true,
     });
-    expect(periodClosingOn('2026-12-30', def)).toBeNull();
-    expect(periodClosingOn('2027-02-28', def)?.periodMonth).toBe('2027-02-01');
+    // Hôm sau: vẫn kỳ 12/2026 nhưng không còn là ngày chốt (lỡ ngày chốt thì đang bù).
+    expect(latestClosablePeriod('2027-01-15', def)).toMatchObject({
+      periodMonth: '2026-12-01',
+      isCloseDay: false,
+    });
+    expect(latestClosablePeriod('2027-03-01', def)).toMatchObject({
+      periodMonth: '2027-02-01',
+      periodEnd: '2027-02-28',
+    });
   });
-  it('ngày chốt cấu hình 5: chỉ đúng ngày 5, hạn theo billingDueDays', () => {
+  it('ngày chốt 5: trước ngày 5 kỳ mới nhất là kỳ trước nữa, từ ngày 5 là kỳ liền trước', () => {
     const s = parseBillingSettings({ billingCloseDay: 5, billingDueDays: 3 });
-    expect(periodClosingOn('2027-01-05', s)).toMatchObject({
-      periodMonth: '2027-01-01',
-      periodEnd: '2027-01-31',
+    expect(latestClosablePeriod('2027-01-04', s)).toMatchObject({
+      periodMonth: '2026-11-01',
+      closeDate: '2026-12-05',
+      isCloseDay: false,
+    });
+    expect(latestClosablePeriod('2027-01-05', s)).toEqual({
+      periodMonth: '2026-12-01',
+      periodEnd: '2026-12-31',
       closeDate: '2027-01-05',
       dueDate: '2027-01-08',
+      isCloseDay: true,
     });
-    expect(periodClosingOn('2027-01-31', s)).toBeNull();
+  });
+  it('các kỳ liền kề không hở không chồng (qua năm)', () => {
+    const s = parseBillingSettings({ billingCloseDay: 28 });
+    const a = latestClosablePeriod('2027-01-28', s);
+    const b = latestClosablePeriod('2027-02-28', s);
+    expect([a.periodMonth, a.periodEnd]).toEqual(['2026-12-01', '2026-12-31']);
+    expect([b.periodMonth, b.periodEnd]).toEqual(['2027-01-01', '2027-01-31']);
   });
   it('cấu hình sai kiểu hoặc ngoài khoảng → mặc định', () => {
     expect(
       parseBillingSettings({ billingCloseDay: 31, billingDueDays: -1 }),
-    ).toEqual({
-      closeDay: null,
-      dueDays: 10,
-    });
-    expect(parseBillingSettings('x')).toEqual({ closeDay: null, dueDays: 10 });
+    ).toEqual({ closeDay: 1, dueDays: 10 });
+    expect(parseBillingSettings('x')).toEqual({ closeDay: 1, dueDays: 10 });
   });
 });
 
@@ -114,7 +131,7 @@ describe('computeEnrollmentInvoice: bản nháp từ buổi và điểm danh', (
     )!;
     expect(r.result.total).toBe(900_000);
   });
-  it('US-7.1 AC3: buổi hủy và buổi bù không phát sinh tiền; buổi chưa dạy không vào hóa đơn', () => {
+  it('US-7.1 AC3: buổi hủy và buổi bù không phát sinh tiền; buổi chưa dạy chỉ là dòng 0 đ chưa điểm danh (D3)', () => {
     const sessions = [
       session(1),
       session(2, { status: 'cancelled' }),
@@ -133,7 +150,9 @@ describe('computeEnrollmentInvoice: bản nháp từ buổi và điểm danh', (
       'taught',
       'cancelled',
       'makeup',
+      undefined,
     ]);
+    expect(r.result.lines.map((l) => l.amount)).toEqual([150_000, 0, 0, 0]);
   });
   it('điểm danh `late` tính là có mặt (tính tiền)', () => {
     expect(toCalcAttendance('late')).toBe('present');
@@ -269,6 +288,85 @@ describe('computeEnrollmentInvoice: bản nháp từ buổi và điểm danh', (
     )!;
     expect(r.result.total).toBe(0);
     expect(r.result.lines.map((l) => l.kind)).toEqual(['monthly', 'discount']);
+  });
+
+  it('D3: buổi planned quá khứ → dòng 0 đ "chưa điểm danh" xen đúng thứ tự ngày, tổng không đổi', () => {
+    const sessions = [
+      session(1),
+      session(2, { status: 'planned' }),
+      session(3),
+    ];
+    const r = computeEnrollmentInvoice(
+      perSession(),
+      enr(),
+      DEC,
+      sessions,
+      new Map(),
+    )!;
+    expect(r.result.total).toBe(300_000);
+    expect(r.result.lines.map((l) => [l.sessionId, l.amount])).toEqual([
+      ['s1', 150_000],
+      ['s2', 0],
+      ['s3', 150_000],
+    ]);
+    expect(r.result.lines[1]!.description).toContain('chưa điểm danh');
+  });
+  it('D3: lớp theo tháng không phụ thuộc điểm danh; buổi planned vẫn nằm trong mẫu số lịch', () => {
+    const cls: ClassFee = {
+      className: 'Văn',
+      feeType: 'monthly',
+      feeAmount: 1_000_000,
+      feeRules: { deductCancelled: true },
+    };
+    const sessions = [
+      session(1, { status: 'planned' }),
+      session(2, { status: 'planned' }),
+      session(3, { status: 'planned' }),
+      session(4, { status: 'cancelled' }),
+    ];
+    // 4 buổi theo lịch, hủy 1 không bù: 1.000.000 − 1.000.000/4 = 750.000
+    expect(
+      computeEnrollmentInvoice(cls, enr(), DEC, sessions, new Map())!.result
+        .total,
+    ).toBe(750_000);
+  });
+  it('D4: học viên tạm nghỉ chỉ còn tiền theo buổi, không thu tháng/trọn khóa', () => {
+    const paused = { paused: true };
+    expect(
+      computeEnrollmentInvoice(
+        perSession(),
+        enr(),
+        DEC,
+        eightTaught,
+        new Map(),
+        paused,
+      )!.result.total,
+    ).toBe(1_200_000);
+    const monthly: ClassFee = {
+      className: 'V',
+      feeType: 'monthly',
+      feeAmount: 1_000_000,
+      feeRules: null,
+    };
+    const course: ClassFee = {
+      className: 'C',
+      feeType: 'course',
+      feeAmount: 3_600_000,
+      feeRules: null,
+    };
+    expect(
+      computeEnrollmentInvoice(monthly, enr(), DEC, [], new Map(), paused),
+    ).toBeNull();
+    expect(
+      computeEnrollmentInvoice(
+        course,
+        enr(),
+        DEC,
+        eightTaught,
+        new Map(),
+        paused,
+      ),
+    ).toBeNull();
   });
 
   it('parseFeeOverride bỏ trường sai kiểu', () => {

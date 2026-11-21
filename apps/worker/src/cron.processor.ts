@@ -70,7 +70,8 @@ export class CronProcessor
       case JOB_GENERATE_SESSIONS:
         return this.generate.run();
       case JOB_BILLING_CLOSE:
-        return this.billingClose.run();
+        // Mốc thời gian của job cố định qua các lần BullMQ thử lại: kỳ được chọn không đổi giữa lần chạy và lần thử lại.
+        return this.billingClose.run(new Date(job.timestamp));
       case JOB_PURGE_IDEMPOTENCY:
         return this.purge.run();
       case JOB_PURGE_STALE_DEVICES:

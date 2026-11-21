@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
+import { z } from 'zod';
 import { uuidv7 } from '@teachhub/core';
 import { TxService } from '@teachhub/db';
 import {
@@ -10,16 +11,17 @@ import {
 
 export const TYPE_BILLING_READY = 'billing_ready';
 
-export interface BillingReadyJobData {
-  eventId: string;
-  tenantId: string;
-  payload: {
-    periodId: string;
-    periodMonth: string;
-    draftCount: number;
-    draftTotalAmount: number;
-  };
-}
+export const billingReadyJobSchema = z.object({
+  eventId: z.uuid(),
+  tenantId: z.uuid(),
+  payload: z.object({
+    periodId: z.uuid(),
+    periodMonth: z.iso.date(),
+    draftCount: z.int().min(0),
+    draftTotalAmount: z.int().min(0),
+  }),
+});
+export type BillingReadyJobData = z.infer<typeof billingReadyJobSchema>;
 
 /**
  * Xử lý sự kiện outbox `billing_drafts_ready` (S5-BE-05, US-7.2 AC1): tạo thông báo `billing_ready` cho chủ tenant rồi gửi
@@ -36,11 +38,9 @@ export class BillingReadyNotifier {
     private readonly delivery: AbsenceNotifier,
   ) {}
 
-  async handle({
-    eventId,
-    tenantId,
-    payload,
-  }: BillingReadyJobData): Promise<void> {
+  /** Dữ liệu job sai dạng → ném lỗi (job vào hàng `failed`, không nuốt im lặng). */
+  async handle(job: unknown): Promise<void> {
+    const { eventId, tenantId, payload } = billingReadyJobSchema.parse(job);
     const pending = await this.tx.run({ userId: null }, async (tx) => {
       const owners = (
         await tx.execute<{ user_id: string; membership_id: string }>(sql`

@@ -55,7 +55,7 @@ import {
 
 const idParam = z.uuid();
 
-// Hợp đồng Sprint 5 (S4-FL-10, S4-CT-01); thân hàm đọc/điều chỉnh đã có (S5-BE-06); phát hành, hủy ở S5-BE-07 (phát hành, hủy).
+// Hợp đồng Sprint 5 (S4-FL-10, S4-CT-01); thân hàm đọc/điều chỉnh đã có (S5-BE-06); phát hành, hủy ở S5-BE-07.
 // Chỉ `tenant_owner` (MVP: giáo viên là chủ tenant; Spec §4.8 "chỉ chủ tenant ghi" tài chính). Id của tenant khác → 404.
 @ApiTags('billing')
 @ApiBearerAuth('bearer')
