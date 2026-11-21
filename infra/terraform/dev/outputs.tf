@@ -17,5 +17,6 @@ output "ansible_vars" {
     jwt_private_key  = tls_private_key.jwt.private_key_pem_pkcs8
     db_passwords     = { for k, v in random_password.db : k => v.result }
     minio_password   = random_password.minio.result
+    app_keys         = { for k, v in random_password.app_key : k => v.result }
   }
 }

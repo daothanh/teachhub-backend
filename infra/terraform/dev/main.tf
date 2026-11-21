@@ -162,3 +162,10 @@ resource "random_password" "minio" {
   length  = 32
   special = false
 }
+
+# Khóa ứng dụng bắt buộc ngoài local/test (libs/core/src/config.ts): ba khóa phải khác nhau.
+resource "random_password" "app_key" {
+  for_each = toset(["consent_ip_hmac", "invite_code_hmac", "idempotency_enc", "admin_api"])
+  length   = 48
+  special  = false
+}
