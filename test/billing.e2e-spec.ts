@@ -970,4 +970,31 @@ describe('billing: job billing.close + API kỳ thu, hóa đơn, điều chỉnh
       ),
     ).toHaveLength(0);
   });
+
+  it('S4 (issue #179): worker dừng hơn một tháng → job tạo đủ các kỳ thiếu cũ → mới; chạy lại không tạo thêm; kỳ cũ không bị bỏ', async () => {
+    const J = await seedTenant(t.worker);
+    const [cls, stu] = [randomUUID(), randomUUID()];
+    await addClass(J, cls, 'J-Văn', ['monthly', 600_000, null]);
+    await addStudent(J, stu, 'Quân');
+    await enroll(J, cls, stu);
+    // Kỳ đầu tiên 12/2026 chốt đúng hạn 01/01/2027, rồi worker dừng tới 10/03/2027 (kỳ 01 và 02/2027 đều đã quá ngày chốt).
+    await job.run(new Date('2026-12-31T19:00:00Z'));
+    expect((await periodsOf(J)).map((p) => p.period_month)).toEqual([
+      '2026-12-01',
+    ]);
+    await job.run(new Date('2027-03-10T05:00:00Z'));
+    const periods = await q(
+      `select period_month::text m, close_date::text c, due_date::text d from billing_periods where tenant_id = $1 order by period_month`,
+      [J.tenantId],
+    );
+    expect(periods).toEqual([
+      { m: '2026-12-01', c: '2027-01-01', d: '2027-01-11' },
+      { m: '2027-01-01', c: '2027-02-01', d: '2027-02-11' },
+      { m: '2027-02-01', c: '2027-03-01', d: '2027-03-11' },
+    ]);
+    expect(await invoicesOf(J)).toHaveLength(3);
+    await job.run(new Date('2027-03-11T05:00:00Z'));
+    expect(await invoicesOf(J)).toHaveLength(3);
+    expect(await periodsOf(J)).toHaveLength(3);
+  });
 });

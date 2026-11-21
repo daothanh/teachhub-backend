@@ -6,6 +6,8 @@
 
 - Trạng thái học viên khi chốt kỳ xét THEO KỲ: học viên chuyển `left`/`paused` sau ngày cuối kỳ M (giữa ngày 1 tháng M+1 và ngày chốt) vẫn bị tính kỳ M theo trạng thái trước đó. `left` trong kỳ: chỉ tính buổi trước ngày rời; `paused`: chỉ buổi theo buổi đã dạy (như cũ). Mốc đổi lấy từ cột mới `students.status_changed_at` (trigger ghi khi `status` đổi; migration `0034_students_status_changed`, thêm cả `status_before`) hoặc `status_effective_on` nếu có. Học viên đã đổi trạng thái trước migration (không có mốc) giữ cách cũ.
 
+- Catch-up: lỡ ngày chốt quá một tháng (worker dừng) thì job tạo MỌI kỳ còn thiếu, cũ → mới, trong một giao dịch của tenant (kỳ có tháng sau kỳ mới nhất đã có; tenant chưa có kỳ nào chỉ tạo kỳ mới nhất; tối đa 12 kỳ). Kỳ cũ tạo muộn vẫn có `closeDate`/`dueDate` như đã chốt đúng hạn; mỗi kỳ ghi riêng một sự kiện `billing_drafts_ready`. Idempotent: chạy lại không tạo gì mới.
+
 ## Ngoại lệ một lần: hợp nhất thông báo và not_marked
 
 Hai thay đổi `oasdiff breaking` báo ERR, được Owner/TL chấp nhận MỘT LẦN vì chưa có bản app nào phát hành ra ngoài (xem "Đã chốt khi duyệt" ở Sprint 7). Sau PR này mọi thay đổi lại phải sạch `oasdiff` mà không cần ngoại lệ.

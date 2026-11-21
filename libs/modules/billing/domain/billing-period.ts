@@ -3,7 +3,9 @@
 //
 // Quyết định nghiệp vụ (Owner chốt, vòng sửa sau review):
 // D1 Kỳ M = tháng dương lịch M, chốt vào ngày `billingCloseDay` (1–28, mặc định 1) của tháng M+1: hóa đơn gồm mọi buổi
-//    có ngày thuộc tháng M, kỳ liền kề không hở không chồng. Lỡ ngày chốt thì kỳ vẫn được tạo ở lần chạy sau (catch-up).
+//    có ngày thuộc tháng M, kỳ liền kề không hở không chồng. Lỡ ngày chốt thì kỳ vẫn được tạo ở lần chạy sau (catch-up): job tạo MỌI kỳ đã tới ngày chốt mà
+//    chưa có (tháng sau kỳ mới nhất đã có của tenant), thứ tự cũ → mới, tối đa 12 kỳ; tenant chưa có kỳ nào chỉ tạo kỳ mới nhất. Kỳ cũ tạo muộn
+//    có `closeDate`/`dueDate` đúng như nếu đã chốt đúng hạn (hạn có thể đã qua; nhắc nợ xử lý khi phát hành).
 // D2 Hạn thanh toán = ngày chốt + `billingDueDays` (mặc định 10).
 // D3 Buổi theo buổi còn `planned` lúc chốt (chưa điểm danh) không tính tiền nhưng vẫn có dòng 0 đ (`charged = false`, lý do `not_marked`) để giáo viên thấy.
 // D4 Học viên `paused`: vẫn tính buổi theo buổi đã dạy, không thu học phí tháng/đợt trọn khóa; `left` hoặc ghi danh rời
@@ -167,6 +169,41 @@ export function studentPeriodState(
   if (asOf === 'left')
     return s.changedOn ? { paused: false, leftOn: s.changedOn } : null;
   return { paused: asOf === 'paused', leftOn: null };
+}
+
+/** Số kỳ bù tối đa một lần chạy (một năm): worker dừng lâu hơn thì kỳ cũ hơn cần xử lý tay. */
+export const MAX_CATCH_UP_PERIODS = 12;
+
+/**
+ * Các kỳ cần tạo, cũ → mới (D1, issue #179): mọi kỳ đã tới ngày chốt có tháng SAU `lastKnownMonth` (tháng của kỳ mới nhất đã có;
+ * null = tenant chưa có kỳ nào → chỉ kỳ mới nhất, không lần ngược về trước lúc dùng hệ thống). Luôn có kỳ mới nhất (để chạy lại đúng ngày
+ * chốt bù học viên mới). Tối đa `MAX_CATCH_UP_PERIODS` kỳ gần nhất.
+ */
+export function closablePeriods(
+  today: string,
+  settings: BillingSettings,
+  lastKnownMonth: string | null,
+): PeriodDates[] {
+  const latest = latestClosablePeriod(today, settings);
+  const out = [latest];
+  if (lastKnownMonth === null) return out;
+  // Lùi từng tháng: ngày chốt của kỳ cũ hơn = `closeDay` của tháng liền sau kỳ đó (đã qua).
+  let prev = latest;
+  while (out.length < MAX_CATCH_UP_PERIODS) {
+    const periodEnd = addDays(prev.periodMonth, -1);
+    const periodMonth = monthStart(periodEnd);
+    if (periodMonth <= lastKnownMonth) break;
+    const closeDate = `${prev.periodMonth.slice(0, 7)}-${String(settings.closeDay).padStart(2, '0')}`;
+    prev = {
+      periodMonth,
+      periodEnd,
+      closeDate,
+      dueDate: addDays(closeDate, settings.dueDays),
+      isCloseDay: false,
+    };
+    out.unshift(prev);
+  }
+  return out;
 }
 
 // ---- Cấu hình học phí đọc từ jsonb ----

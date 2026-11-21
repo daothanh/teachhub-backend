@@ -7,6 +7,7 @@ import {
   inArray,
   isNotNull,
   isNull,
+  max,
   lte,
   or,
   sql,
@@ -34,7 +35,7 @@ import {
   computeEnrollmentInvoice,
   type PeriodDates,
   parseBillingSettings,
-  latestClosablePeriod,
+  closablePeriods,
   studentPeriodState,
 } from '../domain/billing-period.js';
 import {
@@ -103,14 +104,22 @@ export class BillingCloseJob {
       let created = 0;
       let failed = 0;
       for (const tenant of tenantRows) {
-        const period = latestClosablePeriod(
-          localDate(now, tenant.tz),
-          parseBillingSettings(tenant.settings),
-        );
         try {
-          created += await this.tx.run({ userId: null }, (t) =>
-            this.closeTenant(t, tenant.id, tenant.tz, period),
-          );
+          created += await this.tx.run({ userId: null }, async (t) => {
+            const [last] = await t
+              .select({ m: max(billingPeriods.periodMonth) })
+              .from(billingPeriods)
+              .where(eq(billingPeriods.tenantId, tenant.id));
+            // Catch-up: mọi kỳ đã tới ngày chốt mà chưa có, cũ → mới, cùng một giao dịch (idempotent: chạy lại không có kỳ thiếu).
+            let n = 0;
+            for (const period of closablePeriods(
+              localDate(now, tenant.tz),
+              parseBillingSettings(tenant.settings),
+              last?.m ?? null,
+            ))
+              n += await this.closeTenant(t, tenant.id, tenant.tz, period);
+            return n;
+          });
         } catch (e) {
           failed += 1;
           this.log.error(`tenant ${tenant.id}: ${errorCode(e)}`);
@@ -123,7 +132,7 @@ export class BillingCloseJob {
 
   /**
    * Một tenant trong một giao dịch; trả số bản nháp mới. Kỳ đã có thì chỉ chạy lại đúng ngày chốt (bù học viên mới);
-   * lỡ ngày chốt thì kỳ chưa có vẫn được tạo ở lần chạy sau (catch-up). Kỳ chỉ được tạo khi có bản nháp.
+   * lỡ ngày chốt thì kỳ chưa có vẫn được tạo ở lần chạy sau (catch-up, `run` gọi từng kỳ cũ → mới). Kỳ chỉ được tạo khi có bản nháp.
    */
   private async closeTenant(
     t: Tx,

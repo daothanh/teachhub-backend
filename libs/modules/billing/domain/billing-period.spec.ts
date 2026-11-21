@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   type ClassFee,
   type ClassSession,
+  closablePeriods,
   computeEnrollmentInvoice,
   parseBillingSettings,
   parseFeeOverride,
@@ -458,5 +459,52 @@ describe('studentPeriodState: trạng thái học viên theo kỳ (D4, issue #17
       { paused: state.paused },
     );
     expect(r!.result.lines.reduce((n, l) => n + l.amount, 0)).toBe(600_000);
+  });
+});
+
+describe('closablePeriods: catch-up mọi kỳ còn thiếu, cũ → mới (D1, issue #179)', () => {
+  const s1 = parseBillingSettings({});
+  const s5 = parseBillingSettings({ billingCloseDay: 5, billingDueDays: 10 });
+  const months = (ps: { periodMonth: string }[]) =>
+    ps.map((p) => p.periodMonth);
+
+  it('tenant chưa có kỳ nào: chỉ kỳ mới nhất', () => {
+    expect(months(closablePeriods('2027-03-10', s1, null))).toEqual([
+      '2027-02-01',
+    ]);
+  });
+
+  it('worker dừng từ tháng 1: kỳ cuối đã có là 12/2026, hôm nay 10/03 → 01 và 02/2027, đúng thứ tự', () => {
+    const ps = closablePeriods('2027-03-10', s1, '2026-12-01');
+    expect(months(ps)).toEqual(['2027-01-01', '2027-02-01']);
+    expect(ps[0]).toMatchObject({
+      periodEnd: '2027-01-31',
+      closeDate: '2027-02-01',
+      dueDate: '2027-02-11',
+      isCloseDay: false,
+    });
+    expect(ps[1]).toMatchObject({
+      periodEnd: '2027-02-28',
+      closeDate: '2027-03-01',
+      dueDate: '2027-03-11',
+    });
+  });
+
+  it('ngày chốt 5, hôm nay 03/03 (chưa tới ngày chốt tháng 3): kỳ mới nhất là 01/2027; qua năm', () => {
+    expect(months(closablePeriods('2027-03-03', s5, '2026-11-01'))).toEqual([
+      '2026-12-01',
+      '2027-01-01',
+    ]);
+    expect(closablePeriods('2027-03-03', s5, '2026-11-01')[0]).toMatchObject({
+      closeDate: '2027-01-05',
+      dueDate: '2027-01-15',
+    });
+  });
+
+  it('kỳ mới nhất đã có: vẫn trả đúng kỳ đó (để chạy lại đúng ngày chốt); chặn ở 12 kỳ', () => {
+    expect(months(closablePeriods('2027-03-10', s1, '2027-02-01'))).toEqual([
+      '2027-02-01',
+    ]);
+    expect(closablePeriods('2030-03-10', s1, '2026-01-01')).toHaveLength(12);
   });
 });
