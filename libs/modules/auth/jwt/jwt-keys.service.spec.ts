@@ -168,7 +168,8 @@ describe('JwtKeysService (S1-BE-03)', () => {
     expect(() => validateEnv(base)).toThrow(/APPLE_BUNDLE_ID/);
     const ok = validateEnv({
       ...base,
-      GOOGLE_CLIENT_IDS: 'g',
+      GOOGLE_CLIENT_IDS:
+        '432762025168-e2lo4mengjqb64e8bc2sdoat1vbqpdl8.apps.googleusercontent.com',
       APPLE_BUNDLE_ID: 'a.b, c.d',
     });
     expect(ok.APPLE_BUNDLE_ID).toEqual(['a.b', 'c.d']);
@@ -183,6 +184,8 @@ describe('JwtKeysService (S1-BE-03)', () => {
       S3_SECRET_ACCESS_KEY: 'x',
       S3_BUCKET_PRIVATE: 'x',
       JWT_PRIVATE_KEY: 'k',
+      GOOGLE_CLIENT_IDS:
+        '432762025168-e2lo4mengjqb64e8bc2sdoat1vbqpdl8.apps.googleusercontent.com',
       NODE_ENV: 'development',
     };
     expect(() => validateEnv(base)).toThrow(/CONSENT_IP_HMAC_KEY/);

@@ -180,6 +180,13 @@ describe('SSO Google: /v1/auth/sso/google', () => {
     expect(rows[0].n).toBe(0);
   });
 
+  it('aud là Web client (Android gửi với serverClientId) vẫn nhận', async () => {
+    const res = await sso(
+      await idToken({ sub: 'g-sub-web' }, { aud: 'web-client' }),
+    );
+    expect(res.statusCode).toBe(200);
+  });
+
   it('iss dạng không https vẫn nhận', async () => {
     const res = await sso(
       await idToken({ sub: 'g-sub-2' }, { iss: 'accounts.google.com' }),

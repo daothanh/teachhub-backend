@@ -6,6 +6,14 @@ const csv = (v: string) =>
     .map((s) => s.trim())
     .filter(Boolean);
 
+// Client ID Android debug (khóa ký debug ai cũng dựng được) của dev/staging/production: không bao giờ được vào production.
+const GOOGLE_DEBUG_CLIENT_IDS = [
+  '305225338991-r640djv4j04rhv3uqq8g4m56bs3n901a',
+  '753323722874-at7jre1ehfam9pt140oar0d3k3dqbnd2',
+  '432762025168-3i1f3r2a7oelb9hg7pusr9uqc48umcdh',
+].map((id) => `${id}.apps.googleusercontent.com`);
+const GOOGLE_CLIENT_ID_FORMAT = /^\d+-[a-z0-9]+\.apps\.googleusercontent\.com$/;
+
 const isLocalOrTest = (v: string | undefined) => v === 'local' || v === 'test';
 
 export const envSchema = z
@@ -44,7 +52,7 @@ export const envSchema = z
     /** SMTP gửi email (OTP…): Mailpit ở local/dev (smtp://127.0.0.1:1025), SES SMTP ở staging/production. */
     SMTP_URL: z.url().default('smtp://127.0.0.1:1025'),
     EMAIL_FROM: z.string().min(1).default('DayHoc <no-reply@dayhoc.app>'),
-    /** Client ID OAuth Google (iOS, Android, web), ngăn cách bởi dấu phẩy — `aud` hợp lệ của id_token. Trống = từ chối mọi id_token. */
+    /** Client ID OAuth Google (Web, iOS, Android upload), ngăn cách bởi dấu phẩy — `aud` hợp lệ của id_token. Bắt buộc ngoài local/test; trống = từ chối mọi id_token. */
     GOOGLE_CLIENT_IDS: z.string().default('').transform(csv),
     /** Khóa công khai của Google; test trỏ về JWKS giả. */
     GOOGLE_JWKS_URL: z
@@ -109,8 +117,26 @@ export const envSchema = z
         });
       }
     }
+    // Google: ngoài local/test phải có danh sách `aud`, đúng dạng client ID; production cấm client debug.
+    if (!isLocalOrTest(e.NODE_ENV)) {
+      const issue = (message: string) =>
+        ctx.addIssue({ code: 'custom', path: ['GOOGLE_CLIENT_IDS'], message });
+      if (e.GOOGLE_CLIENT_IDS.length === 0) issue('Bắt buộc ngoài local/test');
+      for (const id of e.GOOGLE_CLIENT_IDS) {
+        if (!GOOGLE_CLIENT_ID_FORMAT.test(id)) {
+          issue(
+            'Mỗi client ID phải có dạng <số>-<chuỗi>.apps.googleusercontent.com',
+          );
+        } else if (
+          e.NODE_ENV === 'production' &&
+          GOOGLE_DEBUG_CLIENT_IDS.includes(id)
+        ) {
+          issue('Production không nhận client Android debug');
+        }
+      }
+    }
     if (e.NODE_ENV !== 'staging' && e.NODE_ENV !== 'production') return;
-    for (const k of ['GOOGLE_CLIENT_IDS', 'APPLE_BUNDLE_ID'] as const) {
+    for (const k of ['APPLE_BUNDLE_ID'] as const) {
       if (e[k].length === 0) {
         ctx.addIssue({
           code: 'custom',
