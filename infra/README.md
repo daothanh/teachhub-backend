@@ -57,7 +57,7 @@ Việc Owner phải làm một lần:
 2. Khóa SSH deploy: `ssh-keygen -t ed25519 -f deploy_key -N ""`; khóa công khai truyền cho Ansible, khóa riêng làm secret.
 3. Chạy lại Ansible (an toàn, idempotent): thêm `-e "deploy_ssh_pubkey='$(cat deploy_key.pub)'" -e ts_authkey=<tskey-auth-...>`. VM vào tailnet với tên `teachhub-dev`.
 4. Lấy known_hosts của VM qua tailnet: `ssh-keyscan -t ed25519 teachhub-dev` (hoặc IP Tailscale `100.x.y.z`).
-5. GitHub → Settings → Environments → tạo `development`, thêm secrets: `DEV_SSH_HOST` (IP/tên tailnet của VM), `DEV_SSH_USER` (`deploy`), `DEV_SSH_PRIVATE_KEY` (khóa riêng), `DEV_SSH_KNOWN_HOSTS` (kết quả bước 4), `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`.
+5. GitHub → Settings → Environments → tạo `development`, thêm secrets: `DEV_SSH_HOST` (IP/tên tailnet của VM), `DEV_SSH_USER` (`deploy`), `DEV_SSH_PRIVATE_KEY` (khóa riêng), `DEV_SSH_KNOWN_HOSTS` (kết quả bước 4), `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET` (tạo lại ở Environment này dù trùng giá trị với dev).
 6. Gói GHCR `teachhub-backend` phải cấp quyền đọc cho repo này (Package settings → Manage Actions access), để `GITHUB_TOKEN` kéo được image private.
 
 Ansible đặt `IMAGE_TAG=main` trong `.env` chỉ khi file chưa có; CD sau đó giữ tag SHA đang chạy, nên chạy lại Ansible không làm lùi phiên bản.
@@ -89,18 +89,21 @@ Việc Owner phải làm, theo thứ tự:
 3. Tailscale: thêm `tag:staging` vào `tagOwners` của ACL và rule `{"action":"accept","src":["tag:ci"],"dst":["tag:staging:22"]}`; tạo auth key dùng một lần gắn `tag:staging`. OAuth client `tag:ci` dùng lại của dev.
 4. SES: xác minh domain `dayhoc.app` ở `ap-southeast-1` (S0-PO-08), tạo thông tin xác thực SMTP, và (vì đang sandbox) xác minh các địa chỉ nhận thử. `smtp_url` dạng `smtps://<user>:<pass>@email-smtp.ap-southeast-1.amazonaws.com:465`, mật khẩu phải URL-encode.
 5. Firebase stg (`dayhoc-stg`): tạo service account, tải JSON, `jq -n --slurpfile k fcm-stg.json '{fcm_service_account_json: $k[0]}' > fcm-stg-vars.json`. Bước này tùy chọn; thiếu thì worker tắt gửi push.
-6. Khóa SSH deploy riêng cho staging (`ssh-keygen -t ed25519 -f deploy_key_stg -N ""`), rồi chạy Ansible:
+6. Đẩy tag `v<semver>` đầu tiên và chờ `image` build xong (staging không có tag `main`). Khóa SSH deploy riêng cho staging (`ssh-keygen -t ed25519 -f deploy_key_stg -N ""`), rồi chạy Ansible:
    ```bash
    cd ../../ansible
    uvx --from ansible-core ansible-playbook -i "$(tofu -chdir=../terraform/staging output -raw server_ipv4)," -u root staging.yml \
      -e @staging-vars.json -e ghcr_user=<github-user> -e ghcr_token=<PAT> \
-     -e smtp_url='smtps://...' -e "deploy_ssh_pubkey='$(cat deploy_key_stg.pub)'" -e ts_authkey=<tskey-auth-...> \
+     -e smtp_url='smtps://...' -e initial_image_tag=v0.1.0 -e "deploy_ssh_pubkey='$(cat deploy_key_stg.pub)'" -e ts_authkey=<tskey-auth-...> \
      [-e @fcm-stg-vars.json]
+   # initial_image_tag bắt buộc là tag v<semver> đã có image; Ansible từ chối nếu thiếu.
    curl -s https://api-staging.dayhoc.app/health/ready
    ```
-7. `ssh-keyscan -t ed25519 teachhub-staging` qua tailnet. GitHub → Environments → tạo `staging` (bật Required reviewers nếu muốn duyệt trước khi deploy) với secrets `STAGING_SSH_HOST`, `STAGING_SSH_USER` (`deploy`), `STAGING_SSH_PRIVATE_KEY`, `STAGING_SSH_KNOWN_HOSTS`, `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`.
+7. `ssh-keyscan -t ed25519 teachhub-staging` qua tailnet. GitHub → Environments → tạo `staging` (bật Required reviewers nếu muốn duyệt trước khi deploy) và đặt **Deployment branches and tags** = Selected: chỉ `main` và tag `v*`. Mọi secret là **secret của Environment `staging`**, không phải secret repo: `STAGING_SSH_HOST`, `STAGING_SSH_USER` (`deploy`), `STAGING_SSH_PRIVATE_KEY`, `STAGING_SSH_KNOWN_HOSTS`, `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`.
 
-CD: `git tag v0.1.0 && git push origin v0.1.0` → `image` build + đẩy GHCR với tag `v0.1.0` (kèm `sha-<40 hex>`) → `deploy-staging` (workflow_run, chỉ tag `v*`; hoặc chạy tay với input `tag`) → cùng giao thức forced command như dev. Script trên VM chỉ nhận `v<semver>` (`v1.2.3`, `v1.2.3-rc.1`) hoặc `sha-<40 hex>` để quay lại bản cũ; tag khác bị từ chối. Mỗi lần một deploy (`concurrency: deploy-staging`). Workflow không kiểm tag nằm trên `main`: dùng Required reviewers của Environment nếu cần chặn.
+CD: `git tag v0.1.0 && git push origin v0.1.0` → `image` build + đẩy GHCR với tag `v0.1.0` (kèm `sha-<40 hex>`) → `deploy-staging` (workflow_run, chỉ tag `v*`; hoặc chạy tay với input `tag`) → cùng giao thức forced command như dev. Script trên VM chỉ nhận `v<semver>` (`v1.2.3`, `v1.2.3-rc.1`) hoặc `sha-<40 hex>` để quay lại bản cũ; tag khác bị từ chối. Mỗi lần một deploy (`concurrency: deploy-staging`). Workflow không kiểm tag nằm trên `main`: dùng Required reviewers và deployment tag policy của Environment để chặn.
+
+Link mời (`INVITE_BASE_URL`) theo môi trường: staging `https://app-staging.dayhoc.app/i`, dev `https://app-dev.dayhoc.app/i`. Link mời ở môi trường không phải production không mở app bằng universal link/App Link, vì AASA và `assetlinks.json` chỉ khai cho `dayhoc.app`; người thử mở trong trình duyệt rồi nhập mã.
 
 ## R25: thử hạn mức tạo máy
 

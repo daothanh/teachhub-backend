@@ -10,6 +10,7 @@
     # Tag image nằm trong {{ app_dir }}/.env (IMAGE_TAG), do CD (deploy-dev.yml) cập nhật; Ansible chỉ đặt `main` lúc đầu.
     backend_image: ghcr.io/daothanh/teachhub-backend
     env_name: dev
+    smtp_url: smtp://mailpit:1025
     node_env: development
     # Project dayhoc-dev (305225338991-): Web, iOS, Android debug, Android upload.
     google_client_ids:

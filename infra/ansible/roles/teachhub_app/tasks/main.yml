@@ -2,8 +2,8 @@
   ansible.builtin.assert:
     that:
       - env_name is defined and node_env is defined and google_client_ids | length > 0
-      - use_mailpit or (smtp_url is defined and smtp_url | length > 0)
-    fail_msg: "Thiếu env_name/node_env/google_client_ids, hoặc môi trường không dùng Mailpit mà chưa có smtp_url"
+      - use_mailpit or (smtp_url is defined and smtp_url | length > 0 and 'mailpit' not in smtp_url)
+    fail_msg: "Thiếu env_name/node_env/google_client_ids, hoặc môi trường không dùng Mailpit mà smtp_url chưa truyền (hoặc còn trỏ về mailpit)"
 
 - name: Thư mục ứng dụng
   ansible.builtin.file:

@@ -1,7 +1,7 @@
 # S3-OPS-01: cấu hình VM staging (cùng role với dev, khác biến). Chạy trong infra/ansible (xem infra/README.md mục Staging):
 #   ansible-playbook -i "$IP," -u root staging.yml -e @staging-vars.json -e ghcr_user=<user> -e ghcr_token=<PAT read:packages> \
 #     -e smtp_url='smtps://<user>:<pass-url-encoded>@email-smtp.ap-southeast-1.amazonaws.com:465' \
-#     -e deploy_ssh_pubkey="ssh-ed25519 ..." -e ts_authkey=<tskey-auth-... gắn tag:staging>
+#     -e initial_image_tag=v0.1.0 -e deploy_ssh_pubkey="ssh-ed25519 ..." -e ts_authkey=<tskey-auth-... gắn tag:staging>
 #   Tùy chọn (push FCM): jq -n --slurpfile k fcm-stg.json '{fcm_service_account_json: $k[0]}' > fcm-stg-vars.json  rồi thêm -e @fcm-stg-vars.json
 - name: VM staging
   hosts: all
@@ -23,6 +23,11 @@
     apple_bundle_id: [vn.dayhoc.app.stg]
     # CD staging theo tag SemVer `v1.2.3` / `v1.2.3-rc.1` (tag image do image.yml tạo), hoặc sha-<40 hex> để quay lại bản cũ.
     deploy_tag_regex: '^(sha-[0-9a-f]{40}|v[0-9]+[.][0-9]+[.][0-9]+(-[0-9A-Za-z.]+)?)$'
+  pre_tasks:
+    - name: Bắt buộc truyền initial_image_tag là tag v<semver> đã có image (không dùng `main` cho staging)
+      ansible.builtin.assert:
+        that: initial_image_tag is match('^v[0-9]+[.][0-9]+[.][0-9]+(-[0-9A-Za-z.]+)?$')
+        fail_msg: "Truyền -e initial_image_tag=v<semver> (tag đã push và đã build xong image)"
   roles:
     - docker
     - tailscale
