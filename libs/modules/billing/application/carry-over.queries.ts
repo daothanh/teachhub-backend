@@ -9,6 +9,7 @@ import {
   isNotNull,
   sql,
 } from 'drizzle-orm';
+import { uuidv7 } from '@teachhub/core';
 import {
   attendance,
   billingPeriods,
@@ -27,6 +28,7 @@ import {
 } from '../domain/billing-period.js';
 import {
   diffSessionCharges,
+  type IssuedSession,
   type PrevAdjustment,
   type RecalculatedSession,
 } from '../domain/carry-over.js';
@@ -40,6 +42,32 @@ const OPEN = ['issued', 'partially_paid', 'pending_confirmation'];
 export const PREV_ADJUSTMENT_LOOKBACK_MONTHS = 12;
 const CHUNK = 5000;
 
+/** Dòng hóa đơn không gắn buổi/lớp (mặc định), ghi đè bằng `more`. */
+export const newLine = (
+  tenantId: string,
+  invoiceId: string,
+  position: number,
+  kind: string,
+  description: string,
+  amount: number,
+  more: Partial<typeof invoiceLines.$inferInsert> = {},
+): typeof invoiceLines.$inferInsert => ({
+  id: uuidv7(),
+  tenantId,
+  invoiceId,
+  position,
+  kind,
+  description,
+  amount,
+  charged: true,
+  notChargedReason: null,
+  sessionId: null,
+  sessionDate: null,
+  className: null,
+  adjustmentReason: null,
+  ...more,
+});
+
 const monthsBack = (monthStart: string, n: number): string => {
   const [y, m] = monthStart.split('-').map(Number) as [number, number];
   return new Date(Date.UTC(y, m - 1 - n, 1)).toISOString().slice(0, 10);
@@ -48,26 +76,47 @@ const monthsBack = (monthStart: string, n: number): string => {
 export interface OpenInvoice {
   id: string;
   periodMonth: string;
+  /** total − paid − carried (> 0). */
   remaining: number;
+  /** Hạn nợ của hóa đơn: `oldest_due_date` nếu đã nhận khoản chuyển kỳ, không thì hạn của kỳ. */
+  dueDate: string;
+}
+
+export interface CarryState {
+  /** Hóa đơn kỳ trước đã phát hành còn nợ (chưa chuyển). */
+  open: OpenInvoice[];
+  /** Số dư sổ học viên: Σ(debit − credit); dương = nợ, âm = trả thừa. */
+  balance: number;
+  /** Số dư chuyển kỳ = Σ còn nợ hóa đơn cũ + số dư sổ. */
+  carry: number;
 }
 
 /**
- * Khóa (FOR UPDATE, theo id) rồi đọc lại các hóa đơn còn nợ của học viên ở kỳ trước `periodMonth`: ghi thanh toán song song
- * cùng khóa nên số còn nợ đọc ở đây là số đã commit và không ai ghi thêm cho tới hết giao dịch.
+ * Số dư chuyển kỳ của các học viên (hai truy vấn cho cả lô): hóa đơn đã phát hành chưa thu đủ của kỳ trước `periodMonth` và số
+ * dư sổ. `lock` = khóa hóa đơn cũ `ORDER BY id FOR UPDATE` một lần cho cả lô (phát hành): ghi thanh toán song song cùng khóa nên
+ * số còn nợ đọc ở đây là số đã commit và đứng yên tới hết giao dịch.
  */
-export async function lockOpenInvoices(
+export async function loadCarryState(
   t: Tx,
   tenantId: string,
-  studentId: string,
+  studentIds: string[],
   periodMonth: string,
-): Promise<OpenInvoice[]> {
-  const rows = await t
+  lock = false,
+): Promise<Map<string, CarryState>> {
+  const out = new Map<string, CarryState>(
+    studentIds.map((id) => [id, { open: [], balance: 0, carry: 0 }]),
+  );
+  if (!studentIds.length) return out;
+  const q = t
     .select({
       id: invoices.id,
+      studentId: invoices.studentId,
       total: invoices.totalAmount,
       paid: invoices.paidAmount,
       carried: invoices.carriedAmount,
+      oldest: invoices.oldestDueDate,
       periodMonth: billingPeriods.periodMonth,
+      dueDate: billingPeriods.dueDate,
     })
     .from(invoices)
     .innerJoin(
@@ -80,40 +129,39 @@ export async function lockOpenInvoices(
     .where(
       and(
         eq(invoices.tenantId, tenantId),
-        eq(invoices.studentId, studentId),
+        inArray(invoices.studentId, studentIds),
         inArray(invoices.status, OPEN),
         lt(billingPeriods.periodMonth, periodMonth),
       ),
     )
-    .orderBy(invoices.id)
-    .for('update', { of: invoices });
-  return rows
-    .map((r) => ({
-      id: r.id,
-      periodMonth: r.periodMonth,
-      remaining: Math.max(0, r.total - r.paid - r.carried),
-    }))
-    .filter((r) => r.remaining > 0);
-}
-
-/** Số dư sổ học viên: Σ(debit − credit); dương = nợ, âm = trả thừa. */
-export async function ledgerBalance(
-  t: Tx,
-  tenantId: string,
-  studentId: string,
-): Promise<number> {
-  const [r] = await t
+    .orderBy(invoices.id);
+  for (const r of await (lock ? q.for('update', { of: invoices }) : q)) {
+    const remaining = Math.max(0, r.total - r.paid - r.carried);
+    if (remaining > 0)
+      out.get(r.studentId)!.open.push({
+        id: r.id,
+        periodMonth: r.periodMonth,
+        remaining,
+        dueDate: r.oldest ?? r.dueDate,
+      });
+  }
+  const bal = await t
     .select({
-      n: sql<string>`coalesce(sum(${studentLedger.debit} - ${studentLedger.credit}), 0)::text`,
+      studentId: studentLedger.studentId,
+      n: sql<string>`sum(${studentLedger.debit} - ${studentLedger.credit})::text`,
     })
     .from(studentLedger)
     .where(
       and(
         eq(studentLedger.tenantId, tenantId),
-        eq(studentLedger.studentId, studentId),
+        inArray(studentLedger.studentId, studentIds),
       ),
-    );
-  return Number(r?.n ?? 0);
+    )
+    .groupBy(studentLedger.studentId);
+  for (const b of bal) out.get(b.studentId)!.balance = Number(b.n);
+  for (const s of out.values())
+    s.carry = s.balance + s.open.reduce((n, o) => n + o.remaining, 0);
+  return out;
 }
 
 /**
@@ -175,13 +223,15 @@ export async function loadPrevAdjustments(
   const oldStudents = [...new Set(old.map((o) => o.studentId))];
 
   // Dòng buổi đã phát hành, theo hóa đơn.
-  const issued = new Map<string, Map<string, number>>();
+  const issued = new Map<string, Map<string, IssuedSession>>();
   for (let i = 0; i < old.length; i += CHUNK) {
     const rows = await t
       .select({
         invoiceId: invoiceLines.invoiceId,
         sessionId: invoiceLines.sessionId,
         amount: invoiceLines.amount,
+        date: invoiceLines.sessionDate,
+        className: invoiceLines.className,
       })
       .from(invoiceLines)
       .where(
@@ -196,8 +246,12 @@ export async function loadPrevAdjustments(
         ),
       );
     for (const r of rows) {
-      const m = issued.get(r.invoiceId) ?? new Map<string, number>();
-      m.set(r.sessionId!, (m.get(r.sessionId!) ?? 0) + r.amount);
+      const m = issued.get(r.invoiceId) ?? new Map<string, IssuedSession>();
+      m.set(r.sessionId!, {
+        amount: (m.get(r.sessionId!)?.amount ?? 0) + r.amount,
+        date: r.date ?? '',
+        className: r.className ?? '',
+      });
       issued.set(r.invoiceId, m);
     }
   }
@@ -309,9 +363,33 @@ export async function loadPrevAdjustments(
     }
   }
 
+  // Buổi đã tính tiền ở hóa đơn cũ mà nay không còn (xóa hẳn) → điều chỉnh âm.
+  const issuedIds = [
+    ...new Set([...issued.values()].flatMap((m) => [...m.keys()])),
+  ];
+  const existing = new Set<string>();
+  for (let i = 0; i < issuedIds.length; i += CHUNK)
+    for (const r of await t
+      .select({ id: sessions.id })
+      .from(sessions)
+      .where(
+        and(
+          eq(sessions.tenantId, tenantId),
+          inArray(sessions.id, issuedIds.slice(i, i + CHUNK)),
+        ),
+      ))
+      existing.add(r.id);
+  const gone = new Set(issuedIds.filter((id) => !existing.has(id)));
+  const enrsByStudent = new Map<string, typeof enrs>();
+  for (const e of enrs)
+    enrsByStudent.set(e.studentId, [
+      ...(enrsByStudent.get(e.studentId) ?? []),
+      e,
+    ]);
+
   for (const o of old) {
     const recalc: RecalculatedSession[] = [];
-    for (const e of enrs.filter((x) => x.studentId === o.studentId)) {
+    for (const e of enrsByStudent.get(o.studentId) ?? []) {
       const c = classById.get(e.classId)!;
       const fee: ClassFee = {
         className: c.name,
@@ -339,9 +417,71 @@ export async function loadPrevAdjustments(
       issued.get(o.id) ?? new Map(),
       recalc,
       adjusted.get(o.studentId) ?? new Map(),
+      gone,
     );
     if (diffs.length)
       out.set(o.studentId, [...(out.get(o.studentId) ?? []), ...diffs]);
   }
   return out;
+}
+
+/** Σ các dòng KHÔNG phải `carry_over` của từng hóa đơn (phần phát sinh + điều chỉnh, không phụ thuộc xem trước chuyển kỳ). */
+export async function nonCarrySums(
+  t: Tx,
+  tenantId: string,
+  invoiceIds: string[],
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>(invoiceIds.map((id) => [id, 0]));
+  for (let i = 0; i < invoiceIds.length; i += CHUNK)
+    for (const r of await t
+      .select({
+        id: invoiceLines.invoiceId,
+        n: sql<string>`sum(${invoiceLines.amount})::text`,
+      })
+      .from(invoiceLines)
+      .where(
+        and(
+          eq(invoiceLines.tenantId, tenantId),
+          inArray(invoiceLines.invoiceId, invoiceIds.slice(i, i + CHUNK)),
+          ne(invoiceLines.kind, 'carry_over'),
+        ),
+      )
+      .groupBy(invoiceLines.invoiceId))
+      out.set(r.id, Number(r.n));
+  return out;
+}
+
+/** Thay dòng `carry_over` của BẢN NHÁP bằng số xem trước `carry` (0 = bỏ dòng). Gọi khi đã khóa hóa đơn. */
+export async function setCarryLine(
+  t: Tx,
+  tenantId: string,
+  invoiceId: string,
+  carry: number,
+): Promise<void> {
+  const where = and(
+    eq(invoiceLines.tenantId, tenantId),
+    eq(invoiceLines.invoiceId, invoiceId),
+  );
+  await t
+    .delete(invoiceLines)
+    .where(and(where, eq(invoiceLines.kind, 'carry_over')));
+  if (!carry) return;
+  const [m] = await t
+    .select({
+      max: sql<number>`coalesce(max(${invoiceLines.position}), 0)::int`,
+    })
+    .from(invoiceLines)
+    .where(where);
+  await t
+    .insert(invoiceLines)
+    .values(
+      newLine(
+        tenantId,
+        invoiceId,
+        (m?.max ?? 0) + 1,
+        'carry_over',
+        carry > 0 ? 'Nợ kỳ trước' : 'Trả thừa kỳ trước',
+        carry,
+      ),
+    );
 }

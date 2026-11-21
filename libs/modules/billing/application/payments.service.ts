@@ -52,10 +52,21 @@ export class PaymentsService {
   ): Promise<PaymentResult> {
     const { tenantId } = actor;
     const inv = await this.lockInvoice(tx, tenantId, invoiceId);
-    // Nợ của hóa đơn đã chuyển sang hóa đơn kỳ sau (S6-BE-03): thu ở hóa đơn sau, không thu hai lần.
-    if (!isPayable(inv.status) || inv.carriedAmount > 0)
+    // Hóa đơn đã chuyển nợ một phần vẫn thu được phần còn lại (total − paid − carried); hết còn nợ thì không nhận thêm.
+    const remaining = remainingOf(
+      inv.totalAmount,
+      inv.paidAmount,
+      inv.carriedAmount,
+    );
+    if (!isPayable(inv.status) || (inv.carriedAmount > 0 && remaining === 0))
       throw new AppException('INVOICE_NOT_PAYABLE');
-
+    // Ràng buộc DB: đã thu + đã chuyển ≤ tổng; kiểm trước để trả 422 thay vì lỗi 23514.
+    if (inv.carriedAmount > 0 && body.amount > remaining)
+      throw new AppException('VALIDATION_FAILED', undefined, {
+        amount: [
+          'Hóa đơn đã chuyển một phần nợ sang kỳ sau: chỉ thu tối đa phần còn nợ.',
+        ],
+      });
     const tz = await this.timezone(tx, tenantId);
     const today = localDate(new Date(), tz);
     const paidOn = body.paidOn ?? today;

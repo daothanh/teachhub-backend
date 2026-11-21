@@ -9,19 +9,23 @@
 // D4 Học viên `paused`: vẫn tính buổi theo buổi đã dạy, không thu học phí tháng/đợt trọn khóa; `left` hoặc ghi danh rời
 //    lớp trước kỳ: không tính.
 // D5 Học viên không có dòng nào: không có hóa đơn.
-// D6 Số dư chuyển kỳ (S6-BE-03, US-7.6): MÔ HÌNH "KẾT CHUYỂN HẲN QUA SỔ HỌC VIÊN" (ít rủi ro sai tiền nhất, giữ cách ghi thanh toán
-//    theo hóa đơn). Khi tạo bản nháp của học viên có dòng tiền: (a) khóa các hóa đơn đã phát hành chưa thu đủ của kỳ trước
-//    (issued/partially_paid, không nháp/hủy), ghi sổ `unpaid_carried` (nợ) bằng phần còn nợ và cộng vào `invoices.carried_amount`
-//    của hóa đơn cũ; (b) số dư sổ = Σ(debit − credit) gồm nợ vừa kết chuyển và tiền trả thừa; dòng `carry_over` = số dư đó (dương
-//    "Nợ kỳ trước", âm "Trả thừa kỳ trước"); (c) tổng = max(0, phát sinh + điều chỉnh + số dư), phần âm ở lại sổ (AC4), hóa đơn hấp
-//    thụ được bao nhiêu thì ghi `applied_to_invoice` bấy nhiêu. Hệ quả: `remainingAmount` hóa đơn cũ = tổng − đã thu − carried_amount
-//    nên công nợ T11 chỉ tính ở hóa đơn mới (không đếm hai lần, nợ không chuyển lần hai), hóa đơn cũ không nhận thêm thanh toán
-//    (409 INVOICE_NOT_PAYABLE; thu ở hóa đơn mới) và không hủy được hóa đơn đã chuyển nợ/đang mang dòng chuyển kỳ.
-//    Học viên không có dòng tiền kỳ đó (D5) thì không có hóa đơn mới nên nợ vẫn nằm ở hóa đơn cũ. Phần dư âm không ghi vào
-//    `clamped_amount` (đã ở sổ), nên `adjust` không hấp thụ lại lần hai.
-// D7 Điều chỉnh kỳ trước (US-3.3 AC4): điểm danh/buổi sửa sau khi hóa đơn kỳ cũ (12 tháng gần nhất) đã phát hành → tính lại bằng
-//    cùng calculator và so với dòng buổi đã phát hành; chênh lệch (buổi mới tính / bỏ tính) thành dòng `prev_adjustment` ở bản
-//    nháp mới, trừ phần đã điều chỉnh ở các hóa đơn sau; hóa đơn cũ không đổi. Chỉ lớp theo buổi (tháng/trọn khóa không dùng điểm danh).
+// D6 Số dư chuyển kỳ (S6-BE-03, US-7.6): KẾT CHUYỂN TẠI THỜI ĐIỂM PHÁT HÀNH qua sổ học viên (Coordinator chốt; giữ cách ghi thanh
+//    toán theo hóa đơn, ít rủi ro sai tiền nhất). `billing.close` chỉ tạo bản nháp có dòng `carry_over` XEM TRƯỚC = Σ còn nợ các
+//    hóa đơn kỳ trước đã phát hành (issued/partially_paid, không nháp/hủy) + số dư sổ (dương nợ, âm trả thừa): không ghi sổ, không
+//    đụng hóa đơn cũ, nên hóa đơn cũ vẫn thu được cho tới khi hóa đơn mới được phát hành. Dòng xem trước được tính lại khi đọc
+//    nháp (không ghi), khi `adjust` (ghi) và khi phát hành; tổng nháp = max(0, Σ dòng). `issue()` (một giao dịch) khóa hóa đơn cũ
+//    còn nợ `ORDER BY id FOR UPDATE`, tính lại số dư dưới khóa, ghi `unpaid_carried` (nợ, gắn hóa đơn cũ) + `invoices.carried_amount`
+//    của hóa đơn cũ, đặt dòng `carry_over` và tổng chốt, ghi `applied_to_invoice` (đối ứng, gắn hóa đơn mới) và
+//    `oldest_due_date` = hạn cũ nhất của các hóa đơn nguồn (tuổi nợ T11 không bị "làm mới" khi chuyển kỳ). Tổng ≤ 0: không phát hành
+//    (ZERO_AMOUNT), không kết chuyển gì, nợ/dư giữ nguyên chỗ cũ (US-7.6 AC4). Hệ quả: `remainingAmount` hóa đơn cũ = tổng − đã thu −
+//    carried_amount nên công nợ chỉ tính ở hóa đơn mới (không đếm hai lần, nợ không chuyển lần hai); hóa đơn cũ thu được phần còn nợ,
+//    hết còn nợ thì 409; không hủy được hóa đơn đã chuyển nợ hoặc mang dòng carry_over ≠ 0. Học viên không có dòng tiền kỳ đó (D5)
+//    không có hóa đơn mới nên nợ vẫn ở hóa đơn cũ. Bất biến: Σ(dòng ngoài carry_over của hóa đơn đã phát hành chưa hủy) − Σ đã thu =
+//    Σ remainingAmount + số dư sổ. shortcut: bản nháp 0 đ không bao giờ phát hành nên số dư trả thừa không bị trừ vào phát sinh của kỳ đó.
+// D7 Điều chỉnh kỳ trước (US-3.3 AC4): điểm danh/buổi sửa sau khi hóa đơn kỳ cũ (12 tháng gần nhất, chưa hủy) đã phát hành → tính lại
+//    bằng cùng calculator và so với dòng buổi đã phát hành; chênh lệch (buổi mới tính / bỏ tính / bị hủy / bị xóa) thành dòng
+//    `prev_adjustment` ở bản nháp mới, trừ phần đã điều chỉnh ở các hóa đơn sau; hóa đơn cũ không đổi. Chỉ lớp theo buổi. Giáo viên thấy
+//    số tiền chênh ở dòng trong nháp. shortcut: chưa có thông báo riêng "đã điều chỉnh".
 import {
   type AttendanceStatus,
   calculateInvoice,

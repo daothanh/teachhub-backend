@@ -23,7 +23,6 @@ import type {
   ReceivablesQuery,
   StudentReceivableHistory,
 } from '../http/receivables.schemas.js';
-import { ledgerBalance } from './carry-over.queries.js';
 import { toPayment } from './payments.service.js';
 
 const DEFAULT_TZ = 'Asia/Ho_Chi_Minh';
@@ -58,15 +57,34 @@ export class ReceivablesService {
     ];
     // Một dòng mỗi học viên còn nợ; tuổi nợ tính từ hạn của hóa đơn cũ nhất còn nợ (múi giờ tenant).
     const base = sql`
-      with debt as (
+      with open_inv as (
         select i.student_id,
                sum(i.total_amount - i.paid_amount - i.carried_amount)::bigint as amount,
                count(*)::int as invoice_count,
-               min(p.due_date) as oldest_due
+               min(coalesce(i.oldest_due_date, p.due_date)) as due
           from invoices i join billing_periods p on p.tenant_id = i.tenant_id and p.id = i.period_id
          where i.tenant_id = ${tenantId}::uuid and i.status in ${OPEN}
            and i.total_amount - i.paid_amount - i.carried_amount > 0
          group by i.student_id
+      ), led as (
+        select l.student_id, sum(l.debit - l.credit)::bigint as balance
+          from student_ledger l where l.tenant_id = ${tenantId}::uuid
+         group by l.student_id having sum(l.debit - l.credit) > 0
+      ), led_due as (
+        select l.student_id, min(coalesce(i.oldest_due_date, p.due_date)) as due
+          from student_ledger l
+          join invoices i on i.tenant_id = l.tenant_id and i.id = l.invoice_id
+          join billing_periods p on p.tenant_id = i.tenant_id and p.id = i.period_id
+         where l.tenant_id = ${tenantId}::uuid and l.debit > 0
+         group by l.student_id
+      ), debt as (
+        -- Nợ = Σ còn nợ hóa đơn + nợ ở sổ (số dư dương); học viên chỉ có nợ ở sổ vẫn có dòng (tuổi nợ theo hạn hóa đơn gắn bút toán).
+        select coalesce(o.student_id, g.student_id) as student_id,
+               coalesce(o.amount, 0) + coalesce(g.balance, 0) as amount,
+               greatest(1, coalesce(o.invoice_count, 0))::int as invoice_count,
+               coalesce(least(o.due, case when g.balance is not null then d.due end), ${today}::date) as oldest_due
+          from open_inv o full join led g on g.student_id = o.student_id
+          left join led_due d on d.student_id = coalesce(o.student_id, g.student_id)
       ), base as (
         select d.student_id, s.full_name, d.amount, d.invoice_count, d.oldest_due::text as oldest_due,
                greatest(0, ${today}::date - d.oldest_due)::int as overdue,
@@ -203,9 +221,12 @@ export class ReceivablesService {
       r.i.status === 'void'
         ? 0
         : remainingOf(r.i.totalAmount, r.i.paidAmount, r.i.carriedAmount);
-    const outstanding = invRows
-      .filter((r) => OPEN_STATUSES.includes(r.i.status))
-      .reduce((n, r) => n + remaining(r), 0);
+    const { balance } = await this.ledgerStats(tx, tenantId, studentId);
+    // Nợ = Σ còn nợ hóa đơn + nợ ở sổ (số dư dương), khớp `GET /receivables`.
+    const outstanding =
+      invRows
+        .filter((r) => OPEN_STATUSES.includes(r.i.status))
+        .reduce((n, r) => n + remaining(r), 0) + Math.max(0, balance);
     const code = new Map(invRows.map((r) => [r.i.id, r.i.code]));
 
     const payRows = invRows.length
@@ -250,7 +271,7 @@ export class ReceivablesService {
       studentId,
       studentName: stu.fullName,
       outstandingAmount: outstanding,
-      ledgerBalanceAmount: await ledgerBalance(tx, tenantId, studentId),
+      ledgerBalanceAmount: balance,
       dunningEnabled: true,
       enrollments: enr.map((e) => ({ ...e, dunningEnabled: true })),
       invoices: invRows.slice(0, 24).map((r) => ({
@@ -293,11 +314,7 @@ export class ReceivablesService {
       .orderBy(desc(studentLedger.createdAt), desc(studentLedger.id))
       .limit(limit)
       .offset(offset);
-    const [c] = await tx
-      .select({ n: sql<number>`count(*)::int` })
-      .from(studentLedger)
-      .where(where);
-    const balance = await ledgerBalance(tx, tenantId, studentId);
+    const { count, balance } = await this.ledgerStats(tx, tenantId, studentId);
     return {
       studentId,
       studentName: stu.fullName,
@@ -315,10 +332,27 @@ export class ReceivablesService {
           paymentId: r.paymentId,
           createdAt: formatInZone(r.createdAt, tz),
         })),
-        c?.n ?? 0,
+        count,
         q,
       ),
     };
+  }
+
+  /** Số bút toán và số dư sổ trong một truy vấn. */
+  private async ledgerStats(tx: Tx, tenantId: string, studentId: string) {
+    const [r] = await tx
+      .select({
+        n: sql<number>`count(*)::int`,
+        balance: sql<string>`coalesce(sum(${studentLedger.debit} - ${studentLedger.credit}), 0)::text`,
+      })
+      .from(studentLedger)
+      .where(
+        and(
+          eq(studentLedger.tenantId, tenantId),
+          eq(studentLedger.studentId, studentId),
+        ),
+      );
+    return { count: r?.n ?? 0, balance: Number(r?.balance ?? 0) };
   }
 
   private async student(tx: Tx, tenantId: string, id: string) {

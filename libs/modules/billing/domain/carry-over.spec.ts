@@ -10,7 +10,7 @@ import { calculateInvoice } from './invoice-calculator.js';
 // Test vector US-7.6 AC1–AC4, US-3.3 AC4 (S6-BE-03). Mô hình: xem đầu carry-over.ts.
 describe('planCarryOver (US-7.6)', () => {
   it('AC1: nợ 200.000 + phát sinh 1.200.000 → dòng nợ 200.000, tổng 1.400.000, sổ về 0', () => {
-    expect(planCarryOver(1_200_000, 200_000)).toEqual({
+    expect(planCarryOver(1_200_000, 200_000)).toMatchObject({
       total: 1_400_000,
       carryOver: 200_000,
       applied: 200_000,
@@ -18,31 +18,32 @@ describe('planCarryOver (US-7.6)', () => {
   });
 
   it('AC2: trả thừa 50.000 → dòng trừ 50.000, tổng 1.150.000, sổ về 0', () => {
-    expect(planCarryOver(1_200_000, -50_000)).toEqual({
+    expect(planCarryOver(1_200_000, -50_000)).toMatchObject({
       total: 1_150_000,
       carryOver: -50_000,
       applied: -50_000,
     });
   });
 
-  it('AC4: trả thừa 300.000 > phát sinh 100.000 → hóa đơn 0 đ, 200.000 ở lại sổ (hấp thụ 100.000)', () => {
-    expect(planCarryOver(100_000, -300_000)).toEqual({
+  it('AC4: trả thừa 300.000 > phát sinh 100.000 → hóa đơn 0 đ, không phát hành, không kết chuyển (dư ở nguyên sổ)', () => {
+    expect(planCarryOver(100_000, -300_000)).toMatchObject({
       total: 0,
       carryOver: -300_000,
-      applied: -100_000,
+      issuable: false,
+      applied: 0,
     });
   });
 
-  it('AC4 ca biên: trả thừa đúng bằng phát sinh → 0 đ, sổ về 0', () => {
-    expect(planCarryOver(100_000, -100_000)).toEqual({
+  it('AC4 ca biên: trả thừa đúng bằng phát sinh → 0 đ, không phát hành', () => {
+    expect(planCarryOver(100_000, -100_000)).toMatchObject({
       total: 0,
       carryOver: -100_000,
-      applied: -100_000,
+      applied: 0,
     });
   });
 
   it('AC4 ca biên: hóa đơn 0 đ (phát sinh 0) vẫn giữ nguyên số dư trả thừa, không hấp thụ gì', () => {
-    expect(planCarryOver(0, -80_000)).toEqual({
+    expect(planCarryOver(0, -80_000)).toMatchObject({
       total: 0,
       carryOver: -80_000,
       applied: 0,
@@ -50,19 +51,19 @@ describe('planCarryOver (US-7.6)', () => {
   });
 
   it('không có số dư: không có dòng, không bút toán', () => {
-    expect(planCarryOver(900_000, 0)).toEqual({
+    expect(planCarryOver(900_000, 0)).toMatchObject({
       total: 900_000,
       carryOver: 0,
       applied: 0,
     });
   });
 
-  it('điều chỉnh kỳ trước âm làm tổng âm: phần dư vào sổ (ghi có), không mất', () => {
+  it('điều chỉnh kỳ trước âm làm tổng ≤ 0 → 0 đ, không phát hành', () => {
     // phát sinh 0 + chênh −50.000, số dư 0 → sổ có 50.000 trả thừa
-    expect(planCarryOver(-50_000, 0)).toEqual({
+    expect(planCarryOver(-50_000, 0)).toMatchObject({
       total: 0,
       carryOver: 0,
-      applied: 50_000,
+      applied: 0,
     });
   });
 
@@ -84,6 +85,13 @@ describe('planCarryOver (US-7.6)', () => {
 });
 
 describe('diffSessionCharges (US-3.3 AC4)', () => {
+  const iss = (...e: [string, number][]) =>
+    new Map(
+      e.map(([id, amount]) => [
+        id,
+        { amount, date: '2026-11-05', className: 'Toán 9A' },
+      ]),
+    );
   const rc = (id: string, amount: number) => ({
     sessionId: id,
     date: '2026-11-05',
@@ -93,7 +101,7 @@ describe('diffSessionCharges (US-3.3 AC4)', () => {
 
   it('buổi trước không tính, nay tính (sửa vắng → có mặt) → +tiền buổi', () => {
     const d = diffSessionCharges(
-      new Map([['s1', 0]]),
+      iss(['s1', 0]),
       [rc('s1', 200_000)],
       new Map(),
     );
@@ -109,7 +117,7 @@ describe('diffSessionCharges (US-3.3 AC4)', () => {
 
   it('buổi trước tính, nay không (có mặt → vắng có phép không tính) → −tiền đã phát hành', () => {
     const d = diffSessionCharges(
-      new Map([['s1', 200_000]]),
+      iss(['s1', 200_000]),
       [rc('s1', 0)],
       new Map(),
     );
@@ -118,25 +126,21 @@ describe('diffSessionCharges (US-3.3 AC4)', () => {
 
   it('không đổi hoặc chỉ đổi đơn giá (cùng tính) → không chênh lệch', () => {
     expect(
-      diffSessionCharges(
-        new Map([['s1', 200_000]]),
-        [rc('s1', 250_000)],
-        new Map(),
-      ),
+      diffSessionCharges(iss(['s1', 200_000]), [rc('s1', 250_000)], new Map()),
     ).toEqual([]);
   });
 
   it('đã điều chỉnh ở hóa đơn sau thì không điều chỉnh lại; sửa về như cũ thì điều chỉnh ngược', () => {
     expect(
       diffSessionCharges(
-        new Map([['s1', 0]]),
+        iss(['s1', 0]),
         [rc('s1', 200_000)],
         new Map([['s1', 200_000]]),
       ),
     ).toEqual([]);
     expect(
       diffSessionCharges(
-        new Map([['s1', 0]]),
+        iss(['s1', 0]),
         [rc('s1', 0)],
         new Map([['s1', 200_000]]),
       ).map((x) => x.amount),
@@ -147,6 +151,34 @@ describe('diffSessionCharges (US-3.3 AC4)', () => {
     expect(
       diffSessionCharges(new Map(), [rc('s9', 150_000)], new Map()),
     ).toHaveLength(1);
+  });
+
+  it('buổi đã tính ở hóa đơn cũ nay bị hủy → dòng âm; buổi bị xóa hẳn → dòng âm; đã điều chỉnh rồi thì không lặp', () => {
+    expect(
+      diffSessionCharges(iss(['s1', 200_000]), [rc('s1', 0)], new Map()).map(
+        (x) => x.amount,
+      ),
+    ).toEqual([-200_000]);
+    const gone = new Set(['s2']);
+    const d = diffSessionCharges(iss(['s2', 150_000]), [], new Map(), gone);
+    expect(d).toEqual([
+      {
+        sessionId: 's2',
+        date: '2026-11-05',
+        className: 'Toán 9A',
+        amount: -150_000,
+      },
+    ]);
+    expect(
+      diffSessionCharges(
+        iss(['s2', 150_000]),
+        [],
+        new Map([['s2', -150_000]]),
+        gone,
+      ),
+    ).toEqual([]);
+    // không còn trong tính lại nhưng KHÔNG phải bị xóa (đổi lớp, đổi kiểu học phí): không điều chỉnh
+    expect(diffSessionCharges(iss(['s3', 150_000]), [], new Map())).toEqual([]);
   });
 
   it('mô tả ghi rõ buổi, lớp và số tiền chênh', () => {

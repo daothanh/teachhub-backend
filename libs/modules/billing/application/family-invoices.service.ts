@@ -228,6 +228,7 @@ export class FamilyInvoicesService {
       periodMonth: r.period_month,
       totalAmount: Number(r.total_amount),
       paidAmount: Number(r.paid_amount),
+      carriedAmount: Number(r.carried_amount),
       remainingAmount:
         r.status === 'void'
           ? 0

@@ -22,7 +22,6 @@ import {
   invoices,
   recordOutboxEvent,
   sessions,
-  studentLedger,
   students,
   tenants,
   TxService,
@@ -44,9 +43,9 @@ import {
 } from '../domain/carry-over.js';
 import type { FeeType } from '../domain/invoice-calculator.js';
 import {
-  ledgerBalance,
+  loadCarryState,
   loadPrevAdjustments,
-  lockOpenInvoices,
+  newLine,
 } from './carry-over.queries.js';
 
 export const JOB_BILLING_CLOSE = 'billing.close';
@@ -60,9 +59,6 @@ export interface BillingDraftsReadyPayload extends Record<string, unknown> {
 }
 
 const LINE_CHUNK = 1000;
-/** '2026-12-01' → '12/2026'. */
-const monthLabel = (month: string) =>
-  `${month.slice(5, 7)}/${month.slice(0, 4)}`;
 /** Mã lỗi Postgres (vd. 23505) của lỗi gốc, hoặc tên lỗi: không log message (có thể chứa dữ liệu học viên). */
 const errorCode = (e: unknown): string => {
   const base = e instanceof Error ? (e.cause ?? e) : e;
@@ -355,15 +351,23 @@ export class BillingCloseJob {
     let draftCount = 0;
     let draftTotalAmount = 0;
     const lineRows: (typeof invoiceLines.$inferInsert)[] = [];
+    const todo = [...drafts.values()].filter((d) => !invoiced.has(d.studentId));
+    const todoIds = todo.map((d) => d.studentId);
     const prevAdj = await loadPrevAdjustments(
       t,
       tenantId,
       period.periodMonth,
-      [...drafts.keys()].filter((id) => !invoiced.has(id)),
+      todoIds,
       classById,
     );
-    for (const d of drafts.values()) {
-      if (invoiced.has(d.studentId)) continue;
+    // Dòng `carry_over` ở bản nháp chỉ là XEM TRƯỚC: không ghi sổ, không đụng hóa đơn cũ. Kết chuyển thật ở `issue()` (D6).
+    const carry = await loadCarryState(
+      t,
+      tenantId,
+      todoIds,
+      period.periodMonth,
+    );
+    for (const d of todo) {
       if (d.total > MAX_VND) {
         // Một hóa đơn vượt trần không được làm hỏng cả tenant mỗi đêm: bỏ qua, chỉ log mã lỗi và id học viên.
         this.log.error(
@@ -371,20 +375,11 @@ export class BillingCloseJob {
         );
         continue;
       }
-      // Số dư chuyển kỳ (US-7.6): khóa các hóa đơn cũ còn nợ rồi đọc số dư sổ; ghi sổ chỉ sau khi chắc chắn tạo được bản nháp.
-      const open = await lockOpenInvoices(
-        t,
-        tenantId,
-        d.studentId,
-        period.periodMonth,
-      );
       const adjustments = prevAdj.get(d.studentId) ?? [];
-      const balance =
-        (await ledgerBalance(t, tenantId, d.studentId)) +
-        open.reduce((n, o) => n + o.remaining, 0);
+      const preview = carry.get(d.studentId)?.carry ?? 0;
       const plan = planCarryOver(
         d.total + adjustments.reduce((n, a) => n + a.amount, 0),
-        balance,
+        preview,
       );
       if (plan.total > MAX_VND) {
         this.log.error(
@@ -403,8 +398,7 @@ export class BillingCloseJob {
           periodId: bp.id,
           studentId: d.studentId,
           totalAmount: plan.total,
-          // Phần dư âm nằm ở sổ học viên (chuyển kỳ sau), không ghi ở đây: `adjust` coi total − clamped là tổng chưa cắt.
-          clampedAmount: 0,
+          clampedAmount: Math.max(0, -plan.sum),
           installmentNo: course?.no ?? null,
           installmentCount: course?.count ?? null,
         })
@@ -413,69 +407,28 @@ export class BillingCloseJob {
       if (!row) continue; // đã có bản nháp (chạy chồng): bỏ qua
       draftCount += 1;
       draftTotalAmount += plan.total;
-      for (const l of d.lines) lineRows.push({ ...l, invoiceId: id });
       let position = d.lines.length;
-      const line = (
+      for (const l of d.lines) lineRows.push({ ...l, invoiceId: id });
+      const extra = (
         kind: string,
         description: string,
         amount: number,
-        extra: Partial<typeof invoiceLines.$inferInsert> = {},
+        more: Partial<typeof invoiceLines.$inferInsert> = {},
       ) =>
-        lineRows.push({
-          id: uuidv7(),
-          tenantId,
-          invoiceId: id,
-          position: ++position,
-          kind,
-          description,
-          amount,
-          charged: true,
-          notChargedReason: null,
-          sessionId: null,
-          sessionDate: null,
-          className: null,
-          adjustmentReason: null,
-          ...extra,
-        });
-      if (plan.carryOver)
-        line(
+        lineRows.push(
+          newLine(tenantId, id, ++position, kind, description, amount, more),
+        );
+      if (preview)
+        extra(
           'carry_over',
-          plan.carryOver > 0 ? 'Nợ kỳ trước' : 'Trả thừa kỳ trước',
-          plan.carryOver,
+          preview > 0 ? 'Nợ kỳ trước' : 'Trả thừa kỳ trước',
+          preview,
         );
       for (const a of adjustments)
-        line('prev_adjustment', prevAdjustmentDescription(a), a.amount, {
+        extra('prev_adjustment', prevAdjustmentDescription(a), a.amount, {
           sessionId: a.sessionId,
           sessionDate: a.date || null,
           className: a.className,
-        });
-      for (const o of open) {
-        await t.insert(studentLedger).values({
-          id: uuidv7(),
-          tenantId,
-          studentId: d.studentId,
-          invoiceId: o.id,
-          kind: 'unpaid_carried',
-          debit: o.remaining,
-          description: `Nợ kỳ trước (tháng ${monthLabel(o.periodMonth)})`,
-        });
-        await t
-          .update(invoices)
-          .set({
-            carriedAmount: sql`${invoices.carriedAmount} + ${o.remaining}`,
-          })
-          .where(and(eq(invoices.tenantId, tenantId), eq(invoices.id, o.id)));
-      }
-      if (plan.applied)
-        await t.insert(studentLedger).values({
-          id: uuidv7(),
-          tenantId,
-          studentId: d.studentId,
-          invoiceId: id,
-          kind: 'applied_to_invoice',
-          debit: plan.applied < 0 ? -plan.applied : 0,
-          credit: plan.applied > 0 ? plan.applied : 0,
-          description: `Số dư chuyển vào hóa đơn kỳ ${monthLabel(period.periodMonth)}`,
         });
     }
     for (let i = 0; i < lineRows.length; i += LINE_CHUNK)

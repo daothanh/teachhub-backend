@@ -114,6 +114,8 @@ export const invoices = pgTable(
     paidAmount: bigint({ mode: 'number' }).notNull().default(0),
     /** Phần còn nợ đã chuyển sang hóa đơn kỳ sau (S6-BE-03) = Σ(debit − credit) `unpaid_carried` của hóa đơn trong sổ (constraint trigger); không còn tính vào công nợ ở đây. */
     carriedAmount: bigint({ mode: 'number' }).notNull().default(0),
+    /** Hạn cũ nhất của các khoản nợ được chuyển vào hóa đơn này lúc phát hành (tuổi nợ T11); null = không có kết chuyển. */
+    oldestDueDate: date({ mode: 'string' }),
     installmentNo: integer(),
     installmentCount: integer(),
     transferNote: text(),
@@ -190,8 +192,14 @@ export const invoices = pgTable(
     ),
     check(
       'invoices_carried_amount_check',
-      sql`${t.carriedAmount} >= 0 and ${t.carriedAmount} <= ${t.totalAmount}`,
+      sql`${t.carriedAmount} >= 0 and ${t.carriedAmount} <= ${t.totalAmount}
+        and (${t.carriedAmount} = 0 or ${t.paidAmount} + ${t.carriedAmount} <= ${t.totalAmount})
+        and (${t.status} <> 'draft' or ${t.carriedAmount} = 0)`,
     ),
+    // Công nợ T11: chỉ quét hóa đơn còn mở của học viên.
+    index('invoices_debt_idx')
+      .on(t.tenantId, t.studentId)
+      .where(sql`${t.status} in ('issued', 'partially_paid', 'pending_confirmation')`),
     // Trạng thái khớp số đã thu; `pending_confirmation` (US-7.7, chưa làm) chưa thu đủ. paid_amount = Σ payments chưa hủy do constraint trigger.
     check(
       'invoices_paid_status_check',

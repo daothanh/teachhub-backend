@@ -12893,6 +12893,12 @@
             "maximum": 100000000000,
             "description": "Σ thanh toán chưa hủy của hóa đơn (Sprint 6); 0 khi chưa có. Có thể lớn hơn `totalAmount` khi trả thừa (phần thừa vào sổ học viên, US-7.6)"
           },
+          "carriedAmount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "Phần còn nợ của hóa đơn này đã chuyển sang hóa đơn kỳ sau lúc phát hành hóa đơn đó (dòng `carry_over` ở hóa đơn sau); 0 nếu chưa chuyển. Phần này không còn tính vào `remainingAmount`"
+          },
           "remainingAmount": {
             "type": "integer",
             "minimum": 0,
@@ -13002,6 +13008,7 @@
           "studentName",
           "totalAmount",
           "paidAmount",
+          "carriedAmount",
           "remainingAmount",
           "dueDate",
           "issuedAt",
@@ -13030,6 +13037,7 @@
           "studentName": "Nguyễn Minh Anh",
           "totalAmount": 150000,
           "paidAmount": 0,
+          "carriedAmount": 0,
           "remainingAmount": 150000,
           "dueDate": "2027-01-10",
           "issuedAt": null,
@@ -13358,6 +13366,12 @@
             "maximum": 100000000000,
             "description": "Σ thanh toán chưa hủy (Sprint 6); 0 khi chưa có. Có thể lớn hơn `totalAmount` khi trả thừa"
           },
+          "carriedAmount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "Phần còn nợ đã chuyển sang hóa đơn kỳ sau; 0 nếu chưa chuyển. Không còn tính vào `remainingAmount`"
+          },
           "remainingAmount": {
             "type": "integer",
             "minimum": 0,
@@ -13385,6 +13399,7 @@
           "periodMonth",
           "totalAmount",
           "paidAmount",
+          "carriedAmount",
           "remainingAmount",
           "dueDate",
           "issuedAt"
@@ -13400,6 +13415,7 @@
           "periodMonth": "2026-12-01",
           "totalAmount": 1200000,
           "paidAmount": 0,
+          "carriedAmount": 0,
           "remainingAmount": 1200000,
           "dueDate": "2027-01-10",
           "issuedAt": "2027-01-02T09:00:00+07:00"
@@ -13456,6 +13472,12 @@
             "minimum": 0,
             "maximum": 100000000000,
             "description": "Σ thanh toán chưa hủy (Sprint 6); 0 khi chưa có. Có thể lớn hơn `totalAmount` khi trả thừa"
+          },
+          "carriedAmount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "Phần còn nợ đã chuyển sang hóa đơn kỳ sau; 0 nếu chưa chuyển. Không còn tính vào `remainingAmount`"
           },
           "remainingAmount": {
             "type": "integer",
@@ -13530,6 +13552,7 @@
           "periodMonth",
           "totalAmount",
           "paidAmount",
+          "carriedAmount",
           "remainingAmount",
           "dueDate",
           "issuedAt",
