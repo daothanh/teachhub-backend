@@ -1587,4 +1587,17 @@ describe('carry-over: chuyển kỳ lúc phát hành, sổ học viên, công n�
       await app.end();
     }
   });
+  // Chạy cuối file: toàn bộ dữ liệu chuyển kỳ/trả thừa/hủy ở trên phải qua đối soát (S6-BE-06), không lệch giả.
+  it('đối soát hằng đêm không báo lệch trên dữ liệu chuyển kỳ', async () => {
+    const schema = await import('../libs/db/src/schema/index.js');
+    const { TxService } = await import('../libs/db/src/tx.service.js');
+    const { JobRuns } = await import('../libs/infra/src/job-runs.js');
+    const { BillingReconcileJob } =
+      await import('../libs/modules/billing/application/billing-reconcile.job.js');
+    const tx = new TxService(drizzle(pool, { schema, casing: 'snake_case' }));
+    const reconcile = new BillingReconcileJob(tx, new JobRuns(tx), {
+      get: () => undefined,
+    } as never);
+    expect(await reconcile.run()).toBe(0);
+  });
 });

@@ -7,9 +7,11 @@ import {
 } from '@teachhub/infra';
 import {
   BillingCloseJob,
+  BillingReconcileJob,
   DunningJob,
   JOB_BILLING_CLOSE,
   JOB_BILLING_DUNNING,
+  JOB_BILLING_RECONCILE,
 } from '@teachhub/modules/billing';
 import {
   JOB_PURGE_STALE_DEVICES,
@@ -34,6 +36,7 @@ export class CronProcessor
     @InjectQueue(CRON_QUEUE) private readonly queue: Queue,
     private readonly generate: GenerateSessionsJob,
     private readonly billingClose: BillingCloseJob,
+    private readonly billingReconcile: BillingReconcileJob,
     private readonly dunning: DunningJob,
     private readonly purge: PurgeIdempotencyKeysJob,
     private readonly purgeDevices: PurgeStaleDevicesJob,
@@ -66,6 +69,11 @@ export class CronProcessor
       { name: JOB_BILLING_DUNNING, opts },
     );
     await this.queue.upsertJobScheduler(
+      JOB_BILLING_RECONCILE,
+      { pattern: '0 3 * * *', tz: TZ },
+      { name: JOB_BILLING_RECONCILE, opts },
+    );
+    await this.queue.upsertJobScheduler(
       JOB_PURGE_IDEMPOTENCY,
       { pattern: '30 1 * * *', tz: TZ },
       { name: JOB_PURGE_IDEMPOTENCY, opts },
@@ -84,6 +92,8 @@ export class CronProcessor
       case JOB_BILLING_CLOSE:
         // Mốc thời gian của job cố định qua các lần BullMQ thử lại: kỳ được chọn không đổi giữa lần chạy và lần thử lại.
         return this.billingClose.run(new Date(job.timestamp));
+      case JOB_BILLING_RECONCILE:
+        return this.billingReconcile.run();
       case JOB_BILLING_DUNNING:
         // Giờ chạy thật, không `job.timestamp`: lần BullMQ thử lại muộn không được coi là còn trong khung giờ gửi.
         return this.dunning.run(new Date());
