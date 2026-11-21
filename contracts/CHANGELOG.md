@@ -2,6 +2,14 @@
 
 `contracts/openapi.json` sinh từ schema zod bằng `pnpm openapi:gen`; file này ghi endpoint thêm mới theo sprint. Chỉ thêm, không đổi endpoint cũ (CI chặn bằng `oasdiff`).
 
+## Ngoại lệ một lần: hợp nhất thông báo và not_marked
+
+Hai thay đổi `oasdiff breaking` báo ERR, được Owner/TL chấp nhận MỘT LẦN vì chưa có bản app nào phát hành ra ngoài (xem "Đã chốt khi duyệt" ở Sprint 7). Sau PR này mọi thay đổi lại phải sạch `oasdiff` mà không cần ngoại lệ.
+
+- `Notification` (`GET /notifications`): `oneOf` thêm 7 loại, payload theo schema zod sẵn có: `schedule_changed`, `billing_ready`, `invoice_issued`, `payment_recorded`, `payment_reminder`, `subscription_expiring` (payload `{ offsetDays: 7|1, currentPeriodEnd }`), `subscription_activated` (payload `{ source: bank_transfer, currentPeriodEnd }`). `notificationTypeSchema` thêm hai loại subscription. Client vẫn bỏ qua `type` lạ.
+- `SessionNotChargedReason` thêm `not_marked` (issue #179). Server cài đặt thật: buổi theo buổi còn `planned` lúc chốt (chưa điểm danh) nay là dòng 0 đ `charged = false`, `notChargedReason = not_marked` (trước: `charged = true`, 0 đ). Migration `0033_billing_not_marked` nới CHECK `invoice_lines_not_charged_reason_check`; hóa đơn đã lập trước đó giữ nguyên (chưa có dữ liệu thật). Tổng tiền không đổi.
+- Cơ chế bỏ qua: `contracts/oasdiff-ignore.txt` dùng với `oasdiff breaking --err-ignore` (v1.38.0), mỗi dòng `METHOD PATH <đúng văn bản lỗi>`, chỉ gồm 4 lỗi của thay đổi này (3 `response-property-enum-value-added` ở `GET /v1/invoices/{id}`, `POST /v1/invoices/{id}/adjustments`, `POST /v1/invoices/{id}/void` và 1 `response-property-one-of-added` ở `GET /v1/notifications`). Job `openapi-breaking` trong `.github/workflows/ci.yml` tự thêm `--err-ignore` khi file tồn tại. CI so với `contracts/openapi.json` của nhánh đích, nên chỉ PR này cần file. **Phải XÓA `contracts/oasdiff-ignore.txt` (và có thể bỏ nhánh `--err-ignore` trong ci.yml) ở PR kế tiếp**: sau khi merge, nhánh đích đã chứa thay đổi nên không còn lỗi; file không bị xóa thì lọc lỏng các lỗi sau này chỉ khi trùng nguyên văn, nhưng vẫn là rác.
+
 ## Push FCM có chữ khay (chỉ đổi mô tả, không đổi schema)
 
 Push FCM gửi thêm khối `notification` (tiêu đề + nội dung tiếng Việt chung theo `type`, không tên con, lớp, số tiền), giữ `data` `{ notificationId, type }`; kênh Android `attendance`, `billing`, `general`. Các dòng "data-only" cũ bên dưới đã sửa theo.
@@ -78,7 +86,7 @@ Trọn khóa, thông báo và giới hạn:
 Chờ chốt:
 
 - Ngày chốt và hạn thanh toán của kỳ: chưa có endpoint cấu hình; hợp đồng chỉ đọc `closeDate`, `dueDate`. Mặc định do PO quyết (kỳ là tháng dương lịch theo PRD; ngày chốt và hạn chưa có số), cần chốt trước S5-BE-05.
-- Ba loại thông báo (`schedule_changed`, `billing_ready`, `invoice_issued`) chưa vào `oneOf` của `Notification` (giữ như hiện tại).
+- Đã làm: ba loại thông báo (`schedule_changed`, `billing_ready`, `invoice_issued`) đã vào `oneOf` của `Notification` (xem "Ngoại lệ một lần").
 - Bảng BIN NAPAS: chưa rõ nằm ở server hay client. Hợp đồng giả định server giữ để điền `bankName`.
 - `createReplacementDraft` ở `void` (xem trên) và OTP khi đổi tài khoản nhận tiền (xem trên).
 
@@ -289,7 +297,7 @@ Công nợ (T11):
 
 Chờ chốt:
 
-- Issue #179, lý do `not_marked` cho buổi chưa điểm danh (`SessionNotChargedReason`): CHƯA thêm vì thêm giá trị enum phản hồi bị `oasdiff` báo `response-property-enum-value-added` (mức ERR) ở `GET /invoices/{id}`, `POST /invoices/{id}/adjustments`, `POST /invoices/{id}/void`. Cần Owner/TL chọn: chấp nhận ngoại lệ rồi thêm giá trị (client cũ coi như "không tính"), hoặc giữ như hiện tại. Ba loại thông báo Sprint 4/5 và hai loại mới `payment_recorded`, `payment_reminder` cùng chờ một quyết định ngoại lệ kiểu này.
+- Đã làm: issue #179, lý do `not_marked` cho buổi chưa điểm danh (`SessionNotChargedReason`) đã thêm, kèm `payment_recorded`, `payment_reminder` vào `oneOf` (xem "Ngoại lệ một lần"). Trước đây chưa thêm vì `oasdiff` báo `response-property-enum-value-added`; Owner/TL đã chấp nhận ngoại lệ.
 - Hủy hóa đơn đã có thanh toán (Sprint 5 mô tả 409): hiểu là có thanh toán còn hiệu lực; nếu muốn khác thì S6-BE-02 báo lại.
 
 Sửa sau review (PR #185):
@@ -362,7 +370,7 @@ Gói và dùng thử (`subscription`, chỉ `tenant_owner`):
 
 Chờ chốt:
 
-- Quy tắc chia doanh thu theo lớp (trên), R6 chuyển khoản trong app, giá Pro VNĐ, và ngoại lệ `oneOf` cho các loại thông báo mới.
+- Quy tắc chia doanh thu theo lớp (trên), R6 chuyển khoản trong app, giá Pro VNĐ. Đã làm: ngoại lệ `oneOf` cho các loại thông báo mới (xem "Ngoại lệ một lần").
 
 Đã chốt khi duyệt (S6-CT-01, điều phối theo ủy quyền của Owner 21/11/2026):
 

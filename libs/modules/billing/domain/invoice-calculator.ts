@@ -93,7 +93,8 @@ export type SessionReason =
   | 'excused_not_charged'
   | 'unexcused_not_charged'
   | 'cancelled'
-  | 'makeup';
+  | 'makeup'
+  | 'not_marked';
 
 export interface InvoiceLine {
   kind: LineKind;

@@ -30,9 +30,17 @@ export function effectiveStatus(
 export const planCodeOf = (status: SubscriptionStatus): PlanCode =>
   status === 'trialing' || status === 'active' ? 'pro' : 'free';
 
-/** Số ngày còn lại, làm tròn lên theo khối 24 giờ; không âm. shortcut: không theo ranh giới ngày của múi giờ tenant. */
+/**
+ * Số ngày còn lại, làm tròn lên theo khối 24 giờ; không âm. Bỏ qua lệch ≤ 1 phút (đồng hồ DB và app khác nhau:
+ * hạn `now() + 14 days` của DB đọc bằng giờ app sớm hơn vài ms không được thành 15).
+ * shortcut: không theo ranh giới ngày của múi giờ tenant.
+ */
 export const daysLeft = (end: Date, now: Date): number =>
-  Math.max(0, Math.ceil((end.getTime() - now.getTime()) / DAY_MS));
+  Math.max(
+    0,
+    Math.ceil((end.getTime() - now.getTime() - CLOCK_SKEW_MS) / DAY_MS),
+  );
+const CLOCK_SKEW_MS = 60_000;
 
 /** Số bản ghi đang ở chế độ chỉ đọc vì vượt giới hạn (US-0.8 AC4); `limit` null = không giới hạn. */
 export const overLimit = (active: number, limit: number | null): number =>

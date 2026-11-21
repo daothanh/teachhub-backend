@@ -5,7 +5,7 @@
 // D1 Kỳ M = tháng dương lịch M, chốt vào ngày `billingCloseDay` (1–28, mặc định 1) của tháng M+1: hóa đơn gồm mọi buổi
 //    có ngày thuộc tháng M, kỳ liền kề không hở không chồng. Lỡ ngày chốt thì kỳ vẫn được tạo ở lần chạy sau (catch-up).
 // D2 Hạn thanh toán = ngày chốt + `billingDueDays` (mặc định 10).
-// D3 Buổi theo buổi còn `planned` lúc chốt (chưa điểm danh) không tính tiền nhưng vẫn có dòng 0 đ để giáo viên thấy.
+// D3 Buổi theo buổi còn `planned` lúc chốt (chưa điểm danh) không tính tiền nhưng vẫn có dòng 0 đ (`charged = false`, lý do `not_marked`) để giáo viên thấy.
 // D4 Học viên `paused`: vẫn tính buổi theo buổi đã dạy, không thu học phí tháng/đợt trọn khóa; `left` hoặc ghi danh rời
 //    lớp trước kỳ: không tính.
 // D5 Học viên không có dòng nào: không có hóa đơn.
@@ -328,9 +328,7 @@ export function computeEnrollmentInvoice(
     };
   }
   const result = calculateInvoice(input);
-  // D3: buổi còn `planned` lúc chốt (chưa điểm danh) không tính tiền nhưng vẫn hiện thành dòng 0 đ.
-  // shortcut: DB và hợp đồng chưa có lý do không tính "chưa điểm danh" (CHECK chỉ nhận 4 lý do), nên dòng là
-  // `charged = true` với 0 đ và chú thích trong `description`; đổi sang `charged = false` khi thêm lý do (cần migration + hợp đồng).
+  // D3: buổi còn `planned` lúc chốt (chưa điểm danh) không tính tiền nhưng vẫn hiện thành dòng 0 đ, `charged = false`, lý do `not_marked` (issue #179).
   const dateOf = new Map(inPeriod.map((s) => [s.id, s.date]));
   const unrecorded = inPeriod
     .filter(
@@ -343,7 +341,8 @@ export function computeEnrollmentInvoice(
       kind: 'session' as const,
       amount: 0,
       sessionId: s.id,
-      charged: true,
+      charged: false,
+      reason: 'not_marked' as const,
       description: `Buổi ${s.date} (chưa điểm danh, không tính)`,
     }));
   if (!unrecorded.length) return { result };

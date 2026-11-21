@@ -287,7 +287,7 @@ export const invoiceLines = pgTable(
     check(
       'invoice_lines_not_charged_reason_check',
       sql`(${t.notChargedReason} is not null) = (${t.kind} = 'session' and not ${t.charged})
-        and (${t.notChargedReason} is null or ${t.notChargedReason} in ('excused_not_charged', 'unexcused_not_charged', 'cancelled', 'makeup'))`,
+        and (${t.notChargedReason} is null or ${t.notChargedReason} in ('excused_not_charged', 'unexcused_not_charged', 'cancelled', 'makeup', 'not_marked'))`,
     ),
     check(
       'invoice_lines_adjustment_reason_check',
