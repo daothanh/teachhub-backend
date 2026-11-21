@@ -14,7 +14,7 @@ vi.hoisted(() =>
 import { generateKeyPairSync, type KeyObject } from 'node:crypto';
 import type { ConfigService } from '@nestjs/config';
 import { SignJWT } from 'jose';
-import { validateEnv, type Env } from '@teachhub/core';
+import { secretKey, validateEnv, type Env } from '@teachhub/core';
 import { JwtKeysService } from './jwt-keys.service.js';
 
 const ec = () => generateKeyPairSync('ec', { namedCurve: 'P-256' });
@@ -158,6 +158,9 @@ describe('JwtKeysService (S1-BE-03)', () => {
       S3_SECRET_ACCESS_KEY: 'x',
       S3_BUCKET_PRIVATE: 'x',
       JWT_PRIVATE_KEY: 'k',
+      CONSENT_IP_HMAC_KEY: 'a'.repeat(32),
+      INVITE_CODE_HMAC_KEY: 'b'.repeat(32),
+      IDEMPOTENCY_ENC_KEY: 'c'.repeat(32),
       NODE_ENV: 'staging',
     };
     expect(() => validateEnv(base)).toThrow(/APPLE_BUNDLE_ID/);
@@ -167,5 +170,39 @@ describe('JwtKeysService (S1-BE-03)', () => {
       APPLE_BUNDLE_ID: 'a.b, c.d',
     });
     expect(ok.APPLE_BUNDLE_ID).toEqual(['a.b', 'c.d']);
+  });
+
+  it('ngoài local/test bắt buộc ba khóa bí mật mời/consent và chúng phải khác nhau; secretKey fail closed', () => {
+    const base = {
+      DATABASE_URL: 'postgres://a@b/c',
+      REDIS_URL: 'redis://a',
+      S3_REGION: 'x',
+      S3_ACCESS_KEY_ID: 'x',
+      S3_SECRET_ACCESS_KEY: 'x',
+      S3_BUCKET_PRIVATE: 'x',
+      JWT_PRIVATE_KEY: 'k',
+      NODE_ENV: 'development',
+    };
+    expect(() => validateEnv(base)).toThrow(/CONSENT_IP_HMAC_KEY/);
+    const keys = {
+      CONSENT_IP_HMAC_KEY: 'a'.repeat(32),
+      INVITE_CODE_HMAC_KEY: 'b'.repeat(32),
+      IDEMPOTENCY_ENC_KEY: 'c'.repeat(32),
+    };
+    expect(() => validateEnv({ ...base, ...keys })).not.toThrow();
+    expect(() =>
+      validateEnv({ ...base, ...keys, IDEMPOTENCY_ENC_KEY: 'a'.repeat(32) }),
+    ).toThrow(/phải khác nhau/);
+    expect(() => validateEnv({ ...base, NODE_ENV: 'test' })).not.toThrow();
+    const prev = process.env.NODE_ENV;
+    try {
+      process.env.NODE_ENV = 'development';
+      expect(() => secretKey(undefined, 'X')).toThrow(/Thiếu khóa/);
+      process.env.NODE_ENV = 'test';
+      expect(secretKey(undefined, 'X')).toContain('dev-only');
+      expect(secretKey('v', 'X')).toBe('v');
+    } finally {
+      process.env.NODE_ENV = prev;
+    }
   });
 });

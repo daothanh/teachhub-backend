@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, Req, Res } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import {
   ApiBearerAuth,
@@ -7,7 +7,16 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
-import { ApiErrors, ApiIdempotencyKey, AppException } from '@teachhub/core';
+import type { FastifyReply, FastifyRequest } from 'fastify';
+import {
+  ApiErrors,
+  ApiIdempotencyKey,
+  Ctx,
+  type RequestContext,
+} from '@teachhub/core';
+import { TxService } from '@teachhub/db';
+import { Idempotency } from '@teachhub/infra';
+import { ConsentsService } from '../application/consents.service.js';
 import {
   type Consent,
   type ConsentStatus,
@@ -19,12 +28,18 @@ import {
   createConsentRequestSchema,
 } from './consents.schemas.js';
 
-// Hợp đồng Sprint 4 (S3-FL-12); thân hàm ở S4-BE-01 (bảng) và S4-BE-05.
+// Hợp đồng Sprint 4 (S3-FL-12); bảng ở S4-BE-01, thân hàm ở S4-BE-05.
 @ApiTags('consents')
 @ApiBearerAuth('bearer')
 @ApiErrors('UNAUTHENTICATED', 'TOKEN_EXPIRED')
 @Controller('consents')
 export class ConsentsController {
+  constructor(
+    private readonly tx: TxService,
+    private readonly idem: Idempotency,
+    private readonly consents: ConsentsService,
+  ) {}
+
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post()
   @ApiOperation({
@@ -39,9 +54,18 @@ export class ConsentsController {
   @ApiIdempotencyKey()
   @ApiErrors('VALIDATION_FAILED', 'CONFLICT_STALE', 'RATE_LIMITED')
   create(
-    @Body({ schema: createConsentRequestSchema }) _body: CreateConsentRequest,
-  ): Consent {
-    throw new AppException('NOT_IMPLEMENTED');
+    @Ctx() ctx: RequestContext,
+    @Req() req: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @Body({ schema: createConsentRequestSchema }) body: CreateConsentRequest,
+  ): Promise<Consent> {
+    return this.idem.run(req, reply, ctx, async (t) => ({
+      status: 201,
+      body: await this.consents.create(t, ctx.userId!, body, {
+        ip: req.ip,
+        userAgent: req.headers['user-agent'],
+      }),
+    }));
   }
 
   @Get('status')
@@ -53,8 +77,11 @@ export class ConsentsController {
   @ApiOkResponse({ standardSchema: consentStatusSchema })
   @ApiErrors('VALIDATION_FAILED')
   status(
-    @Query({ schema: consentStatusQuerySchema }) _query: ConsentStatusQuery,
-  ): ConsentStatus {
-    throw new AppException('NOT_IMPLEMENTED');
+    @Ctx() ctx: RequestContext,
+    @Query({ schema: consentStatusQuerySchema }) query: ConsentStatusQuery,
+  ): Promise<ConsentStatus> {
+    return this.tx.run({ userId: ctx.userId }, (t) =>
+      this.consents.status(t, ctx.userId!, query.role),
+    );
   }
 }

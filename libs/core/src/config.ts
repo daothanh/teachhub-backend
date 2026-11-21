@@ -63,8 +63,49 @@ export const envSchema = z
     JWT_PREVIOUS_KID: z.string().optional(),
     /** Service account Firebase (JSON một dòng) để worker gửi FCM. Trống = tắt gửi push, worker vẫn chạy và log cảnh báo. */
     FCM_SERVICE_ACCOUNT_JSON: z.string().optional(),
+    /** Phiên bản điều khoản/chính sách hiện hành (consents, S4-BE-05); đổi giá trị = mọi phụ huynh phải đồng ý lại. */
+    CURRENT_TERMS_VERSION: z
+      .string()
+      .trim()
+      .min(1)
+      .max(40)
+      .default('2026-12-01'),
+    /** Gốc link mời; token nằm ở fragment `#t=` nên không vào log máy chủ. */
+    INVITE_BASE_URL: z.url().default('https://dayhoc.app/i'),
+    /** Khóa HMAC băm IP của consents. Bắt buộc ngoài local/test; local/test dùng khóa tạm cố định. */
+    CONSENT_IP_HMAC_KEY: z.string().min(16).optional(),
+    /** Khóa HMAC băm mã mời ngắn (không gian 2^40: băm trơn dò được nếu lộ bảng). Bắt buộc ngoài local/test. */
+    INVITE_CODE_HMAC_KEY: z.string().min(16).optional(),
+    /** Khóa AES-256-GCM mã hóa phản hồi idempotency chứa token/mã mời. Bắt buộc ngoài local/test. */
+    IDEMPOTENCY_ENC_KEY: z.string().min(16).optional(),
   })
   .superRefine((e, ctx) => {
+    // Fail closed: chỉ local/test được dùng khóa tạm; development và mọi môi trường khác phải cấp khóa thật.
+    if (!['local', 'test'].includes(e.NODE_ENV)) {
+      const keys = [
+        'CONSENT_IP_HMAC_KEY',
+        'INVITE_CODE_HMAC_KEY',
+        'IDEMPOTENCY_ENC_KEY',
+      ] as const;
+      for (const k of keys) {
+        if (!e[k]) {
+          ctx.addIssue({
+            code: 'custom',
+            path: [k],
+            message: 'Bắt buộc ngoài local/test',
+          });
+        }
+      }
+      const set = keys.map((k) => e[k]).filter(Boolean);
+      if (new Set(set).size !== set.length) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['CONSENT_IP_HMAC_KEY'],
+          message:
+            'Ba khóa CONSENT_IP_HMAC_KEY, INVITE_CODE_HMAC_KEY, IDEMPOTENCY_ENC_KEY phải khác nhau',
+        });
+      }
+    }
     if (!['staging', 'production'].includes(e.NODE_ENV)) return;
     for (const k of ['GOOGLE_CLIENT_IDS', 'APPLE_BUNDLE_ID'] as const) {
       if (e[k].length === 0) {
@@ -82,6 +123,15 @@ export const envSchema = z
   });
 
 export type Env = z.infer<typeof envSchema>;
+
+/** Khóa bí mật của `name`. Thiếu thì chỉ local/test dùng khóa tạm cố định; môi trường khác ném lỗi (fail closed). */
+export const secretKey = (value: string | undefined, name: string): string => {
+  if (value) return value;
+  if (['local', 'test'].includes(process.env.NODE_ENV ?? 'local')) {
+    return `dev-only-${name}-khong-dung-o-staging-production`;
+  }
+  throw new Error(`Thiếu khóa bí mật ${name}`);
+};
 
 /** Thiếu/sai biến môi trường → không khởi động (Mục 2.4). */
 export function validateEnv(raw: Record<string, unknown>): Env {

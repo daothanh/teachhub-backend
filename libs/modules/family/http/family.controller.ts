@@ -6,8 +6,9 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { z } from 'zod';
-import { ApiErrors, AppException } from '@teachhub/core';
+import { ApiErrors, Ctx, type RequestContext } from '@teachhub/core';
 import { RequiresRole } from '@teachhub/modules/identity';
+import { FamilyService } from '../application/family.service.js';
 import {
   type FamilyAttendanceQuery,
   familyAttendanceQuerySchema,
@@ -19,13 +20,15 @@ import {
 
 const idParam = z.uuid();
 
-// Hợp đồng Sprint 4 (S3-FL-12); thân hàm ở S4-BE-06. Chỉ đọc. RLS qua `linked_student_ids()` là lớp 2.
+// Hợp đồng Sprint 4 (S3-FL-12); S4-BE-06. Chỉ đọc. RLS qua `linked_student_ids()` là lớp 2.
 @ApiTags('family')
 @ApiBearerAuth('bearer')
 @RequiresRole('parent')
 @ApiErrors('UNAUTHENTICATED', 'TOKEN_EXPIRED', 'FORBIDDEN', 'CONSENT_REQUIRED')
 @Controller('family')
 export class FamilyController {
+  constructor(private readonly family: FamilyService) {}
+
   @Get('students')
   @ApiOperation({
     summary: 'Các con của phụ huynh (P02, US-0.3)',
@@ -34,8 +37,8 @@ export class FamilyController {
       'Phụ huynh chưa đồng ý điều khoản hiện hành → 403 `CONSENT_REQUIRED` (`details.termsVersion`), áp dụng cho cả `/family/**` (US-0.3 AC2); user không có vai trò Phụ huynh → 403 `FORBIDDEN`.',
   })
   @ApiOkResponse({ standardSchema: familyStudentListSchema })
-  students(): FamilyStudentList {
-    throw new AppException('NOT_IMPLEMENTED');
+  students(@Ctx() ctx: RequestContext): Promise<FamilyStudentList> {
+    return this.family.students(ctx.userId!);
   }
 
   @Get('students/:id/attendance')
@@ -48,10 +51,11 @@ export class FamilyController {
   @ApiOkResponse({ standardSchema: familyAttendanceWeekSchema })
   @ApiErrors('VALIDATION_FAILED', 'NOT_FOUND')
   attendance(
-    @Param('id', { schema: idParam }) _studentId: string,
+    @Ctx() ctx: RequestContext,
+    @Param('id', { schema: idParam }) studentId: string,
     @Query({ schema: familyAttendanceQuerySchema })
-    _query: FamilyAttendanceQuery,
-  ): FamilyAttendanceWeek {
-    throw new AppException('NOT_IMPLEMENTED');
+    query: FamilyAttendanceQuery,
+  ): Promise<FamilyAttendanceWeek> {
+    return this.family.attendance(ctx.userId!, studentId, query.week);
   }
 }
