@@ -348,7 +348,7 @@ Phạm vi:
 
 Báo cáo (`reports`, chỉ `tenant_owner`, chỉ đọc):
 
-- Số liệu đọc từ `revenue_ledger` nên "Đã thu" khớp từng đồng với danh sách thanh toán (US-8.1 AC2): `collectedAmount` = Σ dòng sổ có `entry_date` trong tháng, gồm dòng đảo; hủy thanh toán của tháng trước làm tháng hiện tại giảm. `billedAmount` = Σ `totalAmount` hóa đơn đã phát hành (không nháp, không hủy) của kỳ thu tháng đó. `outstandingAmount` và `activeStudentCount` là giá trị hiện tại, không theo tháng chọn.
+- Số liệu đọc từ `revenue_ledger` nên "Đã thu" khớp từng đồng với danh sách thanh toán (US-8.1 AC2): `collectedAmount` = Σ dòng sổ có `entry_date` trong tháng, gồm dòng đảo; hủy thanh toán là sửa sai nên dòng đảo mang ngày thu của khoản gốc và trừ khỏi tháng của khoản đó (đúng như `revenue_ledger` của S6-BE-02, US-9.5 AC1), không làm tháng hủy giảm; cột và tổng của mọi tháng vì vậy không âm (đính chính khi cài đặt S7 reports, chỉ đổi mô tả). `billedAmount` = Σ `totalAmount` hóa đơn đã phát hành (không nháp, không hủy) của kỳ thu tháng đó. `outstandingAmount` và `activeStudentCount` là giá trị hiện tại, không theo tháng chọn.
 - US-8.2 AC3 đòi tổng theo lớp bằng đúng "đã thu": hóa đơn gộp nhiều lớp nên **phải có quy tắc chia thanh toán cho lớp** (ghi ở `RevenueByClass`): theo tỷ lệ dòng học phí dương của từng lớp, làm tròn phần dư lớn nhất; phần không gán được là dòng "Khác" (`classId = null`). **Chờ TL xác nhận** (phương án khác: chỉ phân bổ theo hóa đơn phát hành, không theo thanh toán).
 - `month` là `YYYY-MM`, mặc định tháng hiện tại theo múi giờ tenant, không phân trang cho theo lớp và 12 tháng; `payments` phân trang offset. Phần "cập nhật báo cáo" của US-7.4 AC3 không cần job: đọc thẳng sổ.
 

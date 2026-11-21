@@ -25,5 +25,6 @@ import { ReceivablesController } from './http/receivables.controller.js';
     PaymentsService,
     ReceivablesService,
   ],
+  exports: [ReceivablesService],
 })
 export class BillingModule {}

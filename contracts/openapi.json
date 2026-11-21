@@ -15447,7 +15447,7 @@
             "type": "integer",
             "minimum": -100000000000,
             "maximum": 100000000000,
-            "description": "\"Đã thu\": tổng thanh toán ghi trong tháng (US-8.1 AC1). Có dấu: bằng Σ `amount` của `revenue_ledger` có `entry_date` trong tháng, gồm cả dòng đảo do hủy thanh toán (hủy thanh toán của tháng trước làm tháng này giảm), nên hiếm khi âm"
+            "description": "\"Đã thu\": tổng thanh toán ghi trong tháng (US-8.1 AC1). Có dấu: bằng Σ `amount` của `revenue_ledger` có `entry_date` trong tháng, gồm cả dòng đảo do hủy thanh toán: dòng đảo mang ngày ghi của khoản thu gốc (hủy là sửa sai, US-9.5 AC1) nên trừ khỏi tháng của khoản đó, không phải tháng hủy; vì vậy không bao giờ âm"
           },
           "outstandingAmount": {
             "type": "integer",
@@ -15513,7 +15513,7 @@
             "type": "integer",
             "minimum": -100000000000,
             "maximum": 100000000000,
-            "description": "Σ `amount` của MỌI dòng trong tháng (không chỉ trang này); bằng `collectedAmount` của `GET /reports/month-overview` (US-8.1 AC2, sai lệch 0 đồng). Có dấu: bằng Σ `amount` của `revenue_ledger` có `entry_date` trong tháng, gồm cả dòng đảo do hủy thanh toán (hủy thanh toán của tháng trước làm tháng này giảm), nên hiếm khi âm"
+            "description": "Σ `amount` của MỌI dòng trong tháng (không chỉ trang này); bằng `collectedAmount` của `GET /reports/month-overview` (US-8.1 AC2, sai lệch 0 đồng). Có dấu: bằng Σ `amount` của `revenue_ledger` có `entry_date` trong tháng, gồm cả dòng đảo do hủy thanh toán: dòng đảo mang ngày ghi của khoản thu gốc (hủy là sửa sai, US-9.5 AC1) nên trừ khỏi tháng của khoản đó, không phải tháng hủy; vì vậy không bao giờ âm"
           }
         },
         "required": [
@@ -15569,7 +15569,7 @@
             "type": "string",
             "format": "date",
             "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
-            "description": "Ngày ghi sổ theo múi giờ tenant: `paidOn` của thanh toán với `payment`; ngày hủy với `reversal`"
+            "description": "Ngày ghi sổ theo múi giờ tenant: `paidOn` của thanh toán, với cả `payment` lẫn `reversal` (dòng đảo mang ngày của khoản thu gốc)"
           },
           "amount": {
             "type": "integer",
@@ -15611,7 +15611,7 @@
             "type": "integer",
             "minimum": -100000000000,
             "maximum": 100000000000,
-            "description": "Tổng mọi dòng; bằng `collectedAmount` của `GET /reports/month-overview` (US-8.2 AC3). Có dấu: bằng Σ `amount` của `revenue_ledger` có `entry_date` trong tháng, gồm cả dòng đảo do hủy thanh toán (hủy thanh toán của tháng trước làm tháng này giảm), nên hiếm khi âm"
+            "description": "Tổng mọi dòng; bằng `collectedAmount` của `GET /reports/month-overview` (US-8.2 AC3). Có dấu: bằng Σ `amount` của `revenue_ledger` có `entry_date` trong tháng, gồm cả dòng đảo do hủy thanh toán: dòng đảo mang ngày ghi của khoản thu gốc (hủy là sửa sai, US-9.5 AC1) nên trừ khỏi tháng của khoản đó, không phải tháng hủy; vì vậy không bao giờ âm"
           },
           "items": {
             "type": "array",
@@ -15676,7 +15676,7 @@
             "type": "integer",
             "minimum": -100000000000,
             "maximum": 100000000000,
-            "description": "Phần \"đã thu\" của tháng gán cho lớp. Có dấu: bằng Σ `amount` của `revenue_ledger` có `entry_date` trong tháng, gồm cả dòng đảo do hủy thanh toán (hủy thanh toán của tháng trước làm tháng này giảm), nên hiếm khi âm"
+            "description": "Phần \"đã thu\" của tháng gán cho lớp. Có dấu: bằng Σ `amount` của `revenue_ledger` có `entry_date` trong tháng, gồm cả dòng đảo do hủy thanh toán: dòng đảo mang ngày ghi của khoản thu gốc (hủy là sửa sai, US-9.5 AC1) nên trừ khỏi tháng của khoản đó, không phải tháng hủy; vì vậy không bao giờ âm"
           },
           "attendancePercent": {
             "description": "Chuyên cần của lớp trong tháng, % làm tròn một chữ số thập phân: (có mặt + đi muộn) / tổng lượt của buổi đã dạy (US-8.4 AC1). null khi lớp không có buổi đã dạy trong tháng",
@@ -15716,7 +15716,7 @@
                   "type": "integer",
                   "minimum": -100000000000,
                   "maximum": 100000000000,
-                  "description": "Đã thu của tháng. Có dấu: bằng Σ `amount` của `revenue_ledger` có `entry_date` trong tháng, gồm cả dòng đảo do hủy thanh toán (hủy thanh toán của tháng trước làm tháng này giảm), nên hiếm khi âm"
+                  "description": "Đã thu của tháng. Có dấu: bằng Σ `amount` của `revenue_ledger` có `entry_date` trong tháng, gồm cả dòng đảo do hủy thanh toán: dòng đảo mang ngày ghi của khoản thu gốc (hủy là sửa sai, US-9.5 AC1) nên trừ khỏi tháng của khoản đó, không phải tháng hủy; vì vậy không bao giờ âm"
                 }
               },
               "required": [
