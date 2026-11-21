@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
 import { uuidv7 } from '@teachhub/core';
 import { TxService, type Tx } from '@teachhub/db';
-import { PushSender, maskToken } from '@teachhub/infra';
+import { PushSender, maskToken, pushCopyFor } from '@teachhub/infra';
 import {
   isAbsenceRetracted,
   isNewAbsence,
@@ -38,7 +38,7 @@ export class PushDeliveryError extends Error {}
  * shortcut: đọc chéo module (attendance, guardians, memberships, sessions) bằng SQL thô trong worker để khỏi kéo cả service của module khác; đổi sang port/reader khi có consumer thứ hai.
  * shortcut: nhiều thiết bị của một người nhận tính `sent` khi MỘT thiết bị nhận được; thiết bị còn lại lỗi tạm không được thử lại riêng.
  *
- * Xử lý sự kiện `attendance_recorded` (S3-BE-06) trong worker: tạo thông báo cho phụ huynh rồi gửi FCM data-only.
+ * Xử lý sự kiện `attendance_recorded` (S3-BE-06) trong worker: tạo thông báo cho phụ huynh rồi gửi FCM (khay chữ chung + `data` định danh).
  * Idempotent theo `eventId`: khóa `(recipient, dedupe_key)` cho thông báo và `(notification, channel)` cho lần gửi.
  */
 @Injectable()
@@ -221,10 +221,12 @@ export class AbsenceNotifier {
           )
         ).rows.map((r) => r.token),
       );
+      const copy = pushCopyFor(p.type);
       const results = this.push.enabled
         ? await this.push.send(
             devices.map((token) => ({
               token,
+              ...copy,
               urgent: p.urgent ?? true,
               data: { notificationId: p.notificationId, type: p.type },
             })),

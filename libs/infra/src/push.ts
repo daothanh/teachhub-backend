@@ -4,9 +4,13 @@ import { cert, getApps, initializeApp } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
 import type { Env } from '@teachhub/core';
 
-/** Một tin push data-only tới một token: `data` chỉ chứa chuỗi định danh (`notificationId`, `type`), không có nội dung hiển thị. */
+/** Một tin push tới một token: `title`/`body` chung theo loại (không PII), `data` chỉ chứa chuỗi định danh (`notificationId`, `type`). */
 export interface PushMessage {
   token: string;
+  title: string;
+  body: string;
+  /** Kênh thông báo Android (`attendance`, `billing`, `general`). */
+  channelId: string;
   data: Record<string, string>;
   urgent: boolean;
 }
@@ -66,16 +70,18 @@ export class FirebasePushSender extends PushSender {
     const res = await this.messaging.sendEach(
       messages.map((m) => ({
         token: m.token,
+        notification: { title: m.title, body: m.body },
         data: m.data,
         android: {
           priority: m.urgent ? ('high' as const) : ('normal' as const),
+          notification: { channelId: m.channelId },
         },
         apns: {
           headers: {
             'apns-priority': m.urgent ? '10' : '5',
-            'apns-push-type': 'background',
+            'apns-push-type': 'alert',
           },
-          payload: { aps: { contentAvailable: true } },
+          payload: { aps: { sound: 'default', contentAvailable: true } },
         },
       })),
     );

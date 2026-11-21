@@ -21,6 +21,8 @@ describe('billing: job billing.close + API kỳ thu, hóa đơn, điều chỉnh
   let pushed: {
     token: string;
     urgent: boolean;
+    title: string;
+    channelId: string;
     data: Record<string, string>;
   }[];
   let A: Who;
@@ -419,7 +421,15 @@ describe('billing: job billing.close + API kỳ thu, hóa đơn, điều chỉnh
     });
     expect(notis[0].payload).toEqual(ev.payload);
     expect(pushed).toHaveLength(1);
-    expect(pushed[0]).toMatchObject({ token: 'tok-billing-a', urgent: false });
+    expect(pushed[0]).toMatchObject({
+      token: 'tok-billing-a',
+      urgent: false,
+      title: 'Học phí đã sẵn sàng',
+      channelId: 'billing',
+    });
+    expect(JSON.stringify(pushed)).not.toContain(
+      String(ev.payload.draftTotalAmount),
+    );
     // Push chỉ có id thông báo và loại: không có số tiền hay tên con.
     expect(Object.keys(pushed[0]!.data).sort()).toEqual([
       'notificationId',

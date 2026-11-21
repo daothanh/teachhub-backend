@@ -49,7 +49,7 @@ export class PushController {
     description:
       'Upsert theo `deviceToken`: đăng ký lặp không tạo dòng mới; token đang gắn user khác thì chuyển sang user hiện tại. Mọi vai trò dùng chung. `Idempotency-Key` tùy chọn vì lệnh vốn idempotent theo `deviceToken`. ' +
       '`userId` ở body chỉ để khớp hợp đồng gói `tasco_notifications`: server so với user của token, lệch → 403 `FORBIDDEN`, và không bao giờ dùng `userId` ở body làm danh tính. ' +
-      'Push gửi tới thiết bị là data-only, chỉ có `notificationId` và `type`; không có tên con, lớp hay trạng thái vắng trên khay thông báo. App `GET /notifications` sau khi mở để lấy nội dung.',
+      'Push gửi tới thiết bị có khối `notification` với tiêu đề và nội dung chung theo loại (không tên con, lớp, số tiền) cùng `data` chỉ có `notificationId` và `type`; kênh Android `attendance`/`billing`/`general`. App `GET /notifications` sau khi mở để lấy nội dung.',
   })
   @ApiNoContentResponse()
   @ApiIdempotencyKey(false)

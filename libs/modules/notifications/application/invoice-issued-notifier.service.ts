@@ -36,7 +36,7 @@ const MAIL_TEXT =
 
 /**
  * Xử lý sự kiện outbox `invoice_issued` (S5-BE-07, US-7.3): tạo thông báo `invoice_issued` cho phụ huynh đã có tài khoản của
- * học viên, gửi FCM data-only rồi email. Idempotent theo `eventId` (khóa `(recipient, dedupe_key)`; lần gửi theo
+ * học viên, gửi FCM (chữ khay chung, không PII) rồi email. Idempotent theo `eventId` (khóa `(recipient, dedupe_key)`; lần gửi theo
  * `(notification, channel)`).
  * shortcut: phụ huynh chưa kích hoạt tài khoản (guardians.user_id null) không nhận email, vì không có thông báo để làm khóa
  * chống gửi trùng và họ chưa mở được hóa đơn trong app; mở rộng cùng luồng mời phụ huynh.
