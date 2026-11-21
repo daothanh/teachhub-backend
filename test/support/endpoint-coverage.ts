@@ -266,23 +266,23 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
       'hợp đồng S4-FL-10, thân hàm trả 501 tới S5-BE-08; test chéo tenant/học viên làm cùng task đó',
   },
   'PUT /v1/enrollments/{id}/fee-override': {
-    notApplicable:
-      'hợp đồng S4-FL-10, thân hàm trả 501 tới S5-BE-02; test chéo tenant/học viên làm cùng task đó',
+    file: 'class-fees.e2e-spec.ts',
+    test: 'cô lập tenant: B không sửa học phí lớp của A (404, không đổi) và không đặt mức riêng cho ghi danh của A',
   },
   'GET /v1/payout-accounts': {
-    notApplicable:
-      'hợp đồng S4-FL-10, thân hàm trả 501 tới S5-BE-02; test chéo tenant/học viên làm cùng task đó',
+    file: 'payout-accounts.e2e-spec.ts',
+    test: 'cô lập tenant: B không đọc, sửa, xóa tài khoản của A (404, dữ liệu A không đổi)',
   },
   'POST /v1/payout-accounts': {
-    notApplicable:
-      'hợp đồng S4-FL-10, thân hàm trả 501 tới S5-BE-02; test chéo tenant/học viên làm cùng task đó',
+    file: 'payout-accounts.e2e-spec.ts',
+    test: 'cô lập tenant: B không đọc, sửa, xóa tài khoản của A (404, dữ liệu A không đổi)',
   },
   'PATCH /v1/payout-accounts/{id}': {
-    notApplicable:
-      'hợp đồng S4-FL-10, thân hàm trả 501 tới S5-BE-02; test chéo tenant/học viên làm cùng task đó',
+    file: 'payout-accounts.e2e-spec.ts',
+    test: 'cô lập tenant: B không đọc, sửa, xóa tài khoản của A (404, dữ liệu A không đổi)',
   },
   'DELETE /v1/payout-accounts/{id}': {
-    notApplicable:
-      'hợp đồng S4-FL-10, thân hàm trả 501 tới S5-BE-02; test chéo tenant/học viên làm cùng task đó',
+    file: 'payout-accounts.e2e-spec.ts',
+    test: 'cô lập tenant: B không đọc, sửa, xóa tài khoản của A (404, dữ liệu A không đổi)',
   },
 };
