@@ -34,7 +34,7 @@ export const subscriptionActivatedJobSchema = z.object({
  * hoạt sau khi quản trị xác nhận chuyển khoản, US-0.8 AC3): tạo thông báo cho chủ tenant rồi gửi FCM (chữ khay chung, không PII,
  * không ngày/số). Idempotent theo `eventId` (khóa `(recipient, dedupe_key)`); phần gửi dùng lại `AbsenceNotifier.deliver`.
  * `subscription_expiring` được kiểm lại lúc xử lý: gói đã gia hạn (hạn khác hạn trong sự kiện) hoặc không còn trả phí thì bỏ.
- * Hai loại này CHƯA nằm trong `oneOf` của `Notification` (chờ ngoại lệ oasdiff chung, xem contracts/CHANGELOG.md): chưa có deepLink,
+ * Hai loại này đã nằm trong `oneOf` của `Notification` (ngoại lệ oasdiff một lần, xem contracts/CHANGELOG.md): chưa có deepLink,
  * app đọc trạng thái từ `GET /plan-usage`.
  * shortcut: chưa tôn trọng giờ yên lặng (`send_after` = lúc tạo), như `BillingReadyNotifier`.
  */

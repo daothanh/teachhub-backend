@@ -40,7 +40,7 @@ export type PushUnregisterRequest = z.infer<typeof pushUnregisterRequestSchema>;
 
 // ---- GET /notifications · POST /notifications/read ----
 
-/** Sprint 3: báo vắng (US-3.2). Sprint 4 thêm `schedule_changed` (US-2.2). Sprint 5 thêm `billing_ready` và `invoice_issued`. Sprint 6 thêm `payment_recorded` và `payment_reminder`. */
+/** Sprint 3: báo vắng (US-3.2). Sprint 4 thêm `schedule_changed` (US-2.2). Sprint 5 thêm `billing_ready` và `invoice_issued`. Sprint 6 thêm `payment_recorded` và `payment_reminder`. Sprint 7 thêm `subscription_expiring` và `subscription_activated`. */
 export const notificationTypeSchema = z.enum([
   'student_absent',
   'student_absent_correction',
@@ -49,6 +49,8 @@ export const notificationTypeSchema = z.enum([
   'invoice_issued',
   'payment_recorded',
   'payment_reminder',
+  'subscription_expiring',
+  'subscription_activated',
 ]);
 
 const absencePayloadSchema = z
@@ -66,9 +68,7 @@ const absencePayloadSchema = z
   });
 
 /**
- * Payload loại `schedule_changed` (US-2.2). CHƯA đưa vào `notificationSchema`: thêm thành viên vào `oneOf` của
- * phản hồi bị `oasdiff` coi là breaking (`response-property-one-of-added`). Chờ TL/Owner chấp nhận ngoại lệ rồi thêm
- * `notificationBase.extend({ type: z.literal('schedule_changed'), payload: scheduleChangedPayloadSchema })` vào union.
+ * Payload loại `schedule_changed` (US-2.2). Đã vào `notificationSchema` nhờ ngoại lệ `oasdiff` một lần (xem `contracts/CHANGELOG.md`).
  */
 export const scheduleChangedPayloadSchema = z
   .object({
@@ -88,8 +88,7 @@ export const scheduleChangedPayloadSchema = z
   });
 
 /**
- * Payload loại `billing_ready` (US-7.2 AC1, gửi giáo viên khi `billing.close` tạo bản nháp). CHƯA nằm trong `notificationSchema`
- * vì cùng lý do `oasdiff` như `schedule_changed`. Push FCM có chữ khay chung theo loại và `data` chỉ `notificationId`, `type`; không có số tiền hay tên.
+ * Payload loại `billing_ready` (US-7.2 AC1, gửi giáo viên khi `billing.close` tạo bản nháp). Nằm trong `notificationSchema`. Push FCM có chữ khay chung theo loại và `data` chỉ `notificationId`, `type`; không có số tiền hay tên.
  */
 export const billingReadyPayloadSchema = z
   .object({
@@ -104,7 +103,7 @@ export const billingReadyPayloadSchema = z
   });
 
 /**
- * Payload loại `invoice_issued` (US-7.3, gửi phụ huynh qua outbox `invoice_issued`, kèm email). CHƯA nằm trong `notificationSchema`.
+ * Payload loại `invoice_issued` (US-7.3, gửi phụ huynh qua outbox `invoice_issued`, kèm email)..
  * Push FCM có chữ khay chung theo loại và `data` chỉ `notificationId`, `type`; email có tiêu đề cố định, không chứa tên con. Payload này chỉ có trong hộp thông báo sau khi đăng nhập. Không có số tài khoản hay mã QR: phụ huynh mở hóa đơn qua `GET /family/invoices/{invoiceId}`.
  */
 export const invoiceIssuedPayloadSchema = z
@@ -122,7 +121,7 @@ export const invoiceIssuedPayloadSchema = z
   });
 
 /**
- * Payload loại `payment_recorded` (US-7.4 AC3, gửi phụ huynh ≤ 1 phút sau khi giáo viên ghi thanh toán, qua outbox `payment_recorded`). CHƯA nằm trong `notificationSchema` (cùng lý do `oasdiff`).
+ * Payload loại `payment_recorded` (US-7.4 AC3, gửi phụ huynh ≤ 1 phút sau khi giáo viên ghi thanh toán, qua outbox `payment_recorded`)..
  * Push FCM có chữ khay chung theo loại, `data` chỉ `notificationId`, `type`, không tên con, không số tiền; payload chỉ có trong hộp thông báo sau khi đăng nhập.
  */
 export const paymentRecordedPayloadSchema = z
@@ -142,7 +141,7 @@ export const paymentRecordedPayloadSchema = z
   });
 
 /**
- * Payload loại `payment_reminder` (US-7.5, job `billing.dunning` gửi phụ huynh theo mốc). CHƯA nằm trong `notificationSchema`.
+ * Payload loại `payment_reminder` (US-7.5, job `billing.dunning` gửi phụ huynh theo mốc)..
  * Nội dung do hệ thống đứng tên ("TeachHub nhắc…"), không mạo danh giáo viên; push như các loại tiền khác (chữ khay chung, không số tiền).
  */
 export const paymentReminderPayloadSchema = z
@@ -159,6 +158,30 @@ export const paymentReminderPayloadSchema = z
   .meta({
     description:
       'Nhắc nợ cho một hóa đơn còn nợ; deepLink `teachhub://invoices/{invoiceId}` (nút mở hóa đơn, US-7.5 AC4)',
+  });
+
+/** Payload loại `subscription_expiring` (US-0.8 AC5, job `subscription.lifecycle`, gửi chủ tenant khi gói trả phí còn 7 hoặc 1 ngày). Không PII; app đọc trạng thái từ `GET /plan-usage`. */
+export const subscriptionExpiringPayloadSchema = z
+  .object({
+    offsetDays: z.union([z.literal(7), z.literal(1)]).meta({
+      description: 'Còn bao nhiêu ngày tới hạn gói: 7 hoặc 1',
+    }),
+    currentPeriodEnd: z.iso.datetime({ offset: true }),
+  })
+  .meta({
+    description:
+      'Nhắc gia hạn gói; push chỉ có chữ khay chung, không ngày, không số',
+  });
+
+/** Payload loại `subscription_activated` (US-0.8 AC3, gửi chủ tenant khi quản trị xác nhận chuyển khoản và Pro được kích hoạt). */
+export const subscriptionActivatedPayloadSchema = z
+  .object({
+    source: z.literal('bank_transfer'),
+    currentPeriodEnd: z.iso.datetime({ offset: true }),
+  })
+  .meta({
+    description:
+      'Pro đã kích hoạt sau chuyển khoản; push chỉ có chữ khay chung, không ngày, không số',
   });
 
 const notificationBase = z.object({
@@ -181,11 +204,39 @@ export const notificationSchema = z
       type: z.literal('student_absent_correction'),
       payload: absencePayloadSchema,
     }),
+    notificationBase.extend({
+      type: z.literal('schedule_changed'),
+      payload: scheduleChangedPayloadSchema,
+    }),
+    notificationBase.extend({
+      type: z.literal('billing_ready'),
+      payload: billingReadyPayloadSchema,
+    }),
+    notificationBase.extend({
+      type: z.literal('invoice_issued'),
+      payload: invoiceIssuedPayloadSchema,
+    }),
+    notificationBase.extend({
+      type: z.literal('payment_recorded'),
+      payload: paymentRecordedPayloadSchema,
+    }),
+    notificationBase.extend({
+      type: z.literal('payment_reminder'),
+      payload: paymentReminderPayloadSchema,
+    }),
+    notificationBase.extend({
+      type: z.literal('subscription_expiring'),
+      payload: subscriptionExpiringPayloadSchema,
+    }),
+    notificationBase.extend({
+      type: z.literal('subscription_activated'),
+      payload: subscriptionActivatedPayloadSchema,
+    }),
   ])
   .meta({
     id: 'Notification',
     description:
-      '`payload` theo `type`. Client bỏ qua (không lỗi) phần tử có `type` lạ để tương thích khi server thêm loại mới.',
+      '`payload` theo `type` (mô tả hình dạng từng loại ở `GET /notifications`). Client bỏ qua (không lỗi) phần tử có `type` lạ để tương thích khi server thêm loại mới.',
   });
 
 export const notificationsQuerySchema = cursorQuerySchema(50);
