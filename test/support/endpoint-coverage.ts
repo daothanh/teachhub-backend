@@ -302,24 +302,24 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
     test: 'chỉ chủ tenant; 404 chéo tenant; RLS: tenant B không thấy sổ/công nợ của A',
   },
   'GET /v1/tenant/settings/dunning': {
-    notApplicable:
-      'hợp đồng S5-FL-09, thân hàm trả 501 tới S6-BE-04; test chéo tenant/học viên làm cùng task đó',
+    file: 'dunning.e2e-spec.ts',
+    test: 'DoD 6.4: chỉ chủ tenant; 404 chéo tenant; id lạ 404; ghi danh đã rời 409; RLS: B không thấy dunning_jobs của A',
   },
   'PUT /v1/tenant/settings/dunning': {
-    notApplicable:
-      'hợp đồng S5-FL-09, thân hàm trả 501 tới S6-BE-04; test chéo tenant/học viên làm cùng task đó',
+    file: 'dunning.e2e-spec.ts',
+    test: 'DoD 6.4: chỉ chủ tenant; 404 chéo tenant; id lạ 404; ghi danh đã rời 409; RLS: B không thấy dunning_jobs của A',
   },
   'GET /v1/tenant/settings/dunning/preview': {
-    notApplicable:
-      'hợp đồng S5-FL-09, thân hàm trả 501 tới S6-BE-04; test chéo tenant/học viên làm cùng task đó',
+    file: 'dunning.e2e-spec.ts',
+    test: 'DoD 6.4: chỉ chủ tenant; 404 chéo tenant; id lạ 404; ghi danh đã rời 409; RLS: B không thấy dunning_jobs của A',
   },
   'PUT /v1/enrollments/{id}/dunning': {
-    notApplicable:
-      'hợp đồng S5-FL-09, thân hàm trả 501 tới S6-BE-04; test chéo tenant/học viên làm cùng task đó',
+    file: 'dunning.e2e-spec.ts',
+    test: 'DoD 6.4: chỉ chủ tenant; 404 chéo tenant; id lạ 404; ghi danh đã rời 409; RLS: B không thấy dunning_jobs của A',
   },
   'GET /v1/invoices/{id}/dunning': {
-    notApplicable:
-      'hợp đồng S5-FL-09, thân hàm trả 501 tới S6-BE-04; test chéo tenant/học viên làm cùng task đó',
+    file: 'dunning.e2e-spec.ts',
+    test: 'DoD 6.4: chỉ chủ tenant; 404 chéo tenant; id lạ 404; ghi danh đã rời 409; RLS: B không thấy dunning_jobs của A',
   },
   'GET /v1/receivables': {
     file: 'carry-over.e2e-spec.ts',

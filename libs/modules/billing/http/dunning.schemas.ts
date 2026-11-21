@@ -3,9 +3,6 @@ import { z } from 'zod';
 // Hợp đồng Sprint 6 "Thu tiền" (S5-FL-09): nhắc nợ tự động (US-7.5). Thân hàm ở S6-BE-04.
 // Mốc nhắc tính theo ngày so với hạn thanh toán của hóa đơn: -1 = trước hạn 1 ngày, 0 = đúng hạn, 3 = quá hạn 3 ngày.
 
-/** Lịch mặc định US-7.5 AC1: ngày 9, 10, 13, 17 cho hóa đơn hạn ngày 10. */
-export const DEFAULT_DUNNING_OFFSETS_DAYS = [-1, 0, 3, 7];
-
 const offsetDay = z.int().min(-7).max(30);
 
 export const dunningOffsetsSchema = z

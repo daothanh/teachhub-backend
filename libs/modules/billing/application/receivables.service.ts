@@ -23,6 +23,7 @@ import type {
   ReceivablesQuery,
   StudentReceivableHistory,
 } from '../http/receivables.schemas.js';
+import { DunningService } from './dunning.service.js';
 import { toPayment } from './payments.service.js';
 
 const DEFAULT_TZ = 'Asia/Ho_Chi_Minh';
@@ -34,10 +35,11 @@ const escapeLike = (v: string) => v.replace(/[\\%_]/g, '\\$&');
 /**
  * Công nợ (T11, US-8.3) và sổ học viên (US-7.6), chỉ đọc. Nợ ròng = max(0, Σ còn nợ hóa đơn + số dư sổ); còn nợ = `total − paid − carried`: phần đã chuyển sang hóa đơn kỳ sau chỉ tính ở hóa đơn kỳ sau nên không đếm hai lần.
  * Mọi truy vấn lọc `tenant_id` tường minh (RLS là lớp thứ hai); học viên của tenant khác → 404.
- * shortcut: nhắc nợ (`reminders`) trả rỗng và `dunningEnabled` luôn true tới khi S6-BE-04 có bảng nhắc nợ.
  */
 @Injectable()
 export class ReceivablesService {
+  constructor(private readonly dunning: DunningService) {}
+
   async list(
     tx: Tx,
     tenantId: string,
@@ -264,6 +266,7 @@ export class ReceivablesService {
         enrollmentId: enrollments.id,
         classId: enrollments.classId,
         className: classes.name,
+        dunningEnabled: enrollments.dunningEnabled,
       })
       .from(enrollments)
       .innerJoin(
@@ -281,14 +284,15 @@ export class ReceivablesService {
         ),
       )
       .orderBy(classes.name);
+    const reminders = await this.dunning.studentView(tx, tenantId, studentId);
     return {
       studentId,
       studentName: stu.fullName,
       outstandingAmount: outstanding,
       invoiceOutstandingAmount: invoiceOutstanding,
       ledgerBalanceAmount: balance,
-      dunningEnabled: true,
-      enrollments: enr.map((e) => ({ ...e, dunningEnabled: true })),
+      dunningEnabled: reminders.enabled,
+      enrollments: enr,
       invoices: invRows.slice(0, 24).map((r) => ({
         id: r.i.id,
         code: r.i.code,
@@ -304,7 +308,7 @@ export class ReceivablesService {
         ...toPayment(p, tz),
         invoiceCode: code.get(p.invoiceId) ?? null,
       })),
-      reminders: [],
+      reminders: reminders.reminders,
     };
   }
 

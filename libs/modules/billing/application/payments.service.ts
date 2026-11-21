@@ -30,6 +30,7 @@ import {
   statusAfter,
 } from '../domain/payment.js';
 import type { Actor } from './billing.service.js';
+import { DunningService } from './dunning.service.js';
 
 const DEFAULT_TZ = 'Asia/Ho_Chi_Minh';
 
@@ -40,10 +41,11 @@ type PaymentRow = typeof payments.$inferSelect;
  * Thu tiền (S6-BE-02, US-7.4, US-9.5 AC1). Mọi thao tác khóa hàng hóa đơn `FOR UPDATE` trước khi đọc/ghi số đã thu, nên hai
  * request song song cùng hóa đơn nối đuôi nhau (request sau đọc lại số đã commit). Mọi truy vấn lọc `tenant_id` tường minh,
  * RLS là lớp thứ hai; id của tenant khác → 404. Không log ghi chú hay lý do (văn bản tự do của giáo viên).
- * shortcut: `dunningCancelled` luôn false vì `dunning_jobs` chưa có (S6-BE-04 hủy lời nhắc chưa gửi khi thu đủ, lập lại khi hủy).
  */
 @Injectable()
 export class PaymentsService {
+  constructor(private readonly dunning: DunningService) {}
+
   async record(
     tx: Tx,
     actor: Actor,
@@ -121,6 +123,10 @@ export class PaymentsService {
 
     const status = statusAfter(inv.totalAmount, paidAmount);
     await this.setPaid(tx, tenantId, invoiceId, status, paidAmount);
+    // Hết nợ thì hủy các mốc nhắc chưa gửi (US-7.5 AC2); thu một phần vẫn nhắc số còn lại.
+    // Race nhỏ: job nhắc đã chốt mốc (đọc nợ trước commit này) thì lời nhắc đó vẫn đi; notifier kiểm lại nợ lúc xử lý nên chỉ còn khe hẹp.
+    const dunningCancelled =
+      (await this.dunning.reconcile(tx, tenantId, [invoiceId])).cancelled > 0;
     const remainingAmount = remainingOf(
       inv.totalAmount,
       paidAmount,
@@ -162,12 +168,17 @@ export class PaymentsService {
       before: { status: inv.status, paidAmount: inv.paidAmount },
       after: { status, paidAmount },
     });
-    return this.result(p, tz, {
-      status,
-      paidAmount,
-      total: inv.totalAmount,
-      carried: inv.carriedAmount,
-    });
+    return this.result(
+      p,
+      tz,
+      {
+        status,
+        paidAmount,
+        total: inv.totalAmount,
+        carried: inv.carriedAmount,
+      },
+      dunningCancelled,
+    );
   }
 
   /** Danh sách mọi thanh toán của hóa đơn (kể cả đã hủy), mới ghi trước; bản nháp → 404. */
@@ -262,6 +273,8 @@ export class PaymentsService {
         ? inv.status
         : statusAfter(inv.totalAmount, paidAmount);
     await this.setPaid(tx, tenantId, inv.id, status, paidAmount);
+    // Còn nợ trở lại thì lập lại các mốc chưa qua đã hủy vì thu đủ.
+    await this.dunning.reconcile(tx, tenantId, [inv.id], ['settled']);
     await writeAudit(tx, {
       tenantId,
       entity: 'payment',
@@ -325,6 +338,7 @@ export class PaymentsService {
     p: PaymentRow,
     tz: string,
     s: { status: string; paidAmount: number; total: number; carried: number },
+    dunningCancelled = false,
   ): PaymentResult {
     return {
       payment: toPayment(p, tz),
@@ -332,7 +346,7 @@ export class PaymentsService {
       paidAmount: s.paidAmount,
       remainingAmount: remainingOf(s.total, s.paidAmount, s.carried),
       overpaidAmount: overpaidOf(s.total, s.paidAmount),
-      dunningCancelled: false,
+      dunningCancelled,
     };
   }
 
