@@ -211,6 +211,13 @@
       "when": 1795271180436,
       "tag": "0029_subscription",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1795271881260,
+      "tag": "0030_subscription_webhook_hardening",
+      "breakpoints": true
     }
   ]
 }

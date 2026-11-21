@@ -16184,6 +16184,11 @@
             "type": "string",
             "maxLength": 200
           },
+          "original_transaction_id": {
+            "description": "Giao dịch gốc của kho; nếu có, `EXPIRATION` chỉ hạ gói khi khớp với kỳ đang lưu",
+            "type": "string",
+            "maxLength": 200
+          },
           "store": {
             "description": "`APP_STORE` → `source = app_store`, `PLAY_STORE` → `play_store`; kho khác → `ignored`",
             "type": "string",

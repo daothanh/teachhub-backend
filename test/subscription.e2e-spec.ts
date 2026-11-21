@@ -537,28 +537,28 @@ describe('subscription: gói Free/Pro', () => {
     it('sự kiện cũ đến muộn không ghi đè trạng thái mới hơn', async () => {
       const X = await mk();
       const t0 = Date.now();
-      const newer = t0 + 2 * DAY;
+      const newer = t0 - 1000;
       expect(
         (
           await hook(X, {
             type: 'RENEWAL',
             event_timestamp_ms: newer,
-            expiration_at_ms: t0 + 730 * DAY,
+            expiration_at_ms: t0 + 390 * DAY,
           })
         ).json().status,
       ).toBe('processed');
       const stale = await hook(X, {
         type: 'RENEWAL',
-        event_timestamp_ms: t0,
+        event_timestamp_ms: t0 - 5000,
         expiration_at_ms: t0 + 100 * DAY,
       });
       expect(stale.json()).toEqual({ status: 'ignored' });
-      expect((await sub(X)).current_period_end.getTime()).toBe(t0 + 730 * DAY);
+      expect((await sub(X)).current_period_end.getTime()).toBe(t0 + 390 * DAY);
       // EXPIRATION cũ cũng không hạ gói mới
       const oldExp = await hook(X, {
         type: 'EXPIRATION',
-        event_timestamp_ms: t0 + DAY,
-        expiration_at_ms: t0 + DAY,
+        event_timestamp_ms: t0 - 3000,
+        expiration_at_ms: t0,
       });
       expect(oldExp.json().status).toBe('ignored');
       expect((await sub(X)).status).toBe('active');
@@ -646,6 +646,178 @@ describe('subscription: gói Free/Pro', () => {
         'store',
         'type',
       ]);
+    });
+  });
+
+  describe('gia cố webhook (review bảo mật)', () => {
+    it('hàm rc_begin_event/rc_apply_event gọi từ role app không có cờ webhook → lỗi 42501, không đổi gì', async () => {
+      const X = await mk();
+      const pg = (await import('pg')).default;
+      const app = new pg.Client({ connectionString: t.db.url('teachhub_app') });
+      await app.connect();
+      try {
+        await expect(
+          app.query(
+            `select app_private.rc_begin_event('x1', $1::uuid, 'INITIAL_PURCHASE', now(), '{}'::jsonb)`,
+            [X.tenantId],
+          ),
+        ).rejects.toMatchObject({ code: '42501' });
+        await expect(
+          app.query(
+            `select app_private.rc_apply_event('x1', $1::uuid, 'pro', 'active', 'app_store', now() + interval '1 year', 'p')`,
+            [X.tenantId],
+          ),
+        ).rejects.toMatchObject({ code: '42501' });
+      } finally {
+        await app.end();
+      }
+      expect((await sub(X)).status).toBe('free');
+      expect(
+        await q(`select 1 from subscription_events where tenant_id = $1`, [
+          X.tenantId,
+        ]),
+      ).toHaveLength(0);
+    });
+
+    it('đổi gói qua webhook ghi audit_logs; external_ref lưu sản phẩm kèm giao dịch gốc', async () => {
+      const X = await mk();
+      await hook(X, { original_transaction_id: 'tx-1' });
+      expect((await sub(X)).external_ref).toBe(`${PRODUCT}#tx-1`);
+      const audit = await q(
+        `select action from audit_logs where entity = 'subscriptions' and tenant_id = $1`,
+        [X.tenantId],
+      );
+      expect(audit.length).toBeGreaterThan(0);
+    });
+
+    it('kỳ chuyển khoản đang còn dài không bị store rút ngắn; kỳ store dài hơn thì ghi đè', async () => {
+      const X = await mk();
+      const end = Date.now() + 300 * DAY;
+      await q(
+        `update subscriptions set plan_code='pro', status='active', source='bank_transfer', current_period_end = $2 where tenant_id = $1`,
+        [X.tenantId, new Date(end)],
+      );
+      const short = await hook(X, {
+        store: 'PLAY_STORE',
+        expiration_at_ms: Date.now() + 30 * DAY,
+      });
+      expect(short.json()).toEqual({ status: 'ignored' });
+      expect(await sub(X)).toMatchObject({ source: 'bank_transfer' });
+      expect((await sub(X)).current_period_end.getTime()).toBe(end);
+      const longer = await hook(X, {
+        store: 'PLAY_STORE',
+        expiration_at_ms: end + 60 * DAY,
+      });
+      expect(longer.json()).toEqual({ status: 'processed' });
+      expect((await sub(X)).source).toBe('play_store');
+    });
+
+    it('EXPIRATION chỉ hạ khi product_id và original_transaction_id khớp kỳ đang lưu', async () => {
+      const X = await mk();
+      await hook(X, {
+        original_transaction_id: 'tx-1',
+        event_timestamp_ms: Date.now() - 10_000,
+      });
+      const exp = (o: Record<string, unknown>) =>
+        hook(X, {
+          type: 'EXPIRATION',
+          expiration_at_ms: Date.now(),
+          event_timestamp_ms: Date.now() - 5000,
+          ...o,
+        });
+      expect(
+        (await exp({ product_id: 'teachhub_pro_once' })).json().status,
+      ).toBe('ignored');
+      expect(
+        (await exp({ original_transaction_id: 'tx-khac' })).json().status,
+      ).toBe('ignored');
+      expect((await sub(X)).status).toBe('active');
+      expect(
+        (await exp({ original_transaction_id: 'tx-1' })).json().status,
+      ).toBe('processed');
+      expect((await sub(X)).status).toBe('expired');
+    });
+
+    it('sự kiện đã ignored được xử lý lại khi gửi lại; chỉ processed mới là duplicate', async () => {
+      const X = await mk();
+      const t0 = Date.now();
+      const expiration = {
+        id: 'redeliver-1',
+        type: 'EXPIRATION',
+        expiration_at_ms: t0,
+        event_timestamp_ms: t0,
+      };
+      // Chưa có kỳ Pro nào: bị bỏ qua (not_current_source)
+      expect((await hook(X, expiration)).json().status).toBe('ignored');
+      expect(
+        (
+          await q(
+            `select outcome from subscription_events where event_id = 'redeliver-1'`,
+          )
+        )[0].outcome,
+      ).toBe('ignored');
+      await hook(X, { event_timestamp_ms: t0 - 1000 });
+      // RevenueCat gửi lại cùng event.id: giờ áp dụng được
+      expect((await hook(X, expiration)).json().status).toBe('processed');
+      expect((await sub(X)).status).toBe('expired');
+      expect((await hook(X, expiration)).json().status).toBe('duplicate');
+      expect(
+        await q(
+          `select 1 from subscription_events where event_id = 'redeliver-1'`,
+        ),
+      ).toHaveLength(1);
+    });
+
+    it('chặn thời gian: giá trị vượt trần → 422; hạn > 400 ngày, thiếu event_timestamp_ms, mốc tương lai xa → ignored', async () => {
+      const X = await mk();
+      expect(
+        (await hook(X, { expiration_at_ms: 4_102_444_800_001 })).statusCode,
+      ).toBe(422);
+      expect(
+        (await hook(X, { event_timestamp_ms: 4_102_444_800_001 })).statusCode,
+      ).toBe(422);
+      expect((await hook(X, { event_timestamp_ms: -1 })).statusCode).toBe(422);
+      expect(
+        (await hook(X, { expiration_at_ms: Date.now() + 401 * DAY })).json()
+          .status,
+      ).toBe('ignored');
+      expect(
+        (await hook(X, { event_timestamp_ms: undefined })).json().status,
+      ).toBe('ignored');
+      expect(
+        (await hook(X, { event_timestamp_ms: Date.now() + 30 * DAY })).json()
+          .status,
+      ).toBe('ignored');
+      expect((await sub(X)).status).toBe('free');
+      await hook(X, { event_timestamp_ms: Date.now() - 1000 });
+      expect(
+        (
+          await hook(X, { type: 'EXPIRATION', event_timestamp_ms: undefined })
+        ).json().status,
+      ).toBe('ignored');
+      expect((await sub(X)).status).toBe('active');
+    });
+
+    it('log cảnh báo không PII khi tenant lạ', async () => {
+      const { Logger } = await import('@nestjs/common');
+      const warn = vi
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined);
+      try {
+        const ghost = randomUUID();
+        expect((await hook({ tenantId: ghost })).json()).toEqual({
+          status: 'ignored',
+        });
+        const msgs = warn.mock.calls.map((c) => String(c[0]));
+        expect(msgs.some((m) => m.includes('reason=unknown_tenant'))).toBe(
+          true,
+        );
+        expect(
+          msgs.every((m) => !m.includes(ghost) && !m.includes(PRODUCT)),
+        ).toBe(true);
+      } finally {
+        warn.mockRestore();
+      }
     });
   });
 });

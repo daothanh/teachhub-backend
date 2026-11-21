@@ -210,6 +210,10 @@ export const revenueCatEventSchema = z
         '`tenant_id` (UUID), app đặt khi đăng nhập RevenueCat; không PII (Spec §2.9). Không phải UUID tenant có thật → `ignored` (vẫn 200 để RevenueCat không thử lại)',
     }),
     product_id: z.string().max(200).optional(),
+    original_transaction_id: z.string().max(200).optional().meta({
+      description:
+        'Giao dịch gốc của kho; nếu có, `EXPIRATION` chỉ hạ gói khi khớp với kỳ đang lưu',
+    }),
     store: z.string().max(40).optional().meta({
       description:
         '`APP_STORE` → `source = app_store`, `PLAY_STORE` → `play_store`; kho khác → `ignored`',
