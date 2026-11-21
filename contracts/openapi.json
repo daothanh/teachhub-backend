@@ -8472,7 +8472,7 @@
     },
     "/v1/subscription/bank-transfer-orders": {
       "post": {
-        "description": "Dành cho client web (R6, Spec §10): app không gọi và không dẫn link tới đây. Trả số tiền, nội dung chuyển khoản, tài khoản nhận và chuỗi QR cho màn T14a, trạng thái `pending`. Tenant đã có đơn `pending` → trả lại chính đơn đó (vẫn 201, không tạo trùng). Pro chỉ kích hoạt khi quản trị xác nhận đã nhận tiền (`POST /admin/bank-transfer-orders/{id}/confirm`, đã có từ Sprint 2), kèm push cho giáo viên; client đọc `GET /plan-usage` để thấy gói mới. Giới hạn 5 lần/phút/user.",
+        "description": "Dành cho client web (R6, Spec §10): app không gọi và không dẫn link tới đây. Trả số tiền, nội dung chuyển khoản, tài khoản nhận và chuỗi QR cho màn T14a, trạng thái `pending`. Tenant đã có đơn `pending` → trả lại chính đơn đó (vẫn 201, không tạo trùng). Pro chỉ kích hoạt khi quản trị xác nhận đã nhận tiền (`POST /admin/bank-transfer-orders/{id}/confirm`, đã có từ Sprint 2), kèm push cho giáo viên; client đọc `GET /plan-usage` để thấy gói mới. Giới hạn 5 lần/phút/user. Chưa cấu hình giá hoặc tài khoản nhận tiền phía server → 503 `SERVICE_UNAVAILABLE`.",
         "operationId": "subscription_createBankTransferOrder",
         "parameters": [
           {
@@ -8556,6 +8556,16 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -8571,7 +8581,7 @@
     },
     "/v1/webhooks/revenuecat": {
       "post": {
-        "description": "RevenueCat gọi server-to-server, không có JWT. Xác thực bằng header `Authorization` mang giá trị bí mật đặt trong cấu hình webhook, so sánh thời gian hằng (Spec §7.1); sai hoặc thiếu → 401 `UNAUTHENTICATED`. Idempotent theo `event.id` (bảng `subscription_events`, `event_id` duy nhất): gửi lại → 200 `duplicate`. Một giao dịch: ghi sự kiện, cập nhật `subscriptions` (`planCode`, `status`, `source`, `currentPeriodEnd`, `externalRef`) rồi `audit_logs`; Pro có hiệu lực ≤ 1 phút, app không cần khởi động lại. Mọi sự kiện hợp lệ nhưng không áp dụng trả 200 `ignored` (không 4xx) để RevenueCat không thử lại vô ích; chỉ sai chữ ký trả 401 và thân sai định dạng trả 422 `VALIDATION_FAILED`. Quy tắc từng loại sự kiện ghi ở `RevenueCatEvent.type`.",
+        "description": "RevenueCat gọi server-to-server, không có JWT. Xác thực bằng header `Authorization` mang giá trị bí mật đặt trong cấu hình webhook, so sánh thời gian hằng (Spec §7.1); sai hoặc thiếu → 401 `UNAUTHENTICATED`. Idempotent theo `event.id` (bảng `subscription_events`, `event_id` duy nhất): gửi lại → 200 `duplicate`. Một giao dịch: ghi sự kiện, cập nhật `subscriptions` (`planCode`, `status`, `source`, `currentPeriodEnd`, `externalRef`) rồi `audit_logs`; Pro có hiệu lực ≤ 1 phút, app không cần khởi động lại. Mọi sự kiện hợp lệ nhưng không áp dụng trả 200 `ignored` (không 4xx) để RevenueCat không thử lại vô ích; chỉ sai chữ ký trả 401 và thân sai định dạng trả 422 `VALIDATION_FAILED`. Quy tắc từng loại sự kiện ghi ở `RevenueCatEvent.type`. Chỉ kích hoạt Pro khi `product_id` nằm trong danh sách cho phép phía server (thiếu hoặc lạ → `ignored`) và `expiration_at_ms` ở tương lai (mua một lần không có hạn: lấy thời lượng cấu hình của sản phẩm, không có cấu hình → `ignored`). `EXPIRATION` chỉ hạ gói khi gói hiện tại đang trả phí bằng đúng kho đó. Chưa cấu hình bí mật phía server → 401 như sai bí mật.",
         "operationId": "revenueCatWebhook_receive",
         "parameters": [],
         "requestBody": {

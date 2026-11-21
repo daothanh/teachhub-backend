@@ -346,19 +346,19 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
       'hợp đồng S6-FL-06, thân hàm trả 501 tới task backend `reports` Sprint 7; test chéo tenant làm cùng task đó',
   },
   'GET /v1/plan-usage': {
-    notApplicable:
-      'hợp đồng S6-FL-06, thân hàm trả 501 tới task backend `subscription` Sprint 7; test chéo tenant làm cùng task đó',
+    file: 'subscription.e2e-spec.ts',
+    test: 'plan-usage: tenant khác không thấy gói, mức dùng và đơn của tenant này',
   },
   'POST /v1/subscription/trial': {
-    notApplicable:
-      'hợp đồng S6-FL-06, thân hàm trả 501 tới task backend `subscription` Sprint 7; test chéo tenant làm cùng task đó',
+    file: 'subscription.e2e-spec.ts',
+    test: 'dùng thử của tenant A không đổi gói của tenant B',
   },
   'POST /v1/subscription/bank-transfer-orders': {
-    notApplicable:
-      'hợp đồng S6-FL-06, thân hàm trả 501 tới task backend `subscription` Sprint 7; test chéo tenant làm cùng task đó',
+    file: 'subscription.e2e-spec.ts',
+    test: 'đơn chuyển khoản của A không lộ sang B; mỗi tenant có đơn pending riêng',
   },
   'POST /v1/webhooks/revenuecat': {
-    notApplicable:
-      'webhook server-to-server xác thực bằng bí mật, không có dữ liệu user; hợp đồng S6-FL-06, thân hàm 501 tới task backend `subscription` Sprint 7',
+    file: 'subscription.e2e-spec.ts',
+    test: 'webhook: sự kiện của tenant A không đổi gói của tenant B',
   },
 };
