@@ -72,7 +72,7 @@ export class BillingController {
   @ApiOperation({
     summary: 'Danh sách kỳ thu (T10, US-7.2)',
     description:
-      'Mới nhất trước, phân trang offset. Kỳ do tác vụ nền `billing.close` (02:00) tạo cho tenant có ngày chốt hôm nay; chạy lại không tạo bản nháp trùng (US-7.2 AC1). `month=YYYY-MM` lọc đúng một tháng. ' +
+      'Mới nhất trước, phân trang offset. Kỳ tháng M do tác vụ nền `billing.close` (02:00) tạo vào ngày chốt `billingCloseDay` (1 đến 28, mặc định 1) của tháng M+1, ví dụ kỳ 12/2026 chốt 01/01/2027; lỡ ngày chốt thì kỳ vẫn được tạo ở lần chạy sau; chạy lại không tạo bản nháp trùng (US-7.2 AC1). `month=YYYY-MM` lọc đúng một tháng. ' +
       'Kỳ gồm tiền: mọi số tiền là số nguyên đồng.',
   })
   @ApiOkResponse({ standardSchema: billingPeriodPageSchema })

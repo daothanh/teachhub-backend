@@ -40,13 +40,15 @@ export type PushUnregisterRequest = z.infer<typeof pushUnregisterRequestSchema>;
 
 // ---- GET /notifications · POST /notifications/read ----
 
-/** Sprint 3: báo vắng (US-3.2). Sprint 4 thêm `schedule_changed` (US-2.2). Sprint 5 thêm `billing_ready` và `invoice_issued`. */
+/** Sprint 3: báo vắng (US-3.2). Sprint 4 thêm `schedule_changed` (US-2.2). Sprint 5 thêm `billing_ready` và `invoice_issued`. Sprint 6 thêm `payment_recorded` và `payment_reminder`. */
 export const notificationTypeSchema = z.enum([
   'student_absent',
   'student_absent_correction',
   'schedule_changed',
   'billing_ready',
   'invoice_issued',
+  'payment_recorded',
+  'payment_reminder',
 ]);
 
 const absencePayloadSchema = z
@@ -117,6 +119,46 @@ export const invoiceIssuedPayloadSchema = z
   .meta({
     description:
       'Hóa đơn mới phát hành của một con; có tên con và số tiền nên không bao giờ nằm trong push hay tiêu đề email, khay hiện text cố định. deepLink `teachhub://invoices/{invoiceId}`',
+  });
+
+/**
+ * Payload loại `payment_recorded` (US-7.4 AC3, gửi phụ huynh ≤ 1 phút sau khi giáo viên ghi thanh toán, qua outbox `payment_recorded`). CHƯA nằm trong `notificationSchema` (cùng lý do `oasdiff`).
+ * Push FCM data-only (`notificationId`, `type`), không tên con, không số tiền; payload chỉ có trong hộp thông báo sau khi đăng nhập.
+ */
+export const paymentRecordedPayloadSchema = z
+  .object({
+    invoiceId: z.uuid(),
+    paymentId: z.uuid(),
+    studentId: z.uuid(),
+    studentName: z.string(),
+    amount: z.int().min(1).meta({ description: 'VND, số vừa thu' }),
+    paidOn: z.iso.date(),
+    status: z.enum(['partially_paid', 'paid']),
+    remainingAmount: z.int().min(0).meta({ description: 'VND' }),
+  })
+  .meta({
+    description:
+      'Biên nhận một lần thu: deepLink `teachhub://invoices/{invoiceId}` mở `GET /family/invoices/{invoiceId}` (có `payments`). Không có thông báo khi giáo viên hủy thanh toán',
+  });
+
+/**
+ * Payload loại `payment_reminder` (US-7.5, job `billing.dunning` gửi phụ huynh theo mốc). CHƯA nằm trong `notificationSchema`.
+ * Nội dung do hệ thống đứng tên ("TeachHub nhắc…"), không mạo danh giáo viên; push data-only như các loại tiền khác.
+ */
+export const paymentReminderPayloadSchema = z
+  .object({
+    invoiceId: z.uuid(),
+    studentId: z.uuid(),
+    studentName: z.string(),
+    offsetDays: z.int().meta({
+      description: 'Mốc nhắc so với hạn: -1, 0, 3, 7 theo lịch mặc định',
+    }),
+    remainingAmount: z.int().min(1).meta({ description: 'VND còn nợ' }),
+    dueDate: z.iso.date(),
+  })
+  .meta({
+    description:
+      'Nhắc nợ cho một hóa đơn còn nợ; deepLink `teachhub://invoices/{invoiceId}` (nút mở hóa đơn, US-7.5 AC4)',
   });
 
 const notificationBase = z.object({

@@ -8,7 +8,7 @@ import {
   vndSchema,
 } from '@teachhub/core';
 
-// Hợp đồng Sprint 5 (S4-FL-10, S4-CT-01). Tiền: số nguyên đồng, xem `libs/core/src/money.ts`.
+// Hợp đồng Sprint 5 (S4-FL-10, S4-CT-01); Sprint 6 (S5-FL-09) bổ sung thanh toán ở `payments.schemas.ts`. Tiền: số nguyên đồng, xem `libs/core/src/money.ts`.
 // Luật làm tròn (nghiệp vụ, US-7.1 AC6): mọi dòng có chia tỷ lệ (trọn khóa, trừ buổi hủy của kiểu theo tháng) làm tròn
 // tới 1.000 đ, từ 500 đ trở lên làm tròn lên (888.889 → 889.000). Đơn giá nhập vào và dòng điều chỉnh tay giữ nguyên số nguyên đồng.
 
@@ -86,7 +86,7 @@ export const invoiceStatusSchema = z
   .meta({
     id: 'InvoiceStatus',
     description:
-      'Sprint 5 chỉ phát sinh `draft`, `issued`, `void`. Ba trạng thái còn lại (`pending_confirmation`, `partially_paid`, `paid`) do thu tiền ở Sprint 6; client coi giá trị lạ như `issued`.',
+      'Sprint 5 phát sinh `draft`, `issued`, `void`. Sprint 6 thêm `partially_paid` (0 < Σ thanh toán chưa hủy < `totalAmount`) và `paid` (Σ ≥ `totalAmount`); hủy thanh toán tính lại từ Σ còn hiệu lực (về `issued` khi Σ = 0). `pending_confirmation` (phụ huynh báo đã chuyển khoản, US-7.7) chưa phát sinh ở Sprint 6; client coi giá trị lạ như `issued`.',
   });
 
 export const billingPeriodStatusSchema = z.enum(['drafting', 'closed']).meta({
@@ -207,7 +207,7 @@ export const invoiceLineKindSchema = z
   .meta({
     id: 'InvoiceLineKind',
     description:
-      'Sprint 5 sinh `session`, `monthly`, `course_installment`, `discount`, `manual_adjustment`. `carry_over` và `prev_adjustment` cần số dư chuyển kỳ (US-7.6, Sprint 6); `surcharge` cần US-7.8 (P1). Client coi giá trị lạ như dòng thường',
+      'Sprint 5 sinh `session`, `monthly`, `course_installment`, `discount`, `manual_adjustment`. Sprint 6 sinh thêm `carry_over` (số dư chuyển kỳ, US-7.6) và `prev_adjustment` (chênh lệch điểm danh sửa sau phát hành, US-7.6 AC3); `surcharge` cần US-7.8 (P1). Client coi giá trị lạ như dòng thường',
   });
 
 export const sessionNotChargedReasonSchema = z
@@ -215,7 +215,8 @@ export const sessionNotChargedReasonSchema = z
   .meta({
     id: 'SessionNotChargedReason',
     description:
-      '`excused_not_charged`/`unexcused_not_charged` = lớp hoặc học viên tắt tính vắng có phép/không phép, `cancelled` = giáo viên hủy buổi, `makeup` = buổi bù không tính thêm tiền (US-7.1 AC3). Ứng với `reason` của `InvoiceCalculator` (trừ `taught`, nghĩa là có tính)',
+      '`excused_not_charged`/`unexcused_not_charged` = lớp hoặc học viên tắt tính vắng có phép/không phép, `cancelled` = giáo viên hủy buổi, `makeup` = buổi bù không tính thêm tiền (US-7.1 AC3). Ứng với `reason` của `InvoiceCalculator` (trừ `taught`, nghĩa là có tính). ' +
+      'Chưa có lý do riêng cho buổi chưa điểm danh lúc chốt (issue #179): thêm `not_marked` vào enum bị `oasdiff` coi là breaking (`response-property-enum-value-added`), nên chờ Owner/TL chọn ngoại lệ, xem `contracts/CHANGELOG.md`. Client coi giá trị lạ như "không tính"',
   });
 
 export const invoiceLineSchema = z
@@ -249,7 +250,8 @@ export const invoiceLineSchema = z
   .meta({
     id: 'InvoiceLine',
     description:
-      '`lines` là nguồn duy nhất của hóa đơn và là SNAPSHOT lúc tính: mở hóa đơn không đọc lại điểm danh, và dòng không đổi sau phát hành (chênh lệch do sửa điểm danh về sau vào kỳ sau, `prev_adjustment`). Kiểu theo buổi: mỗi buổi trong kỳ một dòng `session`, kể cả buổi hủy và buổi bù (0 đ). Kiểu theo tháng và trọn khóa: không có dòng buổi, một dòng gốc (`monthly` đã trừ phần buổi hủy nếu bật `deductCancelled`, hoặc `course_installment`), rồi các dòng `discount` và `manual_adjustment`',
+      '`lines` là nguồn duy nhất của hóa đơn và là SNAPSHOT lúc tính: mở hóa đơn không đọc lại điểm danh, và dòng không đổi sau phát hành (chênh lệch do sửa điểm danh về sau vào kỳ sau, `prev_adjustment`). Kiểu theo buổi: mỗi buổi trong kỳ một dòng `session`, kể cả buổi hủy và buổi bù (0 đ). Kiểu theo tháng và trọn khóa: không có dòng buổi, một dòng gốc (`monthly` đã trừ phần buổi hủy nếu bật `deductCancelled`, hoặc `course_installment`), rồi các dòng `discount` và `manual_adjustment`. ' +
+      'Sprint 6: dòng `carry_over` có `amount` có dấu (dương = "Nợ kỳ trước", âm = trừ tiền trả thừa), `className` null; dòng `prev_adjustment` ghi rõ buổi và số tiền chênh trong `description` (có `sessionId`/`sessionDate` khi chênh do một buổi). Cả hai là snapshot lúc tạo bản nháp, giáo viên không sửa được (chỉ thêm `manual_adjustment`)',
   });
 
 export const invoiceSummarySchema = z
@@ -308,7 +310,13 @@ export const invoiceSchema = z
     studentId: z.uuid(),
     studentName: z.string(),
     totalAmount: vndSchema(
-      'Tổng tiền = max(0, Σ `lines.amount`); phần âm không hấp thụ được chuyển kỳ sau (US-7.6, Sprint 6)',
+      'Tổng tiền = max(0, Σ `lines.amount`, gồm cả dòng `carry_over`); phần âm không hấp thụ được chuyển kỳ sau (US-7.6, Sprint 6)',
+    ),
+    paidAmount: vndSchema(
+      'Σ thanh toán chưa hủy của hóa đơn (Sprint 6); 0 khi chưa có. Có thể lớn hơn `totalAmount` khi trả thừa (phần thừa vào sổ học viên, US-7.6)',
+    ),
+    remainingAmount: vndSchema(
+      '0 khi `status` là `void` (hóa đơn hủy, không còn phải trả) hoặc `draft` (chưa phát hành); các trạng thái khác = max(0, `totalAmount` − `paidAmount`). Còn nợ 700.000 đ trên hóa đơn 1.200.000 đ đã thu 500.000 đ (US-7.4 AC2)',
     ),
     dueDate: z.iso.date(),
     issuedAt: z.iso.datetime({ offset: true }).nullable(),
@@ -331,7 +339,7 @@ export const invoiceSchema = z
     }),
     installmentCount: z.int().min(1).max(36).nullable(),
     clampedAmount: vndSchema(
-      'Phần âm bị cắt khi Σ `lines.amount` < 0 để `totalAmount` không âm; 0 khi không cắt. Phần này chuyển kỳ sau (US-7.6, Sprint 6)',
+      'Phần âm bị cắt khi Σ `lines.amount` < 0 để `totalAmount` không âm; 0 khi không cắt. Từ Sprint 6 phần này chuyển kỳ sau thành dòng `carry_over` âm (US-7.6 AC4)',
     ),
     createdAt: z.iso.datetime({ offset: true }),
   })
@@ -350,6 +358,8 @@ export const invoiceSchema = z
       studentId: '019b2c4f-0001-7b30-8c01-000000000001',
       studentName: 'Nguyễn Minh Anh',
       totalAmount: 150000,
+      paidAmount: 0,
+      remainingAmount: 150000,
       dueDate: '2027-01-10',
       issuedAt: null,
       payout: null,
@@ -554,6 +564,12 @@ export const familyInvoiceSummarySchema = z
     teacherName: z.string(),
     periodMonth: z.iso.date(),
     totalAmount: vndSchema('VND'),
+    paidAmount: vndSchema(
+      'Σ thanh toán chưa hủy (Sprint 6); 0 khi chưa có. Có thể lớn hơn `totalAmount` khi trả thừa',
+    ),
+    remainingAmount: vndSchema(
+      '0 khi `status = void`; các trạng thái khác = max(0, `totalAmount` − `paidAmount`) (P03: "Còn nợ" khi `issued` hoặc `partially_paid`)',
+    ),
     dueDate: z.iso.date(),
     issuedAt: z.iso.datetime({ offset: true }),
   })
@@ -568,6 +584,8 @@ export const familyInvoiceSummarySchema = z
       teacherName: 'Cô Lan',
       periodMonth: '2026-12-01',
       totalAmount: 1200000,
+      paidAmount: 0,
+      remainingAmount: 1200000,
       dueDate: '2027-01-10',
       issuedAt: '2027-01-02T09:00:00+07:00',
     },
@@ -602,9 +620,43 @@ export const familyInvoiceLineSchema = z
   })
   .meta({ id: 'FamilyInvoiceLine' });
 
+export const paymentMethodSchema = z.enum(['bank_transfer', 'cash']).meta({
+  id: 'PaymentMethod',
+  description: '`bank_transfer` = chuyển khoản, `cash` = tiền mặt (US-7.4 AC1)',
+});
+
+/** Biên nhận cho phụ huynh (US-7.4 AC3): một thanh toán, đã lọc bỏ lý do hủy và ghi chú nội bộ của giáo viên. */
+export const familyPaymentSchema = z
+  .object({
+    id: z.uuid(),
+    amount: vndSchema('VND, > 0'),
+    method: paymentMethodSchema,
+    paidOn: z.iso.date().meta({ description: 'Ngày thu giáo viên ghi' }),
+    recordedAt: z.iso.datetime({ offset: true }),
+    voidedAt: z.iso.datetime({ offset: true }).nullable().meta({
+      description:
+        'Khác null khi giáo viên hủy thanh toán (ghi nhầm): biên nhận hiện "đã hủy", không tính vào `paidAmount`. Không có lý do hủy',
+    }),
+  })
+  .meta({
+    id: 'FamilyPayment',
+    example: {
+      id: '019c0b20-0001-7b30-8c01-000000000001',
+      amount: 500000,
+      method: 'bank_transfer',
+      paidOn: '2027-01-05',
+      recordedAt: '2027-01-05T09:12:00+07:00',
+      voidedAt: null,
+    },
+  });
+
 export const familyInvoiceSchema = familyInvoiceSummarySchema
   .extend({
     lines: z.array(familyInvoiceLineSchema),
+    payments: z.array(familyPaymentSchema).meta({
+      description:
+        'Biên nhận của hóa đơn, mới nhất trước, gồm cả thanh toán đã hủy (`voidedAt` ≠ null); rỗng khi chưa thu. Phụ huynh nhận thông báo `payment_recorded` trong ≤ 1 phút sau khi giáo viên ghi (US-7.4 AC3) rồi mở màn này làm biên nhận. Chỉ phụ huynh đã liên kết với con mới xem được; hóa đơn của con người khác → 404 `NOT_FOUND`. Không có `recordedBy`/`voidedBy` (chỉ giáo viên thấy)',
+    }),
     transferNote,
     qrPayload: qrPayload.nullable().meta({
       description:
@@ -619,6 +671,6 @@ export const familyInvoiceSchema = familyInvoiceSummarySchema
   .meta({
     id: 'FamilyInvoice',
     description:
-      'Chi tiết hóa đơn cho phụ huynh (P03): kỳ, dòng, tổng tiền, hạn, tài khoản nhận, VietQR (US-7.3 AC1). Không có lý do hủy hay lý do điều chỉnh của giáo viên',
+      'Chi tiết hóa đơn cho phụ huynh (P03): kỳ, dòng, tổng tiền, hạn, tài khoản nhận, VietQR (US-7.3 AC1), biên nhận thanh toán (US-7.4 AC3). Không có lý do hủy hay lý do điều chỉnh của giáo viên. Khi `status = paid` client ẩn mã QR dù `qrPayload` vẫn có',
   });
 export type FamilyInvoice = z.infer<typeof familyInvoiceSchema>;

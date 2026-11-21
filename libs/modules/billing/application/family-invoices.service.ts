@@ -139,6 +139,7 @@ export class FamilyInvoicesService {
       const void_ = r.status === 'void';
       return {
         ...this.summary(r, children, tz),
+        payments: [], // S6-BE-02: đọc từ `payments`
         lines: lines.map((l) => ({
           kind: l.kind,
           className: l.class_name,
@@ -199,6 +200,9 @@ export class FamilyInvoicesService {
       teacherName: c.teacher,
       periodMonth: r.period_month,
       totalAmount: Number(r.total_amount),
+      // Sprint 5 chưa có thanh toán nên đúng là 0; S6-BE-02 thay bằng Σ payments chưa hủy.
+      paidAmount: 0,
+      remainingAmount: r.status === 'void' ? 0 : Number(r.total_amount),
       dueDate: r.due_date,
       issuedAt: formatInZone(new Date(r.issued_at), tz.get(r.student_id)!),
     };

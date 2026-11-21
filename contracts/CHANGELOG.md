@@ -231,3 +231,68 @@ Ghi chú:
 - Endpoint `files` chuyển sang task US-4.1, Sprint 2 chưa làm.
 
 Route `/v1/admin/**` dùng ba security scheme riêng, không Bearer: `x-admin-secret`, `x-admin-user-id` (bắt buộc, không rỗng), `x-admin-permissions` (đúng một URI quyền cho thao tác: `/teachhub/admin/bank-transfer`, `/teachhub/admin/legal-articles` hoặc `/teachhub/admin/support`).
+
+## Sprint 6 "Thu tiền" (S5-FL-09, S5-CT-01)
+
+Thân hàm trả 501 `NOT_IMPLEMENTED` tới khi làm task backend tương ứng; schema đã validate thật. Không có bảng hay migration (S6-BE-01 làm cùng task backend). `oasdiff breaking` so với main: sạch.
+
+| Endpoint | Task backend |
+| --- | --- |
+| `POST /v1/invoices/{id}/payments`, `GET /v1/invoices/{id}/payments`, `POST /v1/payments/{id}/void` | S6-BE-02 |
+| `GET /v1/students/{id}/ledger` (sổ học viên, số dư chuyển kỳ; dòng `carry_over` và `prev_adjustment` trong bản nháp là việc của `InvoiceCalculator`) | S6-BE-03 |
+| `GET /v1/tenant/settings/dunning`, `PUT /v1/tenant/settings/dunning`, `GET /v1/tenant/settings/dunning/preview`, `PUT /v1/enrollments/{id}/dunning`, `GET /v1/invoices/{id}/dunning` | S6-BE-04 |
+| `GET /v1/receivables`, `GET /v1/receivables/{studentId}` (T11, P1) | S6-BE-05 |
+
+Thay đổi trên endpoint cũ (chỉ thêm trường hoặc đổi mô tả, `oasdiff breaking` sạch):
+
+- `Invoice` (`GET /invoices/{id}` và các phản hồi chứa nó) thêm `paidAmount`, `remainingAmount`. `FamilyInvoiceSummary` (cả `GET /family/invoices`) thêm hai trường cùng tên; `FamilyInvoice` thêm `payments` (biên nhận, không có lý do hủy hay ghi chú). Sprint 5 chưa có thanh toán nên mapper hiện trả `0`, `totalAmount` và `[]` (đúng thực tế); S6-BE-02 thay bằng dữ liệu thật.
+- Trạng thái hóa đơn `partially_paid` và `paid` bắt đầu phát sinh (enum đã có từ Sprint 5). `pending_confirmation` vẫn chưa (US-7.7 bị cắt).
+- Dòng `carry_over` (có dấu: dương "Nợ kỳ trước", âm trừ tiền trả thừa) và `prev_adjustment` bắt đầu phát sinh trong `lines` (enum đã có từ Sprint 5).
+- `GET /billing-periods`: mô tả ngày chốt đúng như đang chạy (kỳ tháng M chốt ngày `billingCloseDay` của tháng M+1, mặc định 1) thay cho "tenant có ngày chốt hôm nay" (issue #179).
+- `DELETE /payout-accounts/{id}`: `requestBody.required` là `false` (server nhận không body), sửa ở controller bằng `@ApiBody({ required: false })`, openapi.json do `pnpm openapi:gen` sinh.
+- `GET /notifications`: mô tả thêm hai loại `payment_recorded` và `payment_reminder` (cho phụ huynh), cùng cách với `billing_ready`/`invoice_issued`: có schema payload trong mã nhưng CHƯA nằm trong `oneOf` của `Notification`.
+
+Mã lỗi mới: `INVOICE_NOT_PAYABLE` (409, hóa đơn `draft`/`void`/đã `paid` không ghi thanh toán được). Hủy thanh toán và các lỗi còn lại dùng mã có sẵn (`VALIDATION_FAILED`, `NOT_FOUND`, `CONFLICT_STALE`, `RATE_LIMITED`).
+
+Quyết định khi soạn (cần TL chốt nếu muốn khác; tài liệu không nói rõ nên chọn phương án đơn giản):
+
+Thanh toán:
+
+- `POST /invoices/{id}/payments` trả 201 với `PaymentResult` (`payment`, trạng thái và số liệu hóa đơn sau thao tác, `overpaidAmount`, `dunningCancelled`). Không có cờ "thu đủ" riêng: thu đủ = `amount` bằng số còn nợ, app điền sẵn số đó khi bấm "Đã thu đủ". Bỏ `revenueYtd` và `taxAlerts` khỏi ví dụ Spec §5.4 vì US-9.5 AC2 đến AC4 đã cắt khỏi Sprint 6 (thêm trường vào phản hồi sau này không phá client).
+- Trả thừa được nhận (US-7.6 AC2 cần tiền trả thừa): hóa đơn `paid`, phần thừa vào `student_ledger`. Hóa đơn đã `paid` không nhận thêm thanh toán → 409 `INVOICE_NOT_PAYABLE`. `paidOn` mặc định hôm nay theo múi giờ tenant và không được sau hôm nay. Có `note` tùy chọn ≤ 300 ký tự.
+- `POST /payments/{id}/void` trả 200 cùng `PaymentResult`; hủy lại thanh toán đã hủy vẫn 200 (như hủy hóa đơn). Hủy sau khi phần trả thừa đã bị trừ vào hóa đơn kỳ sau vẫn cho phép, sổ học viên có thể thành nợ. Hóa đơn còn nợ trở lại thì lập lại mốc nhắc chưa tới. Không báo phụ huynh khi hủy.
+- Biên nhận cho phụ huynh nằm trong `GET /family/invoices/{id}` (`payments`), không có endpoint riêng; thông báo `payment_recorded` mở đúng hóa đơn đó. Không có số biên nhận riêng.
+- Sổ doanh thu (US-9.5 AC1) chỉ ghi, chưa có endpoint đọc: `GET /compliance/revenue-book` của Spec thuộc E9 cùng AC2 đến AC4.
+
+Sổ học viên và số dư chuyển kỳ:
+
+- `GET /students/{id}/ledger` trả `balanceAmount` có dấu (dương nợ cũ, âm trả thừa), `debtAmount`, `creditAmount` và các dòng sổ phân trang. Spec §4.4 chỉ nói `debit`, `credit`, `kind` nên tên `kind` là đề xuất: `unpaid_carried`, `overpayment`, `prev_adjustment`, `applied_to_invoice`, `payment_void`. Đổi mô hình sổ thì chỉ đổi enum phản hồi này.
+- Bản nháp kỳ sau thể hiện số dư bằng dòng `carry_over` có dấu trong `lines` (không thêm trường mới vào `Invoice`).
+
+Nhắc nợ:
+
+- Lịch tính bằng ngày so với hạn: `offsetsDays` mặc định `[-1, 0, 3, 7]` (đúng US-7.5 AC1), tenant đổi được, 1 đến 6 mốc từ -7 đến 30, tăng dần. Lịch mới chỉ áp cho hóa đơn phát hành sau đó. Giờ gửi cố định 07:00 đến 21:30 (job của Spec), chưa có cấu hình riêng; giờ yên lặng chung (US-6.5) chưa có endpoint ở repo này.
+- `PUT /enrollments/{id}/dunning` theo đúng Spec và Plan, nhưng US-7.5 AC3 nói theo học viên mà hóa đơn gộp mọi lớp: học viên chỉ không được nhắc khi mọi ghi danh đang mở đều tắt. App bật/tắt theo học viên bằng cách gọi cho từng ghi danh (danh sách ở `GET /receivables/{studentId}`).
+- Không có endpoint tắt nhắc riêng một hóa đơn (US không đòi); `GET /invoices/{id}/dunning` chỉ đọc trạng thái và lý do không còn nhắc. `GET /tenant/settings/dunning/preview` là thêm ngoài Spec §5.4 cho US-7.5 AC4 ("xem trước mẫu tin", S6-FL-04).
+- Thông báo nhắc là `payment_reminder`, do hệ thống đứng tên, push data-only như các loại tiền khác.
+
+Công nợ (T11):
+
+- `GET /receivables` đúng Spec: `agingBucket` là `0-30`, `31-60`, `over-60` (không dùng `60+` vì `+` trong query bị giải mã thành dấu cách), lọc thêm `classId`, sắp `sortField` = `amount` (mặc định, giảm dần), `overdueDays`, `studentName`; phân trang offset. `summary` có tổng ba nhóm và không bị lọc theo `agingBucket`. Hóa đơn chưa tới hạn tính vào nhóm `0-30`.
+- Lịch sử một học viên (US-8.3 AC3) là `GET /receivables/{studentId}` (Plan S6-BE-05 không đặt đường dẫn): hóa đơn tối đa 24, thanh toán và nhắc nợ tối đa 50 bản ghi mới nhất, chưa phân trang.
+- Vai trò mọi endpoint mới: `tenant_owner` (MVP gộp giáo viên và chủ tenant), ghi tiền giới hạn 20 lần/phút/user.
+
+Chờ chốt:
+
+- Issue #179, lý do `not_marked` cho buổi chưa điểm danh (`SessionNotChargedReason`): CHƯA thêm vì thêm giá trị enum phản hồi bị `oasdiff` báo `response-property-enum-value-added` (mức ERR) ở `GET /invoices/{id}`, `POST /invoices/{id}/adjustments`, `POST /invoices/{id}/void`. Cần Owner/TL chọn: chấp nhận ngoại lệ rồi thêm giá trị (client cũ coi như "không tính"), hoặc giữ như hiện tại. Ba loại thông báo Sprint 4/5 và hai loại mới `payment_recorded`, `payment_reminder` cùng chờ một quyết định ngoại lệ kiểu này.
+- Mô hình `student_ledger` (`kind`, quan hệ với dòng `carry_over`) và cách tính nợ ở T11 khi khoản nợ đã vào dòng `carry_over` của hóa đơn kỳ sau (đang mô tả: chỉ tính ở hóa đơn kỳ sau, không đếm hai lần).
+- Hủy hóa đơn đã có thanh toán (Sprint 5 mô tả 409): hiểu là có thanh toán còn hiệu lực; nếu muốn khác thì S6-BE-02 báo lại.
+
+Sửa sau review (PR #185):
+
+- `remainingAmount` (`Invoice`, `FamilyInvoiceSummary`) = 0 khi hóa đơn `void` hoặc `draft`; trạng thái khác = max(0, `totalAmount` − `paidAmount`). Hai mapper tạm trả đúng như vậy, có test hóa đơn hủy cho giáo viên và phụ huynh.
+- `Payment` thêm `recordedBy` và `voidedBy` (`{ id, name }`, nullable); chỉ ở phản hồi của chủ tenant, không có trong `FamilyPayment`. `PaymentResult` bỏ `invoiceId` thừa (đã có `payment.invoiceId`).
+- `GET /invoices/{id}/payments`: hóa đơn `void` vẫn trả danh sách cũ (gồm thanh toán đã hủy), bản nháp → 404.
+- Hủy thanh toán đã hủy (khóa mới) → 200 bản hiện tại, giữ `voidReason`, `voidedBy` ban đầu; cùng khóa → phát lại. Hóa đơn `paid` → 409 `INVOICE_NOT_PAYABLE`, tiền nhận thêm ghi vào kỳ sau. Mô tả hai route ghi nêu rõ `IDEMPOTENCY_IN_PROGRESS` (409) và `IDEMPOTENCY_KEY_REUSED` (422); hai mã này vốn đã được `@ApiIdempotencyKey()` khai vào phản hồi.
+- `GET /receivables` thêm `q` (tên học viên, không dấu); `summary` tính theo `classId` và `q` đang áp, không theo `agingBucket` (vì là trục chia nhóm, nếu lọc thì hai nhóm kia luôn 0).
+- Biên nhận phụ huynh: phụ huynh khác → 404. `PUT /enrollments/{id}/dunning` gọi lặp cùng giá trị → `cancelledCount = 0`.

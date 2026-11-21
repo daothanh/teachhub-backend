@@ -1777,7 +1777,7 @@
           }
         ],
         "requestBody": {
-          "required": true,
+          "required": false,
           "content": {
             "application/json": {
               "schema": {
@@ -4936,7 +4936,7 @@
     },
     "/v1/notifications": {
       "get": {
-        "description": "Phân trang con trỏ (Spec §5.5), mới nhất trước. Chỉ trả thông báo gửi cho chính user và đúng vai trò `active-membership`; không bao giờ lộ thông báo của người khác. Từ Sprint 4 có thêm loại `schedule_changed` (US-2.2) mà schema chưa liệt kê vì oasdiff coi thêm `oneOf` là breaking; client bỏ qua `type` lạ. Hình dạng: `payload = { classId, className, sessionId, change (rescheduled|cancelled|makeup), sessionStartsAt, previousStartsAt|null, reason|null }`, `deepLink = teachhub://sessions/{sessionId}`. Từ Sprint 5 có thêm hai loại cũng chưa liệt kê vì lý do trên: `billing_ready` (cho giáo viên, `payload = { periodId, periodMonth, draftCount, draftTotalAmount }`, `deepLink = teachhub://billing/periods/{periodId}`) và `invoice_issued` (cho phụ huynh, `payload = { invoiceId, studentId, studentName, periodMonth, totalAmount, dueDate }`, `deepLink = teachhub://invoices/{invoiceId}`). Push của hai loại này chỉ data-only (`notificationId`, `type`): text khay cố định, không tên con, không số tiền; email `invoice_issued` có tiêu đề cố định, không chứa tên con.",
+        "description": "Phân trang con trỏ (Spec §5.5), mới nhất trước. Chỉ trả thông báo gửi cho chính user và đúng vai trò `active-membership`; không bao giờ lộ thông báo của người khác. Từ Sprint 4 có thêm loại `schedule_changed` (US-2.2) mà schema chưa liệt kê vì oasdiff coi thêm `oneOf` là breaking; client bỏ qua `type` lạ. Hình dạng: `payload = { classId, className, sessionId, change (rescheduled|cancelled|makeup), sessionStartsAt, previousStartsAt|null, reason|null }`, `deepLink = teachhub://sessions/{sessionId}`. Từ Sprint 5 có thêm hai loại cũng chưa liệt kê vì lý do trên: `billing_ready` (cho giáo viên, `payload = { periodId, periodMonth, draftCount, draftTotalAmount }`, `deepLink = teachhub://billing/periods/{periodId}`) và `invoice_issued` (cho phụ huynh, `payload = { invoiceId, studentId, studentName, periodMonth, totalAmount, dueDate }`, `deepLink = teachhub://invoices/{invoiceId}`). Push của hai loại này chỉ data-only (`notificationId`, `type`): text khay cố định, không tên con, không số tiền; email `invoice_issued` có tiêu đề cố định, không chứa tên con. Từ Sprint 6 thêm hai loại cho phụ huynh, cũng chưa liệt kê: `payment_recorded` (`payload = { invoiceId, paymentId, studentId, studentName, amount, paidOn, status (partially_paid|paid), remainingAmount }`, `deepLink = teachhub://invoices/{invoiceId}`) và `payment_reminder` (nhắc nợ, `payload = { invoiceId, studentId, studentName, offsetDays, remainingAmount, dueDate }`, cùng deepLink); push chỉ data-only, không tên con, không số tiền.",
         "operationId": "notifications_list",
         "parameters": [
           {
@@ -6209,7 +6209,7 @@
     },
     "/v1/billing-periods": {
       "get": {
-        "description": "Mới nhất trước, phân trang offset. Kỳ do tác vụ nền `billing.close` (02:00) tạo cho tenant có ngày chốt hôm nay; chạy lại không tạo bản nháp trùng (US-7.2 AC1). `month=YYYY-MM` lọc đúng một tháng. Kỳ gồm tiền: mọi số tiền là số nguyên đồng.",
+        "description": "Mới nhất trước, phân trang offset. Kỳ tháng M do tác vụ nền `billing.close` (02:00) tạo vào ngày chốt `billingCloseDay` (1 đến 28, mặc định 1) của tháng M+1, ví dụ kỳ 12/2026 chốt 01/01/2027; lỡ ngày chốt thì kỳ vẫn được tạo ở lần chạy sau; chạy lại không tạo bản nháp trùng (US-7.2 AC1). `month=YYYY-MM` lọc đúng một tháng. Kỳ gồm tiền: mọi số tiền là số nguyên đồng.",
         "operationId": "billing_list",
         "parameters": [
           {
@@ -7027,6 +7027,1003 @@
         "summary": "Chi tiết hóa đơn kèm VietQR cho phụ huynh (P03, US-7.3 AC1)",
         "tags": [
           "family"
+        ]
+      }
+    },
+    "/v1/invoices/{id}/payments": {
+      "post": {
+        "description": "Chạy trong MỘT giao dịch có khóa hàng hóa đơn (`SELECT … FOR UPDATE`): thêm `payments`, tính lại trạng thái hóa đơn (`partially_paid` khi 0 < Σ < `totalAmount`, `paid` khi Σ ≥ `totalAmount`), ghi `student_ledger` (phần trả thừa) và `revenue_ledger` (một dòng đúng số tiền, US-9.5 AC1), ghi nhật ký kiểm toán, hủy các lời nhắc nợ chưa gửi khi thu đủ (US-7.5 AC2). Sự kiện outbox `payment_recorded` sinh thông báo `payment_recorded` cho phụ huynh trong ≤ 1 phút (US-7.4 AC3); phụ huynh mở `GET /family/invoices/{id}` làm biên nhận. `amount` nhỏ hơn số còn nợ là thu một phần; bằng là thu đủ; lớn hơn vẫn nhận, hóa đơn `paid` và `overpaidAmount` > 0 (vào sổ học viên, trừ ở kỳ sau, US-7.6 AC2). `paidOn` mặc định hôm nay theo múi giờ tenant, sau hôm nay → 422 `VALIDATION_FAILED`. Chỉ hóa đơn `issued`, `partially_paid` hoặc `pending_confirmation`; hóa đơn `draft`, `void` hay đã `paid` → 409 `INVOICE_NOT_PAYABLE`. Hóa đơn đã `paid` không nhận thêm: muốn nhận thêm tiền thì ghi vào kỳ sau (trả thừa ở lần ghi cuối đã vào sổ học viên). `Idempotency-Key` bắt buộc: gửi lại cùng khóa khi request đầu đang chạy → 409 `IDEMPOTENCY_IN_PROGRESS`; bấm lặp khi mạng chập chờn trả lại đúng kết quả đã lưu, chỉ có MỘT thanh toán; cùng khóa khác nội dung → 422 `IDEMPOTENCY_KEY_REUSED`. Giới hạn 20 lần/phút/user (429 `RATE_LIMITED`). Số tiền là số nguyên đồng. Hóa đơn của tenant khác → 404.",
+        "operationId": "payments_record",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID, giữ nguyên khi thử lại hoặc phát lại từ outbox",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecordPaymentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "INVOICE_NOT_PAYABLE\n\nIDEMPOTENCY_IN_PROGRESS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED\n\nIDEMPOTENCY_KEY_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Ghi đã thu đủ hoặc thu một phần cho hóa đơn (US-7.4 AC1, AC2)",
+        "tags": [
+          "billing"
+        ]
+      },
+      "get": {
+        "description": "Mọi thanh toán của hóa đơn, mới ghi trước, gồm cả thanh toán đã hủy (`voidedAt` khác null, kèm `voidReason`, `voidedBy`) và có `recordedBy`. Hóa đơn `void` vẫn trả danh sách thanh toán cũ. Hóa đơn chưa có thanh toán → `items` rỗng. Bản nháp, hóa đơn của tenant khác hoặc không tồn tại → 404.",
+        "operationId": "payments_list",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Danh sách thanh toán của hóa đơn (US-7.4)",
+        "tags": [
+          "billing"
+        ]
+      }
+    },
+    "/v1/payments/{id}/void": {
+      "post": {
+        "description": "Bắt buộc `reason`. Không xóa dòng: đặt `voidedAt`, `voidReason`, ghi bút toán đảo vào `revenue_ledger` (US-9.5 AC1) và `student_ledger` (đảo phần trả thừa nếu có), ghi nhật ký kiểm toán; tính lại trạng thái hóa đơn từ Σ thanh toán còn hiệu lực (có thể về `partially_paid` hoặc `issued`). Chạy trong một giao dịch có khóa hàng hóa đơn. Hóa đơn còn nợ trở lại thì các mốc nhắc nợ chưa tới được lập lại. Nếu phần trả thừa đã được trừ vào hóa đơn kỳ sau thì vẫn hủy được: số dư sổ học viên có thể thành nợ, chuyển kỳ tiếp theo (không sửa hóa đơn đã phát hành). Không báo phụ huynh riêng: biên nhận hiện `voidedAt` ở `GET /family/invoices/{id}`. Hủy lại thanh toán đã hủy (khóa mới) vẫn 200, trả bản hiện tại, giữ `voidReason` và `voidedBy` ban đầu, không ghi bút toán thứ hai; cùng khóa → phát lại kết quả đã lưu. `Idempotency-Key` bắt buộc (request cùng khóa đang chạy → 409 `IDEMPOTENCY_IN_PROGRESS`, khác nội dung → 422 `IDEMPOTENCY_KEY_REUSED`). Giới hạn 20 lần/phút/user (429 `RATE_LIMITED`). Thanh toán của tenant khác → 404.",
+        "operationId": "payments_voidPayment",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID, giữ nguyên khi thử lại hoặc phát lại từ outbox",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VoidPaymentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "IDEMPOTENCY_IN_PROGRESS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED\n\nIDEMPOTENCY_KEY_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Hủy thanh toán ghi nhầm, có lý do (US-7.4 AC4)",
+        "tags": [
+          "billing"
+        ]
+      }
+    },
+    "/v1/tenant/settings/dunning": {
+      "get": {
+        "description": "Công tắc chung và lịch mốc nhắc. Tenant chưa chỉnh lần nào trả mặc định `enabled = true`, `offsetsDays = [-1, 0, 3, 7]` (US-7.5 AC1).",
+        "operationId": "dunning_getSettings",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DunningSettings"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Xem cài đặt nhắc nợ của tenant (US-7.5 AC4)",
+        "tags": [
+          "billing"
+        ]
+      },
+      "put": {
+        "description": "Thay toàn bộ cài đặt. Lịch mới chỉ áp cho hóa đơn phát hành sau khi lưu. Tắt `enabled` thì hủy lời nhắc chưa gửi của mọi hóa đơn đang mở; bật lại không lập lại cho hóa đơn cũ. `offsetsDays` không hợp lệ (trùng, không tăng dần, ngoài -7 đến 30, quá 6 mốc) → 422 `VALIDATION_FAILED`. Giới hạn 20 lần/phút/user (429 `RATE_LIMITED`).",
+        "operationId": "dunning_putSettings",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateDunningSettingsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DunningSettings"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Đổi cài đặt nhắc nợ của tenant (US-7.5 AC4)",
+        "tags": [
+          "billing"
+        ]
+      }
+    },
+    "/v1/tenant/settings/dunning/preview": {
+      "get": {
+        "description": "Dựng tin mẫu bằng dữ liệu giả để giáo viên xem giọng văn trước khi đổi lịch; không gửi gì cho ai. Tin thật do hệ thống đứng tên \"TeachHub nhắc…\", có số còn nợ, hạn và nút mở hóa đơn.",
+        "operationId": "dunning_preview",
+        "parameters": [
+          {
+            "name": "offsetDays",
+            "required": true,
+            "in": "query",
+            "description": "Mốc cần xem trước (ngày so với hạn thanh toán)",
+            "schema": {
+              "type": "integer",
+              "minimum": -7,
+              "maximum": 30,
+              "description": "Mốc cần xem trước (ngày so với hạn thanh toán)",
+              "example": 3
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DunningPreview"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Xem trước mẫu tin nhắc nợ của một mốc (US-7.5 AC4)",
+        "tags": [
+          "billing"
+        ]
+      }
+    },
+    "/v1/enrollments/{id}/dunning": {
+      "put": {
+        "description": "Đặt `enrollments.dunning_enabled` của một ghi danh. Tắt: hủy mọi lời nhắc chưa gửi của các hóa đơn còn nợ của học viên đó (`cancelledCount`) nếu học viên không còn ghi danh đang mở nào bật nhắc; bật lại: lập lại các mốc chưa tới của hóa đơn còn nợ. Hóa đơn gộp mọi lớp của học viên nên app bật/tắt theo học viên bằng cách gọi cho từng ghi danh đang mở (danh sách ở `GET /receivables/{studentId}`). Ghi danh đã rời lớp (`leftOn`) → 409 `CONFLICT_STALE`; ghi danh của tenant khác → 404. Gọi lặp cùng giá trị → 200, `cancelledCount = 0`, không đổi gì. Giới hạn 20 lần/phút/user (429 `RATE_LIMITED`).",
+        "operationId": "dunning_putEnrollment",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutEnrollmentDunningRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnrollmentDunningResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CONFLICT_STALE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Bật hoặc tắt nhắc nợ theo học viên (US-7.5 AC3)",
+        "tags": [
+          "billing"
+        ]
+      }
+    },
+    "/v1/invoices/{id}/dunning": {
+      "get": {
+        "description": "Các mốc đã lập (`pending`, `sent`, `cancelled`) và lý do khi không còn nhắc (`disabledReason`). Bản nháp và hóa đơn 0 đ trả `steps` rỗng. Hóa đơn của tenant khác → 404.",
+        "operationId": "dunning_invoice",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvoiceDunning"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Trạng thái nhắc nợ của hóa đơn (US-7.5)",
+        "tags": [
+          "billing"
+        ]
+      }
+    },
+    "/v1/receivables": {
+      "get": {
+        "description": "Mỗi dòng một học viên còn nợ: tên, lớp, số nợ, nhóm tuổi nợ 0–30 / 31–60 / > 60 ngày tính từ hạn thanh toán của hóa đơn cũ nhất còn nợ (US-8.3 AC1). Mặc định sắp theo số nợ giảm dần, `summary` có tổng theo từng nhóm (AC2). Lọc: `agingBucket` (`0-30`, `31-60`, `over-60`), `classId`, `q` (tên học viên, không dấu); `summary` tính theo `classId` và `q` đang áp, không theo `agingBucket`; sắp: `sortField` (`amount`, `overdueDays`, `studentName`), `sortOrder`; phân trang offset `page`, `pageSize`. Giá trị ngoài danh sách → 422 `VALIDATION_FAILED`. Số tiền là số nguyên đồng. Mở một dòng bằng `GET /receivables/{studentId}`.",
+        "operationId": "receivables_list",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": 1,
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000
+            }
+          },
+          {
+            "name": "pageSize",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": 20,
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "agingBucket",
+            "required": false,
+            "in": "query",
+            "description": "Chỉ học viên thuộc nhóm tuổi nợ này. Riêng `summary` không lọc theo tham số này (nó là trục chia nhóm) để thanh nhóm vẫn đủ ba số; `summary` tính theo đúng `classId` và `q` đang áp",
+            "schema": {
+              "description": "Chỉ học viên thuộc nhóm tuổi nợ này. Riêng `summary` không lọc theo tham số này (nó là trục chia nhóm) để thanh nhóm vẫn đủ ba số; `summary` tính theo đúng `classId` và `q` đang áp",
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/AgingBucket"
+                }
+              ]
+            }
+          },
+          {
+            "name": "q",
+            "required": false,
+            "in": "query",
+            "description": "Tìm theo họ tên học viên, không phân biệt dấu (như `GET /students?q=`)",
+            "schema": {
+              "description": "Tìm theo họ tên học viên, không phân biệt dấu (như `GET /students?q=`)",
+              "example": "nguyen minh",
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 100
+            }
+          },
+          {
+            "name": "classId",
+            "required": false,
+            "in": "query",
+            "description": "Chỉ học viên đang học lớp này (có hóa đơn nợ gồm lớp đó)",
+            "schema": {
+              "description": "Chỉ học viên đang học lớp này (có hóa đơn nợ gồm lớp đó)",
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          {
+            "name": "sortField",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": "amount",
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/ReceivableSortField"
+                }
+              ]
+            }
+          },
+          {
+            "name": "sortOrder",
+            "required": false,
+            "in": "query",
+            "description": "Mặc định `amount` giảm dần (US-8.3 AC2)",
+            "schema": {
+              "default": "desc",
+              "description": "Mặc định `amount` giảm dần (US-8.3 AC2)",
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Receivables"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Công nợ và tuổi nợ theo học viên (T11, US-8.3)",
+        "tags": [
+          "billing"
+        ]
+      }
+    },
+    "/v1/receivables/{studentId}": {
+      "get": {
+        "description": "Gồm nợ hiện tại, số dư sổ học viên, trạng thái nhắc nợ và các ghi danh đang mở (để bật/tắt nhắc), kèm hóa đơn đã phát hành, thanh toán và lời nhắc mới nhất. Học viên của tenant khác hoặc không tồn tại → 404; học viên hết nợ vẫn xem được (`outstandingAmount = 0`).",
+        "operationId": "receivables_history",
+        "parameters": [
+          {
+            "name": "studentId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudentReceivableHistory"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Lịch sử hóa đơn, thanh toán, nhắc nợ của một học viên (T11, US-8.3 AC3)",
+        "tags": [
+          "billing"
+        ]
+      }
+    },
+    "/v1/students/{id}/ledger": {
+      "get": {
+        "description": "`balanceAmount` = Σ(`debitAmount` − `creditAmount`): dương = nợ cũ chưa vào hóa đơn nào, âm = tiền trả thừa chờ trừ. Bản nháp kỳ sau lấy số dư này thành dòng `carry_over` (US-7.6 AC1, AC2): nợ 200.000 đ + phát sinh 1.200.000 đ → dòng \"Nợ kỳ trước 200.000 đ\", tổng 1.400.000 đ; trả thừa 50.000 đ → dòng trừ 50.000 đ; tổng âm thì hóa đơn 0 đ và phần dư ở lại sổ (AC4). Chênh lệch do sửa điểm danh sau phát hành vào kỳ sau là dòng `prev_adjustment` (AC3). `entries` phân trang offset, mới nhất trước. Học viên của tenant khác → 404; chưa có dòng sổ nào thì số dư 0 và `entries.items` rỗng.",
+        "operationId": "receivables_ledger",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": 1,
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000
+            }
+          },
+          {
+            "name": "pageSize",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": 20,
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudentLedger"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Sổ học viên: nợ cũ, tiền trả thừa, số dư chuyển kỳ (US-7.6)",
+        "tags": [
+          "billing"
         ]
       }
     }
@@ -11493,7 +12490,7 @@
           "paid",
           "void"
         ],
-        "description": "Sprint 5 chỉ phát sinh `draft`, `issued`, `void`. Ba trạng thái còn lại (`pending_confirmation`, `partially_paid`, `paid`) do thu tiền ở Sprint 6; client coi giá trị lạ như `issued`."
+        "description": "Sprint 5 phát sinh `draft`, `issued`, `void`. Sprint 6 thêm `partially_paid` (0 < Σ thanh toán chưa hủy < `totalAmount`) và `paid` (Σ ≥ `totalAmount`); hủy thanh toán tính lại từ Σ còn hiệu lực (về `issued` khi Σ = 0). `pending_confirmation` (phụ huynh báo đã chuyển khoản, US-7.7) chưa phát sinh ở Sprint 6; client coi giá trị lạ như `issued`."
       },
       "BillingPeriodDetail": {
         "type": "object",
@@ -11888,7 +12885,19 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 100000000000,
-            "description": "Tổng tiền = max(0, Σ `lines.amount`); phần âm không hấp thụ được chuyển kỳ sau (US-7.6, Sprint 6)"
+            "description": "Tổng tiền = max(0, Σ `lines.amount`, gồm cả dòng `carry_over`); phần âm không hấp thụ được chuyển kỳ sau (US-7.6, Sprint 6)"
+          },
+          "paidAmount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "Σ thanh toán chưa hủy của hóa đơn (Sprint 6); 0 khi chưa có. Có thể lớn hơn `totalAmount` khi trả thừa (phần thừa vào sổ học viên, US-7.6)"
+          },
+          "remainingAmount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "0 khi `status` là `void` (hóa đơn hủy, không còn phải trả) hoặc `draft` (chưa phát hành); các trạng thái khác = max(0, `totalAmount` − `paidAmount`). Còn nợ 700.000 đ trên hóa đơn 1.200.000 đ đã thu 500.000 đ (US-7.4 AC2)"
           },
           "dueDate": {
             "type": "string",
@@ -11973,7 +12982,7 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 100000000000,
-            "description": "Phần âm bị cắt khi Σ `lines.amount` < 0 để `totalAmount` không âm; 0 khi không cắt. Phần này chuyển kỳ sau (US-7.6, Sprint 6)"
+            "description": "Phần âm bị cắt khi Σ `lines.amount` < 0 để `totalAmount` không âm; 0 khi không cắt. Từ Sprint 6 phần này chuyển kỳ sau thành dòng `carry_over` âm (US-7.6 AC4)"
           },
           "createdAt": {
             "type": "string",
@@ -11992,6 +13001,8 @@
           "studentId",
           "studentName",
           "totalAmount",
+          "paidAmount",
+          "remainingAmount",
           "dueDate",
           "issuedAt",
           "payout",
@@ -12018,6 +13029,8 @@
           "studentId": "019b2c4f-0001-7b30-8c01-000000000001",
           "studentName": "Nguyễn Minh Anh",
           "totalAmount": 150000,
+          "paidAmount": 0,
+          "remainingAmount": 150000,
           "dueDate": "2027-01-10",
           "issuedAt": null,
           "payout": null,
@@ -12166,7 +13179,7 @@
           "adjustmentReason"
         ],
         "additionalProperties": false,
-        "description": "`lines` là nguồn duy nhất của hóa đơn và là SNAPSHOT lúc tính: mở hóa đơn không đọc lại điểm danh, và dòng không đổi sau phát hành (chênh lệch do sửa điểm danh về sau vào kỳ sau, `prev_adjustment`). Kiểu theo buổi: mỗi buổi trong kỳ một dòng `session`, kể cả buổi hủy và buổi bù (0 đ). Kiểu theo tháng và trọn khóa: không có dòng buổi, một dòng gốc (`monthly` đã trừ phần buổi hủy nếu bật `deductCancelled`, hoặc `course_installment`), rồi các dòng `discount` và `manual_adjustment`"
+        "description": "`lines` là nguồn duy nhất của hóa đơn và là SNAPSHOT lúc tính: mở hóa đơn không đọc lại điểm danh, và dòng không đổi sau phát hành (chênh lệch do sửa điểm danh về sau vào kỳ sau, `prev_adjustment`). Kiểu theo buổi: mỗi buổi trong kỳ một dòng `session`, kể cả buổi hủy và buổi bù (0 đ). Kiểu theo tháng và trọn khóa: không có dòng buổi, một dòng gốc (`monthly` đã trừ phần buổi hủy nếu bật `deductCancelled`, hoặc `course_installment`), rồi các dòng `discount` và `manual_adjustment`. Sprint 6: dòng `carry_over` có `amount` có dấu (dương = \"Nợ kỳ trước\", âm = trừ tiền trả thừa), `className` null; dòng `prev_adjustment` ghi rõ buổi và số tiền chênh trong `description` (có `sessionId`/`sessionDate` khi chênh do một buổi). Cả hai là snapshot lúc tạo bản nháp, giáo viên không sửa được (chỉ thêm `manual_adjustment`)"
       },
       "InvoiceLineKind": {
         "type": "string",
@@ -12180,7 +13193,7 @@
           "surcharge",
           "manual_adjustment"
         ],
-        "description": "Sprint 5 sinh `session`, `monthly`, `course_installment`, `discount`, `manual_adjustment`. `carry_over` và `prev_adjustment` cần số dư chuyển kỳ (US-7.6, Sprint 6); `surcharge` cần US-7.8 (P1). Client coi giá trị lạ như dòng thường"
+        "description": "Sprint 5 sinh `session`, `monthly`, `course_installment`, `discount`, `manual_adjustment`. Sprint 6 sinh thêm `carry_over` (số dư chuyển kỳ, US-7.6) và `prev_adjustment` (chênh lệch điểm danh sửa sau phát hành, US-7.6 AC3); `surcharge` cần US-7.8 (P1). Client coi giá trị lạ như dòng thường"
       },
       "SessionNotChargedReason": {
         "type": "string",
@@ -12190,7 +13203,7 @@
           "cancelled",
           "makeup"
         ],
-        "description": "`excused_not_charged`/`unexcused_not_charged` = lớp hoặc học viên tắt tính vắng có phép/không phép, `cancelled` = giáo viên hủy buổi, `makeup` = buổi bù không tính thêm tiền (US-7.1 AC3). Ứng với `reason` của `InvoiceCalculator` (trừ `taught`, nghĩa là có tính)"
+        "description": "`excused_not_charged`/`unexcused_not_charged` = lớp hoặc học viên tắt tính vắng có phép/không phép, `cancelled` = giáo viên hủy buổi, `makeup` = buổi bù không tính thêm tiền (US-7.1 AC3). Ứng với `reason` của `InvoiceCalculator` (trừ `taught`, nghĩa là có tính). Chưa có lý do riêng cho buổi chưa điểm danh lúc chốt (issue #179): thêm `not_marked` vào enum bị `oasdiff` coi là breaking (`response-property-enum-value-added`), nên chờ Owner/TL chọn ngoại lệ, xem `contracts/CHANGELOG.md`. Client coi giá trị lạ như \"không tính\""
       },
       "CreateInvoiceAdjustmentRequest": {
         "type": "object",
@@ -12339,6 +13352,18 @@
             "maximum": 100000000000,
             "description": "VND"
           },
+          "paidAmount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "Σ thanh toán chưa hủy (Sprint 6); 0 khi chưa có. Có thể lớn hơn `totalAmount` khi trả thừa"
+          },
+          "remainingAmount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "0 khi `status = void`; các trạng thái khác = max(0, `totalAmount` − `paidAmount`) (P03: \"Còn nợ\" khi `issued` hoặc `partially_paid`)"
+          },
           "dueDate": {
             "type": "string",
             "format": "date",
@@ -12359,6 +13384,8 @@
           "teacherName",
           "periodMonth",
           "totalAmount",
+          "paidAmount",
+          "remainingAmount",
           "dueDate",
           "issuedAt"
         ],
@@ -12372,6 +13399,8 @@
           "teacherName": "Cô Lan",
           "periodMonth": "2026-12-01",
           "totalAmount": 1200000,
+          "paidAmount": 0,
+          "remainingAmount": 1200000,
           "dueDate": "2027-01-10",
           "issuedAt": "2027-01-02T09:00:00+07:00"
         }
@@ -12422,6 +13451,18 @@
             "maximum": 100000000000,
             "description": "VND"
           },
+          "paidAmount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "Σ thanh toán chưa hủy (Sprint 6); 0 khi chưa có. Có thể lớn hơn `totalAmount` khi trả thừa"
+          },
+          "remainingAmount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "0 khi `status = void`; các trạng thái khác = max(0, `totalAmount` − `paidAmount`) (P03: \"Còn nợ\" khi `issued` hoặc `partially_paid`)"
+          },
           "dueDate": {
             "type": "string",
             "format": "date",
@@ -12437,6 +13478,13 @@
             "items": {
               "$ref": "#/components/schemas/FamilyInvoiceLine"
             }
+          },
+          "payments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FamilyPayment"
+            },
+            "description": "Biên nhận của hóa đơn, mới nhất trước, gồm cả thanh toán đã hủy (`voidedAt` ≠ null); rỗng khi chưa thu. Phụ huynh nhận thông báo `payment_recorded` trong ≤ 1 phút sau khi giáo viên ghi (US-7.4 AC3) rồi mở màn này làm biên nhận. Chỉ phụ huynh đã liên kết với con mới xem được; hóa đơn của con người khác → 404 `NOT_FOUND`. Không có `recordedBy`/`voidedBy` (chỉ giáo viên thấy)"
           },
           "transferNote": {
             "type": "string",
@@ -12481,16 +13529,19 @@
           "teacherName",
           "periodMonth",
           "totalAmount",
+          "paidAmount",
+          "remainingAmount",
           "dueDate",
           "issuedAt",
           "lines",
+          "payments",
           "transferNote",
           "qrPayload",
           "payout",
           "voidedAt"
         ],
         "additionalProperties": false,
-        "description": "Chi tiết hóa đơn cho phụ huynh (P03): kỳ, dòng, tổng tiền, hạn, tài khoản nhận, VietQR (US-7.3 AC1). Không có lý do hủy hay lý do điều chỉnh của giáo viên"
+        "description": "Chi tiết hóa đơn cho phụ huynh (P03): kỳ, dòng, tổng tiền, hạn, tài khoản nhận, VietQR (US-7.3 AC1), biên nhận thanh toán (US-7.4 AC3). Không có lý do hủy hay lý do điều chỉnh của giáo viên. Khi `status = paid` client ẩn mã QR dù `qrPayload` vẫn có"
       },
       "FamilyInvoiceLine": {
         "type": "object",
@@ -12521,6 +13572,1208 @@
           "amount"
         ],
         "additionalProperties": false
+      },
+      "FamilyPayment": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "amount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "VND, > 0"
+          },
+          "method": {
+            "$ref": "#/components/schemas/PaymentMethod"
+          },
+          "paidOn": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
+            "description": "Ngày thu giáo viên ghi"
+          },
+          "recordedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "voidedAt": {
+            "description": "Khác null khi giáo viên hủy thanh toán (ghi nhầm): biên nhận hiện \"đã hủy\", không tính vào `paidAmount`. Không có lý do hủy",
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          }
+        },
+        "required": [
+          "id",
+          "amount",
+          "method",
+          "paidOn",
+          "recordedAt",
+          "voidedAt"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "id": "019c0b20-0001-7b30-8c01-000000000001",
+          "amount": 500000,
+          "method": "bank_transfer",
+          "paidOn": "2027-01-05",
+          "recordedAt": "2027-01-05T09:12:00+07:00",
+          "voidedAt": null
+        }
+      },
+      "PaymentMethod": {
+        "type": "string",
+        "enum": [
+          "bank_transfer",
+          "cash"
+        ],
+        "description": "`bank_transfer` = chuyển khoản, `cash` = tiền mặt (US-7.4 AC1)"
+      },
+      "RecordPaymentRequest": {
+        "type": "object",
+        "properties": {
+          "amount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100000000000,
+            "description": "VND, số nguyên > 0 (mọi `amount` ≤ 0 → 422 `VALIDATION_FAILED`). Bằng số còn nợ là \"Đã thu đủ\", nhỏ hơn là \"Thu một phần\" (US-7.4 AC1, AC2). Lớn hơn số còn nợ vẫn nhận: hóa đơn `paid`, phần thừa vào sổ học viên để trừ kỳ sau (US-7.6 AC2)",
+            "example": 500000
+          },
+          "method": {
+            "$ref": "#/components/schemas/PaymentMethod"
+          },
+          "paidOn": {
+            "description": "Ngày thu; bỏ trống = hôm nay theo múi giờ tenant. Sau hôm nay → 422 `VALIDATION_FAILED`",
+            "example": "2027-01-05",
+            "type": "string",
+            "format": "date",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 300
+          }
+        },
+        "required": [
+          "amount",
+          "method"
+        ],
+        "example": {
+          "amount": 500000,
+          "method": "bank_transfer",
+          "paidOn": "2027-01-05"
+        }
+      },
+      "PaymentResult": {
+        "type": "object",
+        "properties": {
+          "payment": {
+            "$ref": "#/components/schemas/Payment"
+          },
+          "status": {
+            "description": "Trạng thái hóa đơn sau thao tác: `partially_paid`, `paid` hoặc (sau hủy thanh toán cuối) `issued`",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InvoiceStatus"
+              }
+            ]
+          },
+          "paidAmount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "Σ thanh toán chưa hủy của hóa đơn sau thao tác"
+          },
+          "remainingAmount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "max(0, `totalAmount` − `paidAmount`)"
+          },
+          "overpaidAmount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "max(0, `paidAmount` − `totalAmount`): phần trả thừa đã ghi vào sổ học viên (US-7.6 AC2); 0 khi không thừa"
+          },
+          "dunningCancelled": {
+            "type": "boolean",
+            "description": "`true` khi thao tác ghi thu đủ và các lời nhắc chưa gửi của hóa đơn vừa bị hủy (US-7.5 AC2). Luôn `false` khi hủy thanh toán"
+          }
+        },
+        "required": [
+          "payment",
+          "status",
+          "paidAmount",
+          "remainingAmount",
+          "overpaidAmount",
+          "dunningCancelled"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "payment": {
+            "id": "019c0b20-0001-7b30-8c01-000000000001",
+            "invoiceId": "019c0a10-0001-7b30-8c01-000000000001",
+            "amount": 500000,
+            "method": "bank_transfer",
+            "paidOn": "2027-01-05",
+            "note": null,
+            "recordedAt": "2027-01-05T09:12:00+07:00",
+            "recordedBy": {
+              "id": "019b2c00-0001-7b30-8c01-000000000001",
+              "name": "Cô Lan"
+            },
+            "voidedAt": null,
+            "voidedBy": null,
+            "voidReason": null
+          },
+          "status": "partially_paid",
+          "paidAmount": 500000,
+          "remainingAmount": 700000,
+          "overpaidAmount": 0,
+          "dunningCancelled": false
+        }
+      },
+      "Payment": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "invoiceId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "amount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "VND, > 0"
+          },
+          "method": {
+            "$ref": "#/components/schemas/PaymentMethod"
+          },
+          "paidOn": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
+            "description": "Ngày thu theo múi giờ tenant (mặc định hôm nay)"
+          },
+          "note": {
+            "description": "Ghi chú của giáo viên",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "recordedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "recordedBy": {
+            "$ref": "#/components/schemas/PaymentActor"
+          },
+          "voidedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "voidedBy": {
+            "$ref": "#/components/schemas/PaymentActor"
+          },
+          "voidReason": {
+            "description": "Có khi `voidedAt` khác null; chỉ giáo viên thấy",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "invoiceId",
+          "amount",
+          "method",
+          "paidOn",
+          "note",
+          "recordedAt",
+          "recordedBy",
+          "voidedAt",
+          "voidedBy",
+          "voidReason"
+        ],
+        "additionalProperties": false,
+        "description": "Một lần thu tiền của hóa đơn (chỉ phản hồi cho chủ tenant; phụ huynh chỉ có `FamilyPayment`, không có `recordedBy`, `voidedBy`, `note`, `voidReason`). Hủy không xóa dòng: `voidedAt` khác null và có bút toán đảo ở sổ doanh thu (US-7.4 AC4, US-9.5 AC1)",
+        "example": {
+          "id": "019c0b20-0001-7b30-8c01-000000000001",
+          "invoiceId": "019c0a10-0001-7b30-8c01-000000000001",
+          "amount": 500000,
+          "method": "bank_transfer",
+          "paidOn": "2027-01-05",
+          "note": null,
+          "recordedAt": "2027-01-05T09:12:00+07:00",
+          "recordedBy": {
+            "id": "019b2c00-0001-7b30-8c01-000000000001",
+            "name": "Cô Lan"
+          },
+          "voidedAt": null,
+          "voidedBy": null,
+          "voidReason": null
+        }
+      },
+      "PaymentActor": {
+        "description": "`recordedBy` = người ghi, `voidedBy` = người hủy (null khi chưa hủy): id và tên hiển thị; null khi không xác định được (vd. tài khoản đã xóa)",
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "name": {
+            "type": "string",
+            "description": "Tên hiển thị"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "PaymentList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Payment"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "additionalProperties": false,
+        "description": "Mọi thanh toán của hóa đơn, mới ghi trước, gồm cả đã hủy (`voidedAt` khác null). Không phân trang: một hóa đơn có ít lần thu"
+      },
+      "VoidPaymentRequest": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300,
+            "description": "Bắt buộc (US-7.4 AC4); ghi nhật ký kiểm toán cùng người hủy"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "example": {
+          "reason": "Ghi nhầm hóa đơn"
+        }
+      },
+      "DunningSettings": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Công tắc chung của tenant: tắt thì không tạo lời nhắc cho hóa đơn phát hành sau đó và hủy lời nhắc chưa gửi của hóa đơn đang mở"
+          },
+          "offsetsDays": {
+            "minItems": 1,
+            "maxItems": 6,
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": -7,
+              "maximum": 30
+            },
+            "description": "Mốc nhắc (ngày so với hạn thanh toán, -7 đến 30), 1 đến 6 mốc, tăng dần và không trùng. Mặc định `[-1, 0, 3, 7]` (US-7.5 AC1)",
+            "example": [
+              -1,
+              0,
+              3,
+              7
+            ]
+          }
+        },
+        "required": [
+          "enabled",
+          "offsetsDays"
+        ],
+        "additionalProperties": false,
+        "description": "Lịch nhắc nợ của tenant. Job `billing.dunning` chạy mỗi 15 phút từ 07:00 đến 21:30 giờ tenant và chỉ gửi trong khung đó (ngoài giờ yên lặng, US-7.5 AC1). Đổi lịch chỉ áp cho hóa đơn phát hành sau khi lưu; lời nhắc đã lập của hóa đơn cũ giữ nguyên",
+        "example": {
+          "enabled": true,
+          "offsetsDays": [
+            -1,
+            0,
+            3,
+            7
+          ]
+        }
+      },
+      "UpdateDunningSettingsRequest": {
+        "description": "Thay toàn bộ cài đặt: cả `enabled` và `offsetsDays` đều bắt buộc",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/DunningSettings"
+          }
+        ]
+      },
+      "DunningPreview": {
+        "type": "object",
+        "properties": {
+          "offsetDays": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "title": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "offsetDays",
+          "title",
+          "body"
+        ],
+        "additionalProperties": false,
+        "description": "Mẫu tin nhắc nợ dựng bằng dữ liệu mẫu (không có tên hay số tiền thật). Tin gửi thật do hệ thống đứng tên (\"TeachHub nhắc…\") kèm số còn nợ, hạn và nút mở hóa đơn (US-7.5 AC4)",
+        "example": {
+          "offsetDays": 3,
+          "title": "TeachHub nhắc học phí",
+          "body": "TeachHub nhắc: hóa đơn TH-25K7Q9 của bé đã quá hạn 3 ngày, còn 700.000 đ. Mở hóa đơn để chuyển khoản."
+        }
+      },
+      "PutEnrollmentDunningRequest": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "`false` = tắt nhắc nợ; mọi lời nhắc chưa gửi của hóa đơn của học viên đó bị hủy (US-7.5 AC3). `true` = bật lại, lập lại các mốc chưa tới của hóa đơn còn nợ"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "example": {
+          "enabled": false
+        }
+      },
+      "EnrollmentDunningResult": {
+        "type": "object",
+        "properties": {
+          "enrollmentId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "studentId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Giá trị của ghi danh này"
+          },
+          "studentDunningEnabled": {
+            "type": "boolean",
+            "description": "Học viên có được nhắc không: `true` khi còn ít nhất một ghi danh đang mở bật nhắc. Hóa đơn gộp mọi lớp nên chỉ khi mọi ghi danh đang mở đều tắt thì học viên mới không được nhắc"
+          },
+          "cancelledCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "Số lời nhắc chưa gửi vừa bị hủy (0 khi bật lại)"
+          }
+        },
+        "required": [
+          "enrollmentId",
+          "studentId",
+          "enabled",
+          "studentDunningEnabled",
+          "cancelledCount"
+        ],
+        "additionalProperties": false
+      },
+      "InvoiceDunning": {
+        "type": "object",
+        "properties": {
+          "invoiceId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Còn lời nhắc nào sẽ gửi không; `false` thì `disabledReason` khác null"
+          },
+          "disabledReason": {
+            "description": "`tenant_disabled` = tenant tắt nhắc, `student_disabled` = học viên tắt nhắc, `paid` = hóa đơn đã thu đủ, `void` = hóa đơn hủy",
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "tenant_disabled",
+              "student_disabled",
+              "paid",
+              "void",
+              null
+            ]
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DunningStep"
+            },
+            "description": "Các mốc đã lập theo thứ tự thời gian; rỗng với bản nháp và hóa đơn 0 đ (không nhắc, US-1.3 AC3)"
+          }
+        },
+        "required": [
+          "invoiceId",
+          "enabled",
+          "disabledReason",
+          "steps"
+        ],
+        "additionalProperties": false,
+        "description": "Trạng thái nhắc nợ của một hóa đơn (đọc để hiện lịch sử nhắc ở T10 và T11). Không có endpoint tắt riêng một hóa đơn: US-7.5 AC3 tắt theo học viên",
+        "example": {
+          "invoiceId": "019c0a10-0001-7b30-8c01-000000000001",
+          "enabled": true,
+          "disabledReason": null,
+          "steps": [
+            {
+              "offsetDays": -1,
+              "scheduledFor": "2027-01-09T09:00:00+07:00",
+              "status": "sent",
+              "sentAt": "2027-01-09T09:00:12+07:00"
+            },
+            {
+              "offsetDays": 0,
+              "scheduledFor": "2027-01-10T09:00:00+07:00",
+              "status": "pending",
+              "sentAt": null
+            }
+          ]
+        }
+      },
+      "DunningStep": {
+        "type": "object",
+        "properties": {
+          "offsetDays": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "scheduledFor": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DunningStepStatus"
+          },
+          "sentAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          }
+        },
+        "required": [
+          "offsetDays",
+          "scheduledFor",
+          "status",
+          "sentAt"
+        ],
+        "additionalProperties": false
+      },
+      "DunningStepStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "sent",
+          "cancelled"
+        ],
+        "description": "`pending` = chờ tới mốc, `sent` = đã gửi, `cancelled` = hủy do thu đủ, tắt nhắc, hóa đơn hủy hoặc tenant tắt nhắc"
+      },
+      "AgingBucket": {
+        "type": "string",
+        "enum": [
+          "0-30",
+          "31-60",
+          "over-60"
+        ],
+        "description": "Tuổi nợ = số ngày từ hạn thanh toán của hóa đơn cũ nhất còn nợ tới hôm nay (múi giờ tenant): `0-30` (gồm hóa đơn chưa tới hạn), `31-60`, `over-60` (> 60 ngày)"
+      },
+      "ReceivableSortField": {
+        "type": "string",
+        "enum": [
+          "amount",
+          "overdueDays",
+          "studentName"
+        ]
+      },
+      "Receivables": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReceivableRow"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "pageSize": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "summary": {
+            "type": "object",
+            "properties": {
+              "totalAmount": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 100000000000,
+                "description": "Tổng nợ mọi nhóm"
+              },
+              "buckets": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/AgingSummary"
+                },
+                "description": "Luôn đủ ba nhóm theo thứ tự `0-30`, `31-60`, `over-60`"
+              }
+            },
+            "required": [
+              "totalAmount",
+              "buckets"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "pageSize",
+          "summary"
+        ],
+        "additionalProperties": false,
+        "description": "Công nợ của tenant (T11): mỗi dòng một học viên còn nợ, sắp theo số nợ giảm dần mặc định, kèm tổng theo nhóm tuổi nợ (US-8.3 AC1, AC2). Nợ = Σ `remainingAmount` các hóa đơn `issued`/`partially_paid` của học viên; khoản đã nằm trong dòng `carry_over` của hóa đơn kỳ sau chỉ tính ở hóa đơn kỳ sau, không tính hai lần. Học viên không còn nợ không có dòng",
+        "example": {
+          "items": [
+            {
+              "studentId": "019b2c4f-0001-7b30-8c01-000000000001",
+              "studentName": "Nguyễn Minh Anh",
+              "classNames": [
+                "Toán 9A"
+              ],
+              "outstandingAmount": 700000,
+              "openInvoiceCount": 1,
+              "oldestDueDate": "2027-01-10",
+              "overdueDays": 12,
+              "agingBucket": "0-30"
+            }
+          ],
+          "total": 1,
+          "page": 1,
+          "pageSize": 20,
+          "summary": {
+            "totalAmount": 700000,
+            "buckets": [
+              {
+                "agingBucket": "0-30",
+                "studentCount": 1,
+                "totalAmount": 700000
+              },
+              {
+                "agingBucket": "31-60",
+                "studentCount": 0,
+                "totalAmount": 0
+              },
+              {
+                "agingBucket": "over-60",
+                "studentCount": 0,
+                "totalAmount": 0
+              }
+            ]
+          }
+        }
+      },
+      "ReceivableRow": {
+        "type": "object",
+        "properties": {
+          "studentId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "studentName": {
+            "type": "string"
+          },
+          "classNames": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Lớp học viên đang học (hiện ở mỗi dòng, US-8.3 AC1)"
+          },
+          "outstandingAmount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "Tổng số còn nợ, > 0"
+          },
+          "openInvoiceCount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "oldestDueDate": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
+            "description": "Hạn thanh toán của hóa đơn cũ nhất còn nợ"
+          },
+          "overdueDays": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "Số ngày quá hạn tính từ `oldestDueDate`; 0 khi chưa tới hạn"
+          },
+          "agingBucket": {
+            "$ref": "#/components/schemas/AgingBucket"
+          }
+        },
+        "required": [
+          "studentId",
+          "studentName",
+          "classNames",
+          "outstandingAmount",
+          "openInvoiceCount",
+          "oldestDueDate",
+          "overdueDays",
+          "agingBucket"
+        ],
+        "additionalProperties": false
+      },
+      "AgingSummary": {
+        "type": "object",
+        "properties": {
+          "agingBucket": {
+            "$ref": "#/components/schemas/AgingBucket"
+          },
+          "studentCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "totalAmount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "Tổng nợ của nhóm"
+          }
+        },
+        "required": [
+          "agingBucket",
+          "studentCount",
+          "totalAmount"
+        ],
+        "additionalProperties": false
+      },
+      "StudentReceivableHistory": {
+        "type": "object",
+        "properties": {
+          "studentId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "studentName": {
+            "type": "string"
+          },
+          "outstandingAmount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "Tổng nợ hiện tại; 0 khi hết nợ"
+          },
+          "ledgerBalanceAmount": {
+            "type": "integer",
+            "minimum": -100000000000,
+            "maximum": 100000000000,
+            "description": "Số dư sổ học viên (`GET /students/{id}/ledger`): dương = nợ cũ chưa vào hóa đơn, âm = trả thừa"
+          },
+          "dunningEnabled": {
+            "type": "boolean",
+            "description": "Học viên có được nhắc nợ không (khớp `studentDunningEnabled` của `PUT /enrollments/{id}/dunning`)"
+          },
+          "enrollments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReceivableEnrollment"
+            },
+            "description": "Ghi danh đang mở, để app gọi `PUT /enrollments/{id}/dunning` cho từng ghi danh khi bật/tắt nhắc theo học viên"
+          },
+          "invoices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReceivableInvoice"
+            }
+          },
+          "payments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReceivablePayment"
+            }
+          },
+          "reminders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReceivableReminder"
+            }
+          }
+        },
+        "required": [
+          "studentId",
+          "studentName",
+          "outstandingAmount",
+          "ledgerBalanceAmount",
+          "dunningEnabled",
+          "enrollments",
+          "invoices",
+          "payments",
+          "reminders"
+        ],
+        "additionalProperties": false,
+        "description": "Lịch sử hóa đơn, thanh toán và nhắc nợ của một học viên (US-8.3 AC3), mở từ một dòng của T11. Mới nhất trước, chưa phân trang: `invoices` tối đa 24, `payments` và `reminders` tối đa 50 bản ghi mới nhất. Chỉ hóa đơn đã phát hành (không có bản nháp)"
+      },
+      "ReceivableEnrollment": {
+        "type": "object",
+        "properties": {
+          "enrollmentId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "classId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "className": {
+            "type": "string"
+          },
+          "dunningEnabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enrollmentId",
+          "classId",
+          "className",
+          "dunningEnabled"
+        ],
+        "additionalProperties": false
+      },
+      "ReceivableInvoice": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "periodMonth": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+          },
+          "status": {
+            "$ref": "#/components/schemas/InvoiceStatus"
+          },
+          "totalAmount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "VND"
+          },
+          "paidAmount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "Σ thanh toán chưa hủy"
+          },
+          "remainingAmount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "max(0, `totalAmount` − `paidAmount`)"
+          },
+          "dueDate": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "periodMonth",
+          "status",
+          "totalAmount",
+          "paidAmount",
+          "remainingAmount",
+          "dueDate"
+        ],
+        "additionalProperties": false
+      },
+      "ReceivablePayment": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "invoiceId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "amount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "VND, > 0"
+          },
+          "method": {
+            "$ref": "#/components/schemas/PaymentMethod"
+          },
+          "paidOn": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
+            "description": "Ngày thu theo múi giờ tenant (mặc định hôm nay)"
+          },
+          "note": {
+            "description": "Ghi chú của giáo viên",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "recordedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "recordedBy": {
+            "$ref": "#/components/schemas/PaymentActor"
+          },
+          "voidedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "voidedBy": {
+            "$ref": "#/components/schemas/PaymentActor"
+          },
+          "voidReason": {
+            "description": "Có khi `voidedAt` khác null; chỉ giáo viên thấy",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "invoiceCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "invoiceId",
+          "amount",
+          "method",
+          "paidOn",
+          "note",
+          "recordedAt",
+          "recordedBy",
+          "voidedAt",
+          "voidedBy",
+          "voidReason",
+          "invoiceCode"
+        ],
+        "additionalProperties": false
+      },
+      "ReceivableReminder": {
+        "type": "object",
+        "properties": {
+          "invoiceId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "invoiceCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "offsetDays": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "scheduledFor": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DunningStepStatus"
+          },
+          "sentAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          }
+        },
+        "required": [
+          "invoiceId",
+          "invoiceCode",
+          "offsetDays",
+          "scheduledFor",
+          "status",
+          "sentAt"
+        ],
+        "additionalProperties": false
+      },
+      "StudentLedger": {
+        "type": "object",
+        "properties": {
+          "studentId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "studentName": {
+            "type": "string"
+          },
+          "balanceAmount": {
+            "type": "integer",
+            "minimum": -100000000000,
+            "maximum": 100000000000,
+            "description": "Σ(`debitAmount` − `creditAmount`): dương = còn nợ cũ chưa vào hóa đơn nào, âm = tiền trả thừa chờ trừ kỳ sau, 0 = sạch"
+          },
+          "debtAmount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "max(0, `balanceAmount`): nợ cũ"
+          },
+          "creditAmount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "max(0, −`balanceAmount`): tiền trả thừa"
+          },
+          "entries": {
+            "type": "object",
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/LedgerEntry"
+                }
+              },
+              "total": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "page": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "pageSize": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "items",
+              "total",
+              "page",
+              "pageSize"
+            ],
+            "additionalProperties": false,
+            "description": "Mới nhất trước, phân trang offset"
+          }
+        },
+        "required": [
+          "studentId",
+          "studentName",
+          "balanceAmount",
+          "debtAmount",
+          "creditAmount",
+          "entries"
+        ],
+        "additionalProperties": false,
+        "description": "Số dư chuyển kỳ của một học viên (US-7.6). Bản nháp kỳ sau lấy số dư này làm dòng `carry_over`: nợ → dòng dương \"Nợ kỳ trước\", trả thừa → dòng âm; tổng hóa đơn âm thì hóa đơn = 0 đ và phần dư tiếp tục ở sổ (US-7.6 AC4)",
+        "example": {
+          "studentId": "019b2c4f-0001-7b30-8c01-000000000001",
+          "studentName": "Nguyễn Minh Anh",
+          "balanceAmount": 200000,
+          "debtAmount": 200000,
+          "creditAmount": 0,
+          "entries": {
+            "items": [
+              {
+                "id": "019c0b30-0001-7b30-8c01-000000000001",
+                "kind": "unpaid_carried",
+                "debitAmount": 200000,
+                "creditAmount": 0,
+                "description": "Nợ kỳ trước (tháng 12/2026)",
+                "invoiceId": "019c0a10-0001-7b30-8c01-000000000001",
+                "paymentId": null,
+                "createdAt": "2027-02-01T02:00:00+07:00"
+              }
+            ],
+            "total": 1,
+            "page": 1,
+            "pageSize": 20
+          }
+        }
+      },
+      "LedgerEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/LedgerEntryKind"
+          },
+          "debitAmount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "Học viên nợ thêm; 0 nếu dòng này là ghi có"
+          },
+          "creditAmount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "Học viên được trừ; 0 nếu dòng này là ghi nợ"
+          },
+          "description": {
+            "type": "string"
+          },
+          "invoiceId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "paymentId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "debitAmount",
+          "creditAmount",
+          "description",
+          "invoiceId",
+          "paymentId",
+          "createdAt"
+        ],
+        "additionalProperties": false,
+        "description": "Một dòng sổ cái công nợ (`student_ledger`), chỉ ghi thêm, không sửa hay xóa. Mỗi dòng chỉ một trong `debitAmount`, `creditAmount` khác 0"
+      },
+      "LedgerEntryKind": {
+        "type": "string",
+        "enum": [
+          "unpaid_carried",
+          "overpayment",
+          "prev_adjustment",
+          "applied_to_invoice",
+          "payment_void"
+        ],
+        "description": "`unpaid_carried` = phần chưa thu của hóa đơn kỳ trước chuyển kỳ sau (ghi nợ), `overpayment` = trả thừa (ghi có), `prev_adjustment` = chênh lệch do sửa điểm danh sau phát hành (nợ hoặc có), `applied_to_invoice` = khoản đã đưa vào dòng `carry_over` của hóa đơn kỳ sau (bút toán đối ứng), `payment_void` = đảo do hủy thanh toán. Client coi giá trị lạ như dòng thường"
       }
     }
   }
