@@ -4,7 +4,7 @@
 set -euo pipefail
 [[ $# -eq 0 ]] || { echo "không nhận tham số" >&2; exit 2; }
 tag=${SSH_ORIGINAL_COMMAND:-}
-[[ $tag =~ ^(main|sha-[0-9a-f]{40})$ ]] || { echo "tag không hợp lệ" >&2; exit 2; }
+[[ $tag =~ {{ deploy_tag_regex }} ]] || { echo "tag không hợp lệ" >&2; exit 2; }
 IFS= read -r token
 [[ $token =~ ^[A-Za-z0-9_]+$ ]] || { echo "token không hợp lệ" >&2; exit 2; }
 

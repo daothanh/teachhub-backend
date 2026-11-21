@@ -20,7 +20,7 @@ terraform {
     }
   }
 
-  # shortcut: state lưu local (gitignore) vì dev dựng lại được và chỉ một người chạy; khi dựng staging (S3-OPS-01) chuyển sang backend S3 trên R2.
+  # shortcut: state lưu local (gitignore) vì dev dựng lại được và chỉ một người chạy. Staging (../staging) dùng backend S3 trên R2.
 }
 
 # Token đọc từ biến môi trường: HCLOUD_TOKEN, CLOUDFLARE_API_TOKEN (quyền xem infra/README.md).

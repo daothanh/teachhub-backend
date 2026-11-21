@@ -9,7 +9,15 @@
     app_dir: /opt/teachhub
     # Tag image nằm trong {{ app_dir }}/.env (IMAGE_TAG), do CD (deploy-dev.yml) cập nhật; Ansible chỉ đặt `main` lúc đầu.
     backend_image: ghcr.io/daothanh/teachhub-backend
+    env_name: dev
+    node_env: development
+    # Project dayhoc-dev (305225338991-): Web, iOS, Android debug, Android upload.
+    google_client_ids:
+      - 305225338991-7vf98anmjogm9jksgd9kdije4ah8ncgk.apps.googleusercontent.com
+      - 305225338991-eg6h9lb26na0br8qph3gaff5041dga2f.apps.googleusercontent.com
+      - 305225338991-r640djv4j04rhv3uqq8g4m56bs3n901a.apps.googleusercontent.com
+      - 305225338991-5m421cgrtvgf1flv3dhgu8i50uotj9n9.apps.googleusercontent.com
   roles:
     - docker
     - tailscale
-    - teachhub_dev
+    - teachhub_app

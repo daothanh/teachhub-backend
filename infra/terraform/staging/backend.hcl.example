@@ -1,0 +1,4 @@
+# cp backend.hcl.example backend.hcl (đã gitignore), điền rồi: tofu init -backend-config=backend.hcl
+# Khóa truy cập R2 (API token S3 của bucket) đặt qua AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY, không ghi vào file.
+bucket    = "teachhub-tfstate"                                 # tạo tay trước, riêng tư, không bật truy cập công khai
+endpoints = { s3 = "https://<ACCOUNT_ID>.r2.cloudflarestorage.com" }

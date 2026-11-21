@@ -1,3 +1,10 @@
+- name: Kiểm tra biến bắt buộc của môi trường
+  ansible.builtin.assert:
+    that:
+      - env_name is defined and node_env is defined and google_client_ids | length > 0
+      - use_mailpit or (smtp_url is defined and smtp_url | length > 0)
+    fail_msg: "Thiếu env_name/node_env/google_client_ids, hoặc môi trường không dùng Mailpit mà chưa có smtp_url"
+
 - name: Thư mục ứng dụng
   ansible.builtin.file:
     path: "{{ app_dir }}/{{ item }}"
@@ -115,7 +122,7 @@
 # Chỉ root ghi; deploy không đọc được gì ngoài script.
 - name: .env của compose (IMAGE_TAG)
   ansible.builtin.copy:
-    content: "IMAGE_TAG=main\n"
+    content: "IMAGE_TAG={{ initial_image_tag }}\n"
     dest: "{{ app_dir }}/.env"
     force: false
     mode: "0644"
