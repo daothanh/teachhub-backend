@@ -2,7 +2,7 @@
 name: teachhub
 
 x-backend: &backend
-  image: {{ backend_image }}
+  image: {{ backend_image }}:${IMAGE_TAG:-main}
   env_file: backend.env
   restart: unless-stopped
 

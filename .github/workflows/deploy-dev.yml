@@ -1,0 +1,61 @@
+name: deploy-dev
+
+# S0-OPS-02: image.yml build+push xong trên main → migrate (teachhub_owner) → up -d trên VM dev.
+# Runner vào VM qua Tailscale (cổng 22 công khai chỉ mở cho IP admin). Xem infra/README.md mục CD.
+on:
+  workflow_run:
+    workflows: [image]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag image cần deploy (vd sha-<40 hex> hoặc main)
+        default: main
+
+# Một deploy một lúc; deploy sau xếp hàng chờ chứ không hủy deploy đang chạy dở (migrate giữa chừng).
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  deploy:
+    # workflow_run kích hoạt cả với PR/failed: chỉ nhận push lên main và build thành công.
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: development
+    env:
+      TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || format('sha-{0}', github.event.workflow_run.head_sha) }}
+    steps:
+      - name: Kiểm tra tag
+        run: '[[ "$TAG" =~ ^(main|sha-[0-9a-f]{40})$ ]] || { echo "Tag không hợp lệ"; exit 1; }'
+
+      - uses: tailscale/github-action@6cae46e2d796f265265cfcf628b72a32b4d7cade # v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Thiết lập SSH
+        env:
+          SSH_KEY: ${{ secrets.DEV_SSH_PRIVATE_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEV_SSH_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Deploy
+        env:
+          SSH_TARGET: ${{ secrets.DEV_SSH_USER }}@${{ secrets.DEV_SSH_HOST }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # Khóa chỉ chạy được `teachhub-deploy` trên VM (forced command): lệnh gửi đi là tag, token ở stdin.
+        run: |
+          printf '%s\n' "$GHCR_TOKEN" | ssh -i ~/.ssh/id_deploy -o StrictHostKeyChecking=yes -o BatchMode=yes \
+            "$SSH_TARGET" "$TAG"

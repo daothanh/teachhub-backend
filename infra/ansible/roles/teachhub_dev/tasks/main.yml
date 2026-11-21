@@ -38,6 +38,88 @@
     dest: "{{ app_dir }}/postgres-init/01-roles.sh"
     mode: "0755"
 
+# User deploy (CD): không docker, không sudo chung. Chỉ chạy được script cố định qua forced command + sudoers.
+- name: User deploy cho CD
+  ansible.builtin.user:
+    name: deploy
+    shell: /bin/bash
+    groups: []
+    password_lock: true
+  when: deploy_ssh_pubkey is defined
+
+- name: Script deploy (root, cố định)
+  ansible.builtin.template:
+    src: teachhub-deploy.sh.j2
+    dest: /usr/local/bin/teachhub-deploy
+    owner: root
+    group: root
+    mode: "0755"
+  when: deploy_ssh_pubkey is defined
+
+- name: sudoers cho script deploy
+  ansible.builtin.copy:
+    content: |
+      Defaults:deploy env_keep += "SSH_ORIGINAL_COMMAND"
+      deploy ALL=(root) NOPASSWD: /usr/local/bin/teachhub-deploy
+    dest: /etc/sudoers.d/teachhub-deploy
+    owner: root
+    group: root
+    mode: "0440"
+    validate: visudo -cf %s
+  when: deploy_ssh_pubkey is defined
+
+- name: Thư mục .ssh của deploy
+  ansible.builtin.file:
+    path: /home/deploy/.ssh
+    state: directory
+    owner: deploy
+    group: deploy
+    mode: "0700"
+  when: deploy_ssh_pubkey is defined
+
+# Forced command không nhận tham số từ client; tag đi qua SSH_ORIGINAL_COMMAND và được script kiểm regex.
+- name: Khóa SSH của deploy (forced command, chỉ từ tailnet)
+  ansible.builtin.copy:
+    content: 'command="sudo /usr/local/bin/teachhub-deploy",from="100.64.0.0/10",restrict {{ deploy_ssh_pubkey }}{{ "\n" }}'
+    dest: /home/deploy/.ssh/authorized_keys
+    owner: root
+    group: deploy
+    mode: "0640"
+  when: deploy_ssh_pubkey is defined
+
+- name: sshd drop-in cho deploy (chỉ từ Tailscale 100.64.0.0/10)
+  when: deploy_ssh_pubkey is defined
+  block:
+    - name: Ghi drop-in
+      ansible.builtin.template:
+        src: sshd-deploy.conf.j2
+        dest: /etc/ssh/sshd_config.d/60-teachhub-deploy.conf
+        owner: root
+        group: root
+        mode: "0644"
+      register: sshd_dropin
+
+    - name: Kiểm cấu hình sshd rồi nạp lại
+      ansible.builtin.shell: sshd -t && systemctl reload ssh
+      when: sshd_dropin.changed
+      changed_when: true
+  rescue:
+    - name: Gỡ drop-in lỗi
+      ansible.builtin.file:
+        path: /etc/ssh/sshd_config.d/60-teachhub-deploy.conf
+        state: absent
+    - name: Dừng playbook
+      ansible.builtin.fail:
+        msg: sshd -t lỗi, đã gỡ drop-in
+
+# Chỉ root ghi; deploy không đọc được gì ngoài script.
+- name: .env của compose (IMAGE_TAG)
+  ansible.builtin.copy:
+    content: "IMAGE_TAG=main\n"
+    dest: "{{ app_dir }}/.env"
+    force: false
+    mode: "0644"
+
 # Chứa mật khẩu và khóa JWT → 0600.
 - name: Compose + biến môi trường backend
   ansible.builtin.template:
