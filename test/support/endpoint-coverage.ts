@@ -298,8 +298,8 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
     test: 'tenant B không ghi, đọc, hủy thanh toán/hóa đơn của A (404, dữ liệu A không đổi); id lạ cũng 404',
   },
   'GET /v1/students/{id}/ledger': {
-    notApplicable:
-      'hợp đồng S5-FL-09, thân hàm trả 501 tới S6-BE-03; test chéo tenant/học viên làm cùng task đó',
+    file: 'carry-over.e2e-spec.ts',
+    test: 'chỉ chủ tenant; 404 chéo tenant; RLS: tenant B không thấy sổ/công nợ của A',
   },
   'GET /v1/tenant/settings/dunning': {
     notApplicable:
@@ -322,11 +322,11 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
       'hợp đồng S5-FL-09, thân hàm trả 501 tới S6-BE-04; test chéo tenant/học viên làm cùng task đó',
   },
   'GET /v1/receivables': {
-    notApplicable:
-      'hợp đồng S5-FL-09, thân hàm trả 501 tới S6-BE-05; test chéo tenant/học viên làm cùng task đó',
+    file: 'carry-over.e2e-spec.ts',
+    test: 'chỉ chủ tenant; 404 chéo tenant; RLS: tenant B không thấy sổ/công nợ của A',
   },
   'GET /v1/receivables/{studentId}': {
-    notApplicable:
-      'hợp đồng S5-FL-09, thân hàm trả 501 tới S6-BE-05; test chéo tenant/học viên làm cùng task đó',
+    file: 'carry-over.e2e-spec.ts',
+    test: 'chỉ chủ tenant; 404 chéo tenant; RLS: tenant B không thấy sổ/công nợ của A',
   },
 };

@@ -316,7 +316,7 @@ export const invoiceSchema = z
       'Σ thanh toán chưa hủy của hóa đơn (Sprint 6); 0 khi chưa có. Có thể lớn hơn `totalAmount` khi trả thừa (phần thừa vào sổ học viên, US-7.6)',
     ),
     remainingAmount: vndSchema(
-      '0 khi `status` là `void` (hóa đơn hủy, không còn phải trả) hoặc `draft` (chưa phát hành); các trạng thái khác = max(0, `totalAmount` − `paidAmount`). Còn nợ 700.000 đ trên hóa đơn 1.200.000 đ đã thu 500.000 đ (US-7.4 AC2)',
+      '0 khi `status` là `void` (hóa đơn hủy, không còn phải trả) hoặc `draft` (chưa phát hành); các trạng thái khác = max(0, `totalAmount` − `paidAmount` − phần nợ đã chuyển sang hóa đơn kỳ sau). Còn nợ 700.000 đ trên hóa đơn 1.200.000 đ đã thu 500.000 đ (US-7.4 AC2)',
     ),
     dueDate: z.iso.date(),
     issuedAt: z.iso.datetime({ offset: true }).nullable(),
@@ -568,7 +568,7 @@ export const familyInvoiceSummarySchema = z
       'Σ thanh toán chưa hủy (Sprint 6); 0 khi chưa có. Có thể lớn hơn `totalAmount` khi trả thừa',
     ),
     remainingAmount: vndSchema(
-      '0 khi `status = void`; các trạng thái khác = max(0, `totalAmount` − `paidAmount`) (P03: "Còn nợ" khi `issued` hoặc `partially_paid`)',
+      '0 khi `status = void`; các trạng thái khác = max(0, `totalAmount` − `paidAmount` − phần nợ đã chuyển sang hóa đơn kỳ sau) (P03: "Còn nợ" khi `issued` hoặc `partially_paid`)',
     ),
     dueDate: z.iso.date(),
     issuedAt: z.iso.datetime({ offset: true }),

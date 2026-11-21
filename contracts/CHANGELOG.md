@@ -286,7 +286,6 @@ Công nợ (T11):
 Chờ chốt:
 
 - Issue #179, lý do `not_marked` cho buổi chưa điểm danh (`SessionNotChargedReason`): CHƯA thêm vì thêm giá trị enum phản hồi bị `oasdiff` báo `response-property-enum-value-added` (mức ERR) ở `GET /invoices/{id}`, `POST /invoices/{id}/adjustments`, `POST /invoices/{id}/void`. Cần Owner/TL chọn: chấp nhận ngoại lệ rồi thêm giá trị (client cũ coi như "không tính"), hoặc giữ như hiện tại. Ba loại thông báo Sprint 4/5 và hai loại mới `payment_recorded`, `payment_reminder` cùng chờ một quyết định ngoại lệ kiểu này.
-- Mô hình `student_ledger` (`kind`, quan hệ với dòng `carry_over`) và cách tính nợ ở T11 khi khoản nợ đã vào dòng `carry_over` của hóa đơn kỳ sau (đang mô tả: chỉ tính ở hóa đơn kỳ sau, không đếm hai lần).
 - Hủy hóa đơn đã có thanh toán (Sprint 5 mô tả 409): hiểu là có thanh toán còn hiệu lực; nếu muốn khác thì S6-BE-02 báo lại.
 
 Sửa sau review (PR #185):
@@ -297,3 +296,10 @@ Sửa sau review (PR #185):
 - Hủy thanh toán đã hủy (khóa mới) → 200 bản hiện tại, giữ `voidReason`, `voidedBy` ban đầu; cùng khóa → phát lại. Hóa đơn `paid` → 409 `INVOICE_NOT_PAYABLE`, tiền nhận thêm ghi vào kỳ sau. Mô tả hai route ghi nêu rõ `IDEMPOTENCY_IN_PROGRESS` (409) và `IDEMPOTENCY_KEY_REUSED` (422); hai mã này vốn đã được `@ApiIdempotencyKey()` khai vào phản hồi.
 - `GET /receivables` thêm `q` (tên học viên, không dấu); `summary` tính theo `classId` và `q` đang áp, không theo `agingBucket` (vì là trục chia nhóm, nếu lọc thì hai nhóm kia luôn 0).
 - Biên nhận phụ huynh: phụ huynh khác → 404. `PUT /enrollments/{id}/dunning` gọi lặp cùng giá trị → `cancelledCount = 0`.
+
+Đã chốt (S6-BE-03, S6-BE-05; chỉ đổi mô tả, `oasdiff breaking` sạch):
+
+- Mô hình số dư chuyển kỳ: nợ kết chuyển hẳn qua `student_ledger` (chi tiết ở đầu `billing-period.ts`, D6, D7). Bản nháp kỳ mới ghi `unpaid_carried` (nợ, gắn hóa đơn cũ) rồi dòng `carry_over` = số dư sổ (nợ + trả thừa), kèm `applied_to_invoice` (đối ứng, gắn hóa đơn mới); tổng âm → 0 đ, phần dư ở lại sổ. Chênh lệch điểm danh sửa sau phát hành thành dòng `prev_adjustment` (có `sessionId`, `sessionDate`, mô tả ghi buổi và số tiền), không đi qua sổ.
+- T11 và `remainingAmount`: `remainingAmount` = max(0, `totalAmount` − `paidAmount` − phần nợ đã chuyển sang hóa đơn kỳ sau). Hóa đơn cũ đã chuyển nợ có `remainingAmount` 0 (trạng thái vẫn `issued`/`partially_paid`) nên Σ nợ ở `GET /receivables` = Σ `remainingAmount` các hóa đơn còn nợ, không đếm hai lần.
+- Hóa đơn đã chuyển nợ sang kỳ sau: `POST /invoices/{id}/payments` → 409 `INVOICE_NOT_PAYABLE` (thu ở hóa đơn kỳ sau); `POST /invoices/{id}/void` → 409 `CONFLICT_STALE`, cũng áp cho hóa đơn đang mang dòng `carry_over` (chưa hỗ trợ trả khoản chuyển kỳ về).
+- `GET /receivables/{studentId}`: `reminders` rỗng và `dunningEnabled` luôn `true` tới khi S6-BE-04 có bảng nhắc nợ.

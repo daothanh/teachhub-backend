@@ -120,7 +120,9 @@ export const receivableInvoiceSchema = z
     status: invoiceStatusSchema,
     totalAmount: vndSchema('VND'),
     paidAmount: vndSchema('Σ thanh toán chưa hủy'),
-    remainingAmount: vndSchema('max(0, `totalAmount` − `paidAmount`)'),
+    remainingAmount: vndSchema(
+      'max(0, `totalAmount` − `paidAmount` − phần nợ đã chuyển sang hóa đơn kỳ sau)',
+    ),
     dueDate: z.iso.date(),
   })
   .meta({ id: 'ReceivableInvoice' });

@@ -210,7 +210,7 @@ export class BillingController {
   @ApiOperation({
     summary: 'Hủy hóa đơn đã phát hành, có lý do (US-7.3 AC4)',
     description:
-      'Chỉ hóa đơn `issued`: hóa đơn chưa phát hành (`draft`) → 409 `CONFLICT_STALE`; hóa đơn đã có thanh toán (Sprint 6) cũng 409, phải hủy thanh toán trước. Hóa đơn đã `void` gọi lại vẫn 200, trả bản hiện tại, `replacementInvoiceId = null`. ' +
+      'Chỉ hóa đơn `issued`: hóa đơn chưa phát hành (`draft`) → 409 `CONFLICT_STALE`; hóa đơn đã có thanh toán (Sprint 6) cũng 409, phải hủy thanh toán trước; hóa đơn đã chuyển nợ sang kỳ sau hoặc đang mang dòng `carry_over` cũng 409 (chưa hỗ trợ trả khoản chuyển kỳ về). Hóa đơn đã `void` gọi lại vẫn 200, trả bản hiện tại, `replacementInvoiceId = null`. ' +
       'Mã QR của hóa đơn đã hủy không còn hiển thị cho phụ huynh (`payout` và `qrPayload` null phía phụ huynh). `createReplacementDraft = true` chưa hỗ trợ ở MVP → 422 `VALIDATION_FAILED`, `replacementInvoiceId` luôn null; hóa đơn thay thế = tạo lại bản nháp rồi chốt. Phản hồi có `payout` nên lưu mã hóa, phát lại tối đa 10 phút. Giới hạn 20 lần/phút/user (429 `RATE_LIMITED`).',
   })
   @ApiOkResponse({ standardSchema: voidInvoiceResultSchema })
