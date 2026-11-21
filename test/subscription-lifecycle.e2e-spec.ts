@@ -4,6 +4,8 @@ import pg from 'pg';
 import { startTestApp, type TestApp } from './support/app.js';
 import { seedTenant, type SeededTenant } from './support/seed.js';
 
+const ADMIN_SECRET = 'bi-mat-bff-admin-test-0123';
+const PERM = '/teachhub/admin/bank-transfer';
 type Who = SeededTenant & { token: string };
 
 // S7 subscription (phần còn lại sau #194): FeatureGuard, job subscription.lifecycle, admin xác nhận chuyển khoản
@@ -24,6 +26,7 @@ describe('subscription: vòng đời gói', () => {
 
   beforeAll(async () => {
     Object.assign(process.env, {
+      ADMIN_API_SECRET: ADMIN_SECRET,
       PRO_PRICE_VND: '250000',
       PAYEE_BANK_BIN: '970436',
       PAYEE_BANK_NAME: 'Vietcombank',
@@ -260,6 +263,290 @@ describe('subscription: vòng đời gói', () => {
           )
         ).length,
       ).toBe(1);
+    });
+  });
+
+  describe('admin xác nhận chuyển khoản (US-0.8 AC3)', () => {
+    const adminHeaders = (
+      over: Record<string, string | undefined> = {},
+    ): Record<string, string> =>
+      Object.fromEntries(
+        Object.entries({
+          'x-admin-secret': ADMIN_SECRET,
+          'x-admin-user-id': 'iam-user-0042',
+          'x-admin-permissions': PERM,
+          ...over,
+        }).filter(([, v]) => v !== undefined),
+      ) as Record<string, string>;
+    const list = (
+      over: Record<string, string | undefined> = {},
+      status = 'pending',
+    ) =>
+      t.app.inject({
+        method: 'GET',
+        url: `/v1/admin/bank-transfer-orders?status=${status}&pageSize=100`,
+        headers: adminHeaders(over),
+      });
+    const mkOrder = async (who: Who) => {
+      const r = await t.app.inject({
+        method: 'POST',
+        url: '/v1/subscription/bank-transfer-orders',
+        payload: { planCode: 'pro' },
+        headers: {
+          authorization: `Bearer ${who.token}`,
+          'idempotency-key': randomUUID(),
+        },
+      });
+      expect(r.statusCode, r.body).toBe(201);
+      return r.json().id as string;
+    };
+    const find = async (id: string, status = 'pending') =>
+      (await list({}, status))
+        .json()
+        .items.find((o: { id: string }) => o.id === id);
+    const confirm = (
+      id: string,
+      body: object,
+      over: Record<string, string | undefined> = {},
+    ) =>
+      t.app.inject({
+        method: 'POST',
+        url: `/v1/admin/bank-transfer-orders/${id}/confirm`,
+        payload: body,
+        headers: adminHeaders({ 'idempotency-key': randomUUID(), ...over }),
+      });
+    const body = (o: { amount: number; updatedAt: string }, ref = 'FT001') => ({
+      amount: o.amount,
+      bankTransactionRef: ref,
+      expectedUpdatedAt: o.updatedAt,
+    });
+    const subOf = async (who: Who) =>
+      (
+        await q(`select * from subscriptions where tenant_id = $1`, [
+          who.tenantId,
+        ])
+      )[0];
+    const MONTH12 = (from: Date) => {
+      const d = new Date(from);
+      d.setUTCFullYear(d.getUTCFullYear() + 1);
+      return d.getTime();
+    };
+
+    it('không đủ ba header hoặc sai → 401; quyền khác route → 403; token người dùng không thay được admin', async () => {
+      for (const over of [
+        { 'x-admin-secret': undefined },
+        { 'x-admin-secret': 'sai-bi-mat-sai-bi-mat' },
+        { 'x-admin-user-id': undefined },
+        { 'x-admin-user-id': '   ' },
+      ])
+        expect((await list(over)).statusCode, JSON.stringify(over)).toBe(401);
+      for (const perm of [
+        undefined,
+        '/teachhub/admin/support',
+        '/teachhub/admin/legal-articles',
+      ])
+        expect(
+          (await list({ 'x-admin-permissions': perm })).statusCode,
+          String(perm),
+        ).toBe(403);
+      const owner = await mk();
+      const r = await t.app.inject({
+        method: 'GET',
+        url: '/v1/admin/bank-transfer-orders',
+        headers: { authorization: `Bearer ${owner.token}` },
+      });
+      expect(r.statusCode).toBe(401);
+      // Route admin khác vẫn 501 sau khi qua guard, và 403 nếu sai quyền.
+      const legal = (perm: string) =>
+        t.app.inject({
+          method: 'GET',
+          url: '/v1/admin/legal-articles',
+          headers: adminHeaders({ 'x-admin-permissions': perm }),
+        });
+      expect((await legal(PERM)).statusCode).toBe(403);
+      expect((await legal('/teachhub/admin/legal-articles')).statusCode).toBe(
+        501,
+      );
+    });
+
+    it('xác nhận đơn pending: Pro active nguồn bank_transfer 12 tháng, đơn confirmed, push outbox, audit, plan-usage thấy Pro', async () => {
+      const w = await mk();
+      const id = await mkOrder(w);
+      const o = await find(id);
+      expect(o).toMatchObject({
+        tenantId: w.tenantId,
+        status: 'pending',
+        amount: 250000,
+      });
+      const before = Date.now();
+      const r = await confirm(id, body(o, 'FT-A1'));
+      expect(r.statusCode, r.body).toBe(200);
+      const res = r.json();
+      expect(res.order).toMatchObject({
+        status: 'confirmed',
+        confirmedBy: 'iam-user-0042',
+        bankTransactionRef: 'FT-A1',
+      });
+      expect(res.subscription).toMatchObject({
+        planCode: 'pro',
+        status: 'active',
+      });
+      expect(
+        Math.abs(
+          new Date(res.subscription.currentPeriodEnd).getTime() -
+            MONTH12(new Date(before)),
+        ),
+      ).toBeLessThan(60_000);
+      expect(await subOf(w)).toMatchObject({
+        plan_code: 'pro',
+        status: 'active',
+        source: 'bank_transfer',
+      });
+      const ev = await q(
+        `select payload from outbox_events where tenant_id = $1 and type = 'subscription_activated'`,
+        [w.tenantId],
+      );
+      expect(ev).toHaveLength(1);
+      expect(ev[0].payload.source).toBe('bank_transfer');
+      const audit = await q(
+        `select entity, after_data from audit_logs where tenant_id = $1 and entity in ('bank_transfer_orders', 'subscriptions') order by created_at`,
+        [w.tenantId],
+      );
+      expect(
+        audit.some(
+          (a) =>
+            a.entity === 'bank_transfer_orders' &&
+            a.after_data.confirmed_by === 'iam-user-0042',
+        ),
+      ).toBe(true);
+      expect(
+        audit.some(
+          (a) =>
+            a.entity === 'subscriptions' &&
+            a.after_data.source === 'bank_transfer',
+        ),
+      ).toBe(true);
+      const usage = await t.app.inject({
+        method: 'GET',
+        url: '/v1/plan-usage',
+        headers: { authorization: `Bearer ${w.token}` },
+      });
+      expect(usage.json()).toMatchObject({
+        plan: { code: 'pro', source: 'bank_transfer' },
+        pendingBankTransferOrder: null,
+      });
+      expect((await find(id, 'confirmed')).status).toBe('confirmed');
+      expect(await find(id)).toBeUndefined();
+    });
+
+    it('xác nhận hai lần: một kỳ, một push; gọi lại khác mã giao dịch hoặc dữ liệu cũ → 409', async () => {
+      const w = await mk();
+      const id = await mkOrder(w);
+      const o = await find(id);
+      const first = await confirm(id, body(o, 'FT-B1'));
+      const end1 = (await subOf(w)).current_period_end;
+      const again = await confirm(id, body(o, 'FT-B1'));
+      expect(again.statusCode, again.body).toBe(200);
+      expect(again.json().subscription).toEqual(first.json().subscription);
+      expect((await subOf(w)).current_period_end).toEqual(end1);
+      const other = await confirm(id, body(o, 'FT-KHAC'));
+      expect(other.statusCode).toBe(409);
+      expect(other.json().code).toBe('CONFLICT_STALE');
+      expect(
+        await q(
+          `select 1 from outbox_events where tenant_id = $1 and type = 'subscription_activated'`,
+          [w.tenantId],
+        ),
+      ).toHaveLength(1);
+      // Admin khác xác nhận lại đơn đã xong cũng là 409, không cộng kỳ.
+      const stranger = await confirm(id, body(o, 'FT-B1'), {
+        'x-admin-user-id': 'iam-user-9999',
+      });
+      expect(stranger.statusCode).toBe(409);
+      expect((await subOf(w)).current_period_end).toEqual(end1);
+    });
+
+    it('đang Pro còn hạn: cộng nối từ hạn hiện tại, không rút ngắn', async () => {
+      const w = await mk('pro');
+      const cur = new Date(Date.now() + 100 * 86_400_000);
+      await q(
+        `update subscriptions set current_period_end = $2 where tenant_id = $1`,
+        [w.tenantId, cur],
+      );
+      const id = await mkOrder(w);
+      const r = await confirm(id, body(await find(id), 'FT-C1'));
+      expect(r.statusCode, r.body).toBe(200);
+      expect(new Date(r.json().subscription.currentPeriodEnd).getTime()).toBe(
+        MONTH12(cur),
+      );
+    });
+
+    it('tenant hết hạn dùng thử tính từ bây giờ, không từ hạn cũ; đơn của tenant khác không đổi gói của tenant này', async () => {
+      const [a, b] = [await mk(), await mk()];
+      await q(
+        `update subscriptions set status = 'expired', plan_code = 'free', current_period_end = now() - interval '30 days' where tenant_id = $1`,
+        [a.tenantId],
+      );
+      const [ia] = [await mkOrder(a), await mkOrder(b)];
+      const r = await confirm(ia, body(await find(ia), 'FT-D1'));
+      expect(
+        Math.abs(
+          new Date(r.json().subscription.currentPeriodEnd).getTime() -
+            MONTH12(new Date()),
+        ),
+      ).toBeLessThan(60_000);
+      expect(await subOf(b)).toMatchObject({
+        plan_code: 'free',
+        status: 'free',
+      });
+      expect(
+        await q(
+          `select status from bank_transfer_orders where tenant_id = $1`,
+          [b.tenantId],
+        ),
+      ).toEqual([{ status: 'pending' }]);
+    });
+
+    it('sai số tiền → 422 ở trường amount; expectedUpdatedAt lệch → 409; id lạ → 404; thiếu Idempotency-Key → 422; không đổi gói', async () => {
+      const w = await mk();
+      const id = await mkOrder(w);
+      const o = await find(id);
+      const bad = await confirm(id, { ...body(o), amount: o.amount - 1 });
+      expect(bad.statusCode).toBe(422);
+      expect(bad.json().errors).toHaveProperty('amount');
+      const stale = await confirm(id, {
+        ...body(o),
+        expectedUpdatedAt: '2020-01-01T00:00:00Z',
+      });
+      expect(stale.statusCode).toBe(409);
+      expect((await confirm(randomUUID(), body(o))).statusCode).toBe(404);
+      expect(
+        (await confirm(id, body(o), { 'idempotency-key': undefined }))
+          .statusCode,
+      ).toBe(422);
+      expect(await subOf(w)).toMatchObject({
+        plan_code: 'free',
+        status: 'free',
+      });
+      expect((await find(id)).status).toBe('pending');
+    });
+
+    it('role app gọi thẳng hàm admin khi không có cờ → 42501, không đổi gì', async () => {
+      const w = await mk();
+      const id = await mkOrder(w);
+      const o = await find(id);
+      const app = new pg.Pool({ connectionString: t.db.url('teachhub_app') });
+      try {
+        await expect(
+          app.query(
+            `select app_private.admin_confirm_bank_transfer($1, $2, 'X', $3)`,
+            [id, o.amount, o.updatedAt],
+          ),
+        ).rejects.toMatchObject({ code: '42501' });
+      } finally {
+        await app.end();
+      }
+      expect(await subOf(w)).toMatchObject({ status: 'free' });
     });
   });
 });

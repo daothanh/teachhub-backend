@@ -99,6 +99,11 @@ export const envSchema = z
     INVITE_CODE_HMAC_KEY: z.string().min(16).optional(),
     /** Khóa AES-256-GCM mã hóa phản hồi idempotency chứa token/mã mời. Bắt buộc ngoài local/test. */
     IDEMPOTENCY_ENC_KEY: z.string().min(16).optional(),
+    /** Secret server-to-server của BFF admin (header `x-admin-secret`, Spec §5.2e). Thiếu = mọi route `/v1/admin/**` trả 401 (fail closed). */
+    ADMIN_API_SECRET: z.preprocess(
+      emptyToUndefined,
+      z.string().min(16).optional(),
+    ),
     /** Bí mật webhook RevenueCat (header `Authorization`). Thiếu = webhook trả 401 cho mọi request (fail closed). */
     REVENUECAT_WEBHOOK_SECRET: z.preprocess(
       emptyToUndefined,

@@ -4056,7 +4056,7 @@
     },
     "/v1/admin/bank-transfer-orders/{id}/confirm": {
       "post": {
-        "description": "Quyền IAM: `/teachhub/admin/bank-transfer`. Một giao dịch: đơn → `confirmed` (ghi `x-admin-user-id`), `subscriptions` → Pro, `audit_logs`, rồi push cho giáo viên. Body bắt buộc `amount`, `bankTransactionRef`, `expectedUpdatedAt`; đơn không còn `pending` hoặc `expectedUpdatedAt` lệch `updatedAt` → 409 `CONFLICT_STALE`.",
+        "description": "Quyền IAM: `/teachhub/admin/bank-transfer`. Một giao dịch: đơn → `confirmed` (ghi `x-admin-user-id`), `subscriptions` → Pro, `audit_logs`, rồi push cho giáo viên. Body bắt buộc `amount`, `bankTransactionRef`, `expectedUpdatedAt`; đơn không còn `pending` hoặc `expectedUpdatedAt` lệch `updatedAt` → 409 `CONFLICT_STALE`. Kỳ Pro 12 tháng (giá Pro là giá một năm): đang Pro còn hạn thì cộng nối từ hạn hiện tại, không rút ngắn; `amount` phải bằng số tiền của đơn, lệch → 422 `VALIDATION_FAILED` ở trường `amount`. Gọi lại cùng `bankTransactionRef` và `amount` bởi cùng người xác nhận → 200 với kết quả cũ (không cộng kỳ lần hai); khác đi → 409 `CONFLICT_STALE`.",
         "operationId": "admin_confirmBankTransferOrder",
         "parameters": [
           {

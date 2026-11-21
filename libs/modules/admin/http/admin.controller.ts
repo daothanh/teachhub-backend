@@ -7,6 +7,8 @@ import {
   Param,
   Post,
   Query,
+  Req,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiCreatedResponse,
@@ -16,8 +18,16 @@ import {
   ApiSecurity,
   ApiTags,
 } from '@nestjs/swagger';
+import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { ApiErrors, ApiIdempotencyKey, AppException } from '@teachhub/core';
+import {
+  ApiErrors,
+  ApiIdempotencyKey,
+  AppException,
+  Public,
+} from '@teachhub/core';
+import { BankTransferAdminService } from '../application/bank-transfer-admin.service.js';
+import { AdminGuard, RequiresAdminPermission } from './admin.guard.js';
 import {
   type BankTransferConfirmed,
   type ConfirmBankTransferRequest,
@@ -42,6 +52,9 @@ import {
 } from './admin.schemas.js';
 
 const idParam = z.uuid();
+/** `x-admin-user-id` đã được AdminGuard kiểm (không rỗng). Không dùng `@Headers` vì sẽ khai thành tham số bắt buộc mới trong hợp đồng. */
+const adminUserOf = (req: FastifyRequest) =>
+  String(req.headers['x-admin-user-id']).trim();
 
 /**
  * Xác thực server-to-server của BFF admin (Spec §5.2e): ba header phải có đủ (một yêu cầu bảo mật AND).
@@ -51,14 +64,19 @@ const AdminAuth = (permission: string) =>
   applyDecorators(
     ApiSecurity({ adminSecret: [], adminUserId: [], adminPermissions: [] }),
     ApiExtension('x-admin-permission', permission),
+    RequiresAdminPermission(permission),
     ApiErrors('UNAUTHENTICATED', 'FORBIDDEN'),
   );
 
-// Hợp đồng Sprint 2 (S1-CT-02). AdminGuard thật và thân hàm làm ở task backend riêng; chưa có guard thì
-// JwtAuthGuard toàn cục vẫn chặn (401), nên route chưa mở nhầm cho ai.
+// Hợp đồng Sprint 2 (S1-CT-02). `AdminGuard` (secret + user id + quyền IAM) thay JWT cho cả controller; chuyển khoản
+// đã có thân hàm (S7), bài quy định và tra cứu hỗ trợ còn trả 501 (đã qua guard) tới task admin riêng.
 @ApiTags('admin')
+@Public()
+@UseGuards(AdminGuard)
 @Controller('admin')
 export class AdminController {
+  constructor(private readonly bankTransfers: BankTransferAdminService) {}
+
   @Get('bank-transfer-orders')
   @AdminAuth('/teachhub/admin/bank-transfer')
   @ApiOperation({
@@ -70,9 +88,10 @@ export class AdminController {
   @ApiErrors('VALIDATION_FAILED')
   listBankTransferOrders(
     @Query({ schema: bankTransferListQuerySchema })
-    _query: BankTransferListQuery,
-  ): BankTransferOrderPage {
-    throw new AppException('NOT_IMPLEMENTED');
+    query: BankTransferListQuery,
+    @Req() req: FastifyRequest,
+  ): Promise<BankTransferOrderPage> {
+    return this.bankTransfers.list(adminUserOf(req), query);
   }
 
   @Post('bank-transfer-orders/:id/confirm')
@@ -82,17 +101,26 @@ export class AdminController {
     summary: 'Xác nhận đã nhận chuyển khoản, kích hoạt Pro (US-0.8 AC3)',
     description:
       'Quyền IAM: `/teachhub/admin/bank-transfer`. Một giao dịch: đơn → `confirmed` (ghi `x-admin-user-id`), `subscriptions` → Pro, `audit_logs`, rồi push cho giáo viên. ' +
-      'Body bắt buộc `amount`, `bankTransactionRef`, `expectedUpdatedAt`; đơn không còn `pending` hoặc `expectedUpdatedAt` lệch `updatedAt` → 409 `CONFLICT_STALE`.',
+      'Body bắt buộc `amount`, `bankTransactionRef`, `expectedUpdatedAt`; đơn không còn `pending` hoặc `expectedUpdatedAt` lệch `updatedAt` → 409 `CONFLICT_STALE`. ' +
+      'Kỳ Pro 12 tháng (giá Pro là giá một năm): đang Pro còn hạn thì cộng nối từ hạn hiện tại, không rút ngắn; `amount` phải bằng số tiền của đơn, lệch → 422 `VALIDATION_FAILED` ở trường `amount`. ' +
+      'Gọi lại cùng `bankTransactionRef` và `amount` bởi cùng người xác nhận → 200 với kết quả cũ (không cộng kỳ lần hai); khác đi → 409 `CONFLICT_STALE`.',
   })
   @ApiOkResponse({ standardSchema: bankTransferConfirmedSchema })
   @ApiIdempotencyKey()
   @ApiErrors('VALIDATION_FAILED', 'NOT_FOUND', 'CONFLICT_STALE')
   confirmBankTransferOrder(
-    @Param('id', { schema: idParam }) _id: string,
+    @Param('id', { schema: idParam }) id: string,
     @Body({ schema: confirmBankTransferRequestSchema })
-    _body: ConfirmBankTransferRequest,
-  ): BankTransferConfirmed {
-    throw new AppException('NOT_IMPLEMENTED');
+    body: ConfirmBankTransferRequest,
+    @Req() req: FastifyRequest,
+  ): Promise<BankTransferConfirmed> {
+    // Khóa phát lại do chính trạng thái đơn bảo đảm (xác nhận lặp không cộng kỳ hai); header chỉ cần đúng dạng (hợp đồng bắt buộc).
+    const key = req.headers['idempotency-key'];
+    if (typeof key !== 'string' || !z.uuid().safeParse(key).success)
+      throw new AppException('VALIDATION_FAILED', undefined, {
+        'Idempotency-Key': ['Bắt buộc, dạng UUID'],
+      });
+    return this.bankTransfers.confirm(adminUserOf(req), id, body);
   }
 
   // Bổ sung ngoài bảng Spec §5.4: trang admin cần liệt kê bài để chọn bài phát hành.
