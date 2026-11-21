@@ -6,6 +6,8 @@ import {
   Param,
   Post,
   Query,
+  Req,
+  Res,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import {
@@ -15,9 +17,19 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { ApiErrors, ApiIdempotencyKey, AppException } from '@teachhub/core';
+import {
+  ApiErrors,
+  ApiIdempotencyKey,
+  AppException,
+  Ctx,
+  type RequestContext,
+} from '@teachhub/core';
+import { TxService } from '@teachhub/db';
+import { Idempotency } from '@teachhub/infra';
 import { RequiresRole } from '@teachhub/modules/identity';
+import { BillingService } from '../application/billing.service.js';
 import {
   type BillingPeriodDetail,
   billingPeriodDetailSchema,
@@ -43,7 +55,7 @@ import {
 
 const idParam = z.uuid();
 
-// Hợp đồng Sprint 5 (S4-FL-10, S4-CT-01); thân hàm ở S5-BE-06 (đọc, điều chỉnh) và S5-BE-07 (phát hành, hủy).
+// Hợp đồng Sprint 5 (S4-FL-10, S4-CT-01); thân hàm đọc/điều chỉnh đã có (S5-BE-06); phát hành, hủy ở S5-BE-07 (phát hành, hủy).
 // Chỉ `tenant_owner` (MVP: giáo viên là chủ tenant; Spec §4.8 "chỉ chủ tenant ghi" tài chính). Id của tenant khác → 404.
 @ApiTags('billing')
 @ApiBearerAuth('bearer')
@@ -51,6 +63,12 @@ const idParam = z.uuid();
 @ApiErrors('UNAUTHENTICATED', 'TOKEN_EXPIRED', 'FORBIDDEN')
 @Controller()
 export class BillingController {
+  constructor(
+    private readonly tx: TxService,
+    private readonly idem: Idempotency,
+    private readonly billing: BillingService,
+  ) {}
+
   @Get('billing-periods')
   @ApiOperation({
     summary: 'Danh sách kỳ thu (T10, US-7.2)',
@@ -61,10 +79,13 @@ export class BillingController {
   @ApiOkResponse({ standardSchema: billingPeriodPageSchema })
   @ApiErrors('VALIDATION_FAILED')
   list(
+    @Ctx() ctx: RequestContext,
     @Query({ schema: billingPeriodListQuerySchema })
-    _query: BillingPeriodListQuery,
-  ): BillingPeriodPage {
-    throw new AppException('NOT_IMPLEMENTED');
+    query: BillingPeriodListQuery,
+  ): Promise<BillingPeriodPage> {
+    return this.tx.run(ctx, (t) =>
+      this.billing.listPeriods(t, ctx.tenantId!, query),
+    );
   }
 
   @Get('billing-periods/:id')
@@ -76,11 +97,14 @@ export class BillingController {
   @ApiOkResponse({ standardSchema: billingPeriodDetailSchema })
   @ApiErrors('VALIDATION_FAILED', 'NOT_FOUND')
   get(
-    @Param('id', { schema: idParam }) _id: string,
+    @Ctx() ctx: RequestContext,
+    @Param('id', { schema: idParam }) id: string,
     @Query({ schema: billingPeriodDetailQuerySchema })
-    _query: BillingPeriodDetailQuery,
-  ): BillingPeriodDetail {
-    throw new AppException('NOT_IMPLEMENTED');
+    query: BillingPeriodDetailQuery,
+  ): Promise<BillingPeriodDetail> {
+    return this.tx.run(ctx, (t) =>
+      this.billing.getPeriod(t, ctx.tenantId!, id, query),
+    );
   }
 
   @Post('billing-periods/:id/issue')
@@ -119,8 +143,13 @@ export class BillingController {
   })
   @ApiOkResponse({ standardSchema: invoiceSchema })
   @ApiErrors('NOT_FOUND')
-  invoice(@Param('id', { schema: idParam }) _id: string): Invoice {
-    throw new AppException('NOT_IMPLEMENTED');
+  invoice(
+    @Ctx() ctx: RequestContext,
+    @Param('id', { schema: idParam }) id: string,
+  ): Promise<Invoice> {
+    return this.tx.run(ctx, (t) =>
+      this.billing.getInvoice(t, ctx.tenantId!, id),
+    );
   }
 
   @Post('invoices/:id/adjustments')
@@ -140,11 +169,22 @@ export class BillingController {
     'RATE_LIMITED',
   )
   adjust(
-    @Param('id', { schema: idParam }) _id: string,
+    @Ctx() ctx: RequestContext,
+    @Req() req: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @Param('id', { schema: idParam }) id: string,
     @Body({ schema: createAdjustmentRequestSchema })
-    _body: CreateAdjustmentRequest,
-  ): Invoice {
-    throw new AppException('NOT_IMPLEMENTED');
+    body: CreateAdjustmentRequest,
+  ): Promise<Invoice> {
+    return this.idem.run(req, reply, ctx, async (t) => ({
+      status: 201,
+      body: await this.billing.adjust(
+        t,
+        { tenantId: ctx.tenantId!, userId: ctx.userId! },
+        id,
+        body,
+      ),
+    }));
   }
 
   @Post('invoices/:id/void')
