@@ -204,6 +204,32 @@ describe('billing: phát hành và hủy hóa đơn', () => {
     expect(await events(A.tenantId, invoiceIds)).toHaveLength(2);
   });
 
+  it('Security: phản hồi idempotency của issue lưu mã hóa, không chứa số tài khoản dạng rõ; phát lại vẫn đúng', async () => {
+    const { periodId } = await mkPeriod(A, [123_000]);
+    const key = randomUUID();
+    const first = await call(
+      A,
+      `/billing-periods/${periodId}/issue`,
+      { invoiceIds: null },
+      key,
+    );
+    const again = await call(
+      A,
+      `/billing-periods/${periodId}/issue`,
+      { invoiceIds: null },
+      key,
+    );
+    expect(again.json()).toEqual(first.json());
+    expect(first.json().invoices[0].qrPayload).toContain('0011223344');
+    const rows = await q(
+      `select response_body::text as b from idempotency_keys where key = $1`,
+      [key],
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].b).not.toContain('0011223344');
+    expect(rows[0].b).not.toContain('qrPayload');
+  });
+
   it('AC-1/5: hai request song song (khóa khác nhau) cùng kỳ chỉ phát hành mỗi hóa đơn một lần, mã không trùng', async () => {
     const { periodId, invoiceIds } = await mkPeriod(
       A,

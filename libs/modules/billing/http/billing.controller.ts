@@ -116,7 +116,7 @@ export class BillingController {
       'Hóa đơn 0 đ không phát hành, không nhắc nợ (US-1.3 AC3): nằm trong `skipped` với `ZERO_AMOUNT` và vẫn là bản nháp. Hóa đơn đã phát hành hay đã hủy trong `invoiceIds` vào `skipped` với `NOT_DRAFT`. `invoiceIds` chứa id không thuộc kỳ này → 404. ' +
       'Tenant chưa có tài khoản nhận tiền → 422 `PAYOUT_ACCOUNT_MISSING`, không phát hành hóa đơn nào (client mở màn tài khoản nhận tiền, US-7.3 AC5). ' +
       '`Idempotency-Key` bắt buộc: gửi lặp cùng khóa trả lại kết quả đã lưu, gọi lại bằng khóa mới khi đã hết bản nháp thì `issuedCount = 0`, không phát hành hai lần. Mỗi hóa đơn phát hành ghi sự kiện outbox `invoice_issued` → thông báo `invoice_issued` + email cho phụ huynh. ' +
-      'Giới hạn 20 lần/phút/user (429 `RATE_LIMITED`). Kỳ chuyển `closed` khi không còn bản nháp nào có số tiền > 0.',
+      'Phản hồi chứa số tài khoản nhận tiền (`qrPayload`) nên lưu mã hóa và chỉ phát lại trong 10 phút; quá hạn → 409 `CONFLICT_STALE`, dùng khóa mới. Giới hạn 20 lần/phút/user (429 `RATE_LIMITED`). Kỳ chuyển `closed` khi không còn bản nháp nào có số tiền > 0.',
   })
   @ApiOkResponse({ standardSchema: issueInvoicesResultSchema })
   @ApiIdempotencyKey()
@@ -124,6 +124,7 @@ export class BillingController {
     'VALIDATION_FAILED',
     'NOT_FOUND',
     'PAYOUT_ACCOUNT_MISSING',
+    'CONFLICT_STALE',
     'RATE_LIMITED',
   )
   issue(
@@ -133,15 +134,21 @@ export class BillingController {
     @Param('id', { schema: idParam }) id: string,
     @Body({ schema: issueInvoicesRequestSchema }) body: IssueInvoicesRequest,
   ): Promise<IssueInvoicesResult> {
-    return this.idem.run(req, reply, ctx, async (t) => ({
-      status: 200,
-      body: await this.billing.issue(
-        t,
-        { tenantId: ctx.tenantId!, userId: ctx.userId! },
-        id,
-        body,
-      ),
-    }));
+    return this.idem.run(
+      req,
+      reply,
+      ctx,
+      async (t) => ({
+        status: 200,
+        body: await this.billing.issue(
+          t,
+          { tenantId: ctx.tenantId!, userId: ctx.userId! },
+          id,
+          body,
+        ),
+      }),
+      { sensitive: true },
+    );
   }
 
   @Get('invoices/:id')
@@ -204,7 +211,7 @@ export class BillingController {
     summary: 'Hủy hóa đơn đã phát hành, có lý do (US-7.3 AC4)',
     description:
       'Chỉ hóa đơn `issued`: hóa đơn chưa phát hành (`draft`) → 409 `CONFLICT_STALE`; hóa đơn đã có thanh toán (Sprint 6) cũng 409, phải hủy thanh toán trước. Hóa đơn đã `void` gọi lại vẫn 200, trả bản hiện tại, `replacementInvoiceId = null`. ' +
-      'Mã QR của hóa đơn đã hủy không còn hiển thị cho phụ huynh (`payout` và `qrPayload` null phía phụ huynh). `createReplacementDraft = true` chưa hỗ trợ ở MVP → 422 `VALIDATION_FAILED`, `replacementInvoiceId` luôn null; hóa đơn thay thế = tạo lại bản nháp rồi chốt. Giới hạn 20 lần/phút/user (429 `RATE_LIMITED`).',
+      'Mã QR của hóa đơn đã hủy không còn hiển thị cho phụ huynh (`payout` và `qrPayload` null phía phụ huynh). `createReplacementDraft = true` chưa hỗ trợ ở MVP → 422 `VALIDATION_FAILED`, `replacementInvoiceId` luôn null; hóa đơn thay thế = tạo lại bản nháp rồi chốt. Phản hồi có `payout` nên lưu mã hóa, phát lại tối đa 10 phút. Giới hạn 20 lần/phút/user (429 `RATE_LIMITED`).',
   })
   @ApiOkResponse({ standardSchema: voidInvoiceResultSchema })
   @ApiIdempotencyKey()
@@ -216,14 +223,20 @@ export class BillingController {
     @Param('id', { schema: idParam }) id: string,
     @Body({ schema: voidInvoiceRequestSchema }) body: VoidInvoiceRequest,
   ): Promise<VoidInvoiceResult> {
-    return this.idem.run(req, reply, ctx, async (t) => ({
-      status: 200,
-      body: await this.billing.voidInvoice(
-        t,
-        { tenantId: ctx.tenantId!, userId: ctx.userId! },
-        id,
-        body,
-      ),
-    }));
+    return this.idem.run(
+      req,
+      reply,
+      ctx,
+      async (t) => ({
+        status: 200,
+        body: await this.billing.voidInvoice(
+          t,
+          { tenantId: ctx.tenantId!, userId: ctx.userId! },
+          id,
+          body,
+        ),
+      }),
+      { sensitive: true },
+    );
   }
 }
