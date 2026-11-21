@@ -25,7 +25,7 @@ export type BillingReadyJobData = z.infer<typeof billingReadyJobSchema>;
 
 /**
  * Xử lý sự kiện outbox `billing_drafts_ready` (S5-BE-05, US-7.2 AC1): tạo thông báo `billing_ready` cho chủ tenant rồi gửi
- * FCM data-only (không số tiền, không tên con). Idempotent theo `eventId` (khóa `(recipient, dedupe_key)`); phần gửi dùng
+ * FCM (chữ khay chung, không số tiền, không tên con). Idempotent theo `eventId` (khóa `(recipient, dedupe_key)`); phần gửi dùng
  * lại cơ chế của `AbsenceNotifier.deliver`.
  * shortcut: chưa tôn trọng giờ yên lặng (`send_after` = lúc tạo); thêm khi US-6.5 có cấu hình giờ yên lặng.
  */

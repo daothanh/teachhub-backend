@@ -29,7 +29,7 @@ export class WebPushController {
       'Upsert theo `endpoint`: đăng ký lặp không tạo dòng mới; endpoint đang gắn user khác thì chuyển sang user hiện tại. Không có endpoint đọc lại. ' +
       'Chống SSRF: schema đã chỉ nhận `https` cổng 443, không userinfo, host trong allowlist (`fcm.googleapis.com`, `*.push.apple.com`, `updates.push.services.mozilla.com`, `*.notify.windows.com`); server kiểm lại host lúc gửi và không theo redirect. ' +
       'Bảng subscription theo user, mỗi user tối đa 10 (vượt → bản cũ nhất bị thay). ' +
-      '`Idempotency-Key` tùy chọn vì lệnh vốn idempotent theo `endpoint`. Nội dung push cũng data-only như FCM: chỉ `notificationId` và `type`.',
+      '`Idempotency-Key` tùy chọn vì lệnh vốn idempotent theo `endpoint`. Web Push chỉ mang `notificationId` và `type` (data-only); FCM mới có khối `notification` chung theo loại.',
   })
   @ApiNoContentResponse()
   @ApiIdempotencyKey(false)
