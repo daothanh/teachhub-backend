@@ -7,6 +7,8 @@ import {
   Param,
   Patch,
   Post,
+  Req,
+  Res,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -17,9 +19,18 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { ApiErrors, ApiIdempotencyKey, AppException } from '@teachhub/core';
+import {
+  ApiErrors,
+  ApiIdempotencyKey,
+  Ctx,
+  type RequestContext,
+} from '@teachhub/core';
+import { TxService } from '@teachhub/db';
+import { Idempotency } from '@teachhub/infra';
 import { RequiresRole } from '@teachhub/modules/identity';
+import { PayoutAccountsService } from '../application/payout-accounts.service.js';
 import {
   type CreatePayoutAccountRequest,
   createPayoutAccountRequestSchema,
@@ -33,13 +44,19 @@ import {
 
 const idParam = z.uuid();
 
-// Hợp đồng Sprint 5 (S4-FL-10); thân hàm ở S5-BE-02. Chỉ `tenant_owner` ghi và đọc (Spec §4.8). Id của tenant khác → 404.
+// Hợp đồng Sprint 5 (S4-FL-10); S5-BE-02. Chỉ `tenant_owner` ghi và đọc (Spec §4.8). Id của tenant khác → 404.
 @ApiTags('payout-accounts')
 @ApiBearerAuth('bearer')
 @RequiresRole('tenant_owner')
 @ApiErrors('UNAUTHENTICATED', 'TOKEN_EXPIRED', 'FORBIDDEN')
 @Controller('payout-accounts')
 export class PayoutAccountsController {
+  constructor(
+    private readonly tx: TxService,
+    private readonly idem: Idempotency,
+    private readonly accounts: PayoutAccountsService,
+  ) {}
+
   @Get()
   @ApiOperation({
     summary: 'Danh sách tài khoản nhận tiền (S5-FL-03)',
@@ -47,8 +64,8 @@ export class PayoutAccountsController {
       'Tài khoản chính (`isPrimary`) đứng đầu, số tài khoản đã che (`accountNoMasked`). Chưa có tài khoản nào thì `items` rỗng: chốt kỳ sẽ bị chặn bằng 422 `PAYOUT_ACCOUNT_MISSING` (US-7.3 AC5).',
   })
   @ApiOkResponse({ standardSchema: payoutAccountListSchema })
-  list(): PayoutAccountList {
-    throw new AppException('NOT_IMPLEMENTED');
+  list(@Ctx() ctx: RequestContext): Promise<PayoutAccountList> {
+    return this.tx.run(ctx, (t) => this.accounts.list(t, ctx.tenantId!));
   }
 
   @Post()
@@ -63,10 +80,20 @@ export class PayoutAccountsController {
   @ApiIdempotencyKey()
   @ApiErrors('VALIDATION_FAILED', 'OTP_INVALID', 'OTP_LOCKED', 'RATE_LIMITED')
   create(
+    @Ctx() ctx: RequestContext,
+    @Req() req: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
     @Body({ schema: createPayoutAccountRequestSchema })
-    _body: CreatePayoutAccountRequest,
-  ): PayoutAccount {
-    throw new AppException('NOT_IMPLEMENTED');
+    body: CreatePayoutAccountRequest,
+  ): Promise<PayoutAccount> {
+    return this.idem.run(req, reply, ctx, async (t) => ({
+      status: 201,
+      body: await this.accounts.create(
+        t,
+        { tenantId: ctx.tenantId!, userId: ctx.userId! },
+        body,
+      ),
+    }));
   }
 
   @Patch(':id')
@@ -86,11 +113,22 @@ export class PayoutAccountsController {
     'RATE_LIMITED',
   )
   update(
-    @Param('id', { schema: idParam }) _id: string,
+    @Ctx() ctx: RequestContext,
+    @Req() req: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @Param('id', { schema: idParam }) id: string,
     @Body({ schema: updatePayoutAccountRequestSchema })
-    _body: UpdatePayoutAccountRequest,
-  ): PayoutAccount {
-    throw new AppException('NOT_IMPLEMENTED');
+    body: UpdatePayoutAccountRequest,
+  ): Promise<PayoutAccount> {
+    return this.idem.run(req, reply, ctx, async (t) => ({
+      status: 200,
+      body: await this.accounts.update(
+        t,
+        { tenantId: ctx.tenantId!, userId: ctx.userId! },
+        id,
+        body,
+      ),
+    }));
   }
 
   @Delete(':id')
@@ -104,7 +142,15 @@ export class PayoutAccountsController {
   @ApiNoContentResponse()
   @ApiIdempotencyKey()
   @ApiErrors('NOT_FOUND', 'RATE_LIMITED')
-  remove(@Param('id', { schema: idParam }) _id: string): void {
-    throw new AppException('NOT_IMPLEMENTED');
+  async remove(
+    @Ctx() ctx: RequestContext,
+    @Req() req: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @Param('id', { schema: idParam }) id: string,
+  ): Promise<void> {
+    await this.idem.run(req, reply, ctx, async (t) => ({
+      status: 204,
+      body: await this.accounts.remove(t, ctx.tenantId!, id),
+    }));
   }
 }
