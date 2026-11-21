@@ -44,6 +44,8 @@ export const bankTransferOrderSchema = z
   })
   .meta({ id: 'BankTransferOrder', example: bankTransferOrderExample });
 
+export type BankTransferOrder = z.infer<typeof bankTransferOrderSchema>;
+
 export const bankTransferListQuerySchema = pageQuerySchema.extend({
   status: bankTransferStatusSchema.default('pending'),
 });

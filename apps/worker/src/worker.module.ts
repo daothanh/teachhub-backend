@@ -6,6 +6,7 @@ import { DbModule } from '@teachhub/db';
 import { JobsModule, RedisModule } from '@teachhub/infra';
 import { BillingJobsModule } from '@teachhub/modules/billing';
 import { NotificationsJobsModule } from '@teachhub/modules/notifications';
+import { SubscriptionJobsModule } from '@teachhub/modules/subscription';
 import { ScheduleRulesModule } from '@teachhub/modules/schedule';
 import { CRON_QUEUE, CronProcessor } from './cron.processor.js';
 import {
@@ -26,6 +27,7 @@ import { UrgentProcessor } from './notify/urgent.processor.js';
     ScheduleRulesModule,
     BillingJobsModule,
     NotificationsJobsModule,
+    SubscriptionJobsModule,
     BullModule.registerQueue(
       { name: CRON_QUEUE },
       { name: OUTBOX_QUEUE_URGENT },

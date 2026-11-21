@@ -12,11 +12,16 @@ import {
   InvoiceIssuedNotifier,
   PaymentRecordedNotifier,
   PaymentReminderNotifier,
+  SubscriptionNotifier,
 } from '@teachhub/modules/notifications';
 import {
   SCHEDULE_CHANGED,
   type ScheduleChangedPayload,
 } from '@teachhub/modules/schedule';
+import {
+  SUBSCRIPTION_ACTIVATED,
+  SUBSCRIPTION_EXPIRING,
+} from '@teachhub/modules/subscription';
 import { OUTBOX_QUEUE_DEFAULT } from '../outbox/outbox-policy.js';
 
 interface ScheduleChangedJob {
@@ -27,7 +32,7 @@ interface ScheduleChangedJob {
 
 /**
  * Consumer duy nhất của hàng đợi `events` (một hàng đợi chỉ nên có một processor), phân loại theo tên sự kiện:
- * `billing_drafts_ready` (S5-BE-05) → thông báo + push giáo viên; `invoice_issued` (S5-BE-07) → thông báo + push + email phụ huynh; `payment_recorded` (S6-BE-02) → biên nhận push + email phụ huynh; `payment_reminder` (S6-BE-04) → nhắc nợ push + email phụ huynh; `schedule_changed` (S4-BE-07) → chỉ ghi log.
+ * `billing_drafts_ready` (S5-BE-05) → thông báo + push giáo viên; `invoice_issued` (S5-BE-07) → thông báo + push + email phụ huynh; `payment_recorded` (S6-BE-02) → biên nhận push + email phụ huynh; `payment_reminder` (S6-BE-04) → nhắc nợ push + email phụ huynh; `subscription_expiring` (nhắc gia hạn) và `subscription_activated` (Pro kích hoạt) → thông báo + push chủ tenant; `schedule_changed` (S4-BE-07) → chỉ ghi log.
  * shortcut (schedule_changed): chưa tạo thông báo cho phụ huynh. Loại `schedule_changed` chưa có trong oneOf notification
  * của hợp đồng (Owner chưa chốt), nên chưa tạo dòng `notifications` và chưa gửi push. Khi chốt: lấy phụ huynh có
  * `guardians.user_id` của học viên đang học lớp `payload.classId`, tạo thông báo idempotent theo `eventId` như báo vắng.
@@ -42,6 +47,7 @@ export class EventsProcessor extends WorkerHost {
     private readonly invoiceIssued: InvoiceIssuedNotifier,
     private readonly paymentRecorded: PaymentRecordedNotifier,
     private readonly paymentReminder: PaymentReminderNotifier,
+    private readonly subscription: SubscriptionNotifier,
   ) {
     super();
   }
@@ -54,6 +60,10 @@ export class EventsProcessor extends WorkerHost {
       return this.paymentRecorded.handle(job.data);
     if (job.name === PAYMENT_REMINDER)
       return this.paymentReminder.handle(job.data);
+    if (job.name === SUBSCRIPTION_EXPIRING)
+      return this.subscription.handleExpiring(job.data);
+    if (job.name === SUBSCRIPTION_ACTIVATED)
+      return this.subscription.handleActivated(job.data);
     // Loại khác chưa có consumer: ném lỗi để job giữ lại ở hàng `failed`, không bị nuốt im lặng.
     if (job.name !== SCHEDULE_CHANGED) {
       return Promise.reject(new Error(`chưa có xử lý cho sự kiện ${job.name}`));

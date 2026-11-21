@@ -115,11 +115,11 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
   },
   'GET /v1/admin/bank-transfer-orders': {
     notApplicable:
-      'hợp đồng S1-CT-02, thân hàm trả 501 tới task admin; test chéo tenant làm cùng task đó',
+      'BFF admin xem đơn của mọi tenant theo thiết kế; chặn bằng AdminGuard (secret + user id + quyền), test 401/403 ở subscription-lifecycle.e2e-spec.ts',
   },
   'POST /v1/admin/bank-transfer-orders/{id}/confirm': {
-    notApplicable:
-      'hợp đồng S1-CT-02, thân hàm trả 501 tới task admin; test chéo tenant làm cùng task đó',
+    file: 'subscription-lifecycle.e2e-spec.ts',
+    test: 'đơn của tenant khác không đổi gói của tenant này',
   },
   'GET /v1/admin/legal-articles': {
     notApplicable:

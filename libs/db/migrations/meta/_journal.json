@@ -218,6 +218,20 @@
       "when": 1795271881260,
       "tag": "0030_subscription_webhook_hardening",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1795273925214,
+      "tag": "0031_subscription_admin_confirm",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1795274450307,
+      "tag": "0032_bank_transfer_ref_unique",
+      "breakpoints": true
     }
   ]
 }

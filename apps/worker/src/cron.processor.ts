@@ -18,6 +18,10 @@ import {
   PurgeStaleDevicesJob,
 } from '@teachhub/modules/notifications';
 import {
+  JOB_SUBSCRIPTION_LIFECYCLE,
+  SubscriptionLifecycleJob,
+} from '@teachhub/modules/subscription';
+import {
   GenerateSessionsJob,
   JOB_GENERATE_SESSIONS,
 } from '@teachhub/modules/schedule';
@@ -40,6 +44,7 @@ export class CronProcessor
     private readonly dunning: DunningJob,
     private readonly purge: PurgeIdempotencyKeysJob,
     private readonly purgeDevices: PurgeStaleDevicesJob,
+    private readonly lifecycle: SubscriptionLifecycleJob,
   ) {
     super();
   }
@@ -74,6 +79,11 @@ export class CronProcessor
       { name: JOB_BILLING_RECONCILE, opts },
     );
     await this.queue.upsertJobScheduler(
+      JOB_SUBSCRIPTION_LIFECYCLE,
+      { pattern: '0 6 * * *', tz: TZ },
+      { name: JOB_SUBSCRIPTION_LIFECYCLE, opts },
+    );
+    await this.queue.upsertJobScheduler(
       JOB_PURGE_IDEMPOTENCY,
       { pattern: '30 1 * * *', tz: TZ },
       { name: JOB_PURGE_IDEMPOTENCY, opts },
@@ -97,6 +107,9 @@ export class CronProcessor
       case JOB_BILLING_DUNNING:
         // Giờ chạy thật, không `job.timestamp`: lần BullMQ thử lại muộn không được coi là còn trong khung giờ gửi.
         return this.dunning.run(new Date());
+      case JOB_SUBSCRIPTION_LIFECYCLE:
+        // Giờ chạy thật: lần BullMQ thử lại vẫn chốt theo "bây giờ", không theo mốc lập lịch.
+        return this.lifecycle.run(new Date());
       case JOB_PURGE_IDEMPOTENCY:
         return this.purge.run();
       case JOB_PURGE_STALE_DEVICES:

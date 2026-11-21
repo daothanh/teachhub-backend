@@ -11,6 +11,8 @@ const SENT_TYPES = [
   'payment_recorded',
   'payment_reminder',
   'schedule_changed',
+  'subscription_expiring',
+  'subscription_activated',
 ];
 
 describe('pushCopyFor', () => {
