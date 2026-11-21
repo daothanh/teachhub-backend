@@ -170,4 +170,102 @@ describe('validateEnv', () => {
     expect(env.CORS_ORIGINS).toEqual(['a', 'b']);
     expect(env.S3_FORCE_PATH_STYLE).toBe(true);
   });
+
+  describe('GOOGLE_CLIENT_IDS ngoài local/test', () => {
+    const sfx = '.apps.googleusercontent.com';
+    const web = `432762025168-e2lo4mengjqb64e8bc2sdoat1vbqpdl8${sfx}`;
+    const prodDebug = `432762025168-3i1f3r2a7oelb9hg7pusr9uqc48umcdh${sfx}`;
+    const devDebug = `305225338991-r640djv4j04rhv3uqq8g4m56bs3n901a${sfx}`;
+    const secret = 'k'.repeat(16);
+    const base = (over: Record<string, string>) => ({
+      DATABASE_URL: 'postgres://a@b/c',
+      REDIS_URL: 'redis://x',
+      S3_REGION: 'us-east-1',
+      S3_ACCESS_KEY_ID: 'k',
+      S3_SECRET_ACCESS_KEY: 's',
+      S3_BUCKET_PRIVATE: 'b',
+      JWT_PRIVATE_KEY: 'pem',
+      CONSENT_IP_HMAC_KEY: secret + '1',
+      INVITE_CODE_HMAC_KEY: secret + '2',
+      IDEMPOTENCY_ENC_KEY: secret + '3',
+      APPLE_BUNDLE_ID: 'vn.dayhoc.app',
+      ...over,
+    });
+
+    it('development/production thiếu danh sách → không khởi động', () => {
+      for (const NODE_ENV of ['development', 'production']) {
+        expect(() => validateEnv(base({ NODE_ENV }))).toThrow(
+          /GOOGLE_CLIENT_IDS/,
+        );
+      }
+    });
+
+    it('sai định dạng → không khởi động; local bỏ trống vẫn chạy', () => {
+      expect(() =>
+        validateEnv(base({ NODE_ENV: 'staging', GOOGLE_CLIENT_IDS: 'web' })),
+      ).toThrow(/apps\.googleusercontent\.com/);
+      expect(
+        validateEnv(base({ NODE_ENV: 'local' })).GOOGLE_CLIENT_IDS,
+      ).toEqual([]);
+    });
+
+    it('production cấm client Android debug, nhận Web/iOS/upload', () => {
+      expect(() =>
+        validateEnv(
+          base({
+            NODE_ENV: 'production',
+            GOOGLE_CLIENT_IDS: `${web}, ${prodDebug}`,
+          }),
+        ),
+      ).toThrow(/Android debug/);
+      expect(
+        validateEnv(base({ NODE_ENV: 'production', GOOGLE_CLIENT_IDS: web }))
+          .GOOGLE_CLIENT_IDS,
+      ).toEqual([web]);
+    });
+
+    it('mỗi môi trường chỉ nhận client của project mình', () => {
+      const dev = `305225338991-7vf98anmjogm9jksgd9kdije4ah8ncgk${sfx}`;
+      for (const [NODE_ENV, ids] of [
+        ['production', dev],
+        ['staging', web],
+        ['development', web],
+        ['production', `${web},${dev}`],
+      ] as const)
+        expect(() =>
+          validateEnv(base({ NODE_ENV, GOOGLE_CLIENT_IDS: ids })),
+        ).toThrow(/chỉ nhận client của project/);
+    });
+
+    it('ngoài local/test chỉ nhận JWKS mặc định của Google', () => {
+      expect(() =>
+        validateEnv(
+          base({
+            NODE_ENV: 'production',
+            GOOGLE_CLIENT_IDS: web,
+            GOOGLE_JWKS_URL: 'https://evil.example.com/certs',
+          }),
+        ),
+      ).toThrow(/JWKS mặc định/);
+      expect(
+        validateEnv(
+          base({
+            NODE_ENV: 'test',
+            GOOGLE_JWKS_URL: 'http://127.0.0.1:1/certs',
+          }),
+        ).GOOGLE_JWKS_URL,
+      ).toBe('http://127.0.0.1:1/certs');
+    });
+
+    it('client debug vẫn dùng được ở development', () => {
+      expect(
+        validateEnv(
+          base({
+            NODE_ENV: 'development',
+            GOOGLE_CLIENT_IDS: `305225338991-7vf98anmjogm9jksgd9kdije4ah8ncgk${sfx},${devDebug}`,
+          }),
+        ).GOOGLE_CLIENT_IDS,
+      ).toHaveLength(2);
+    });
+  });
 });

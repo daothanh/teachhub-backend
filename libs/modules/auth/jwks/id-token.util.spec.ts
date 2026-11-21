@@ -15,7 +15,11 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { SignJWT, generateKeyPair, jwtVerify } from 'jose';
 import { AppException } from '@teachhub/core';
-import { mapIdTokenError, remoteKeys } from './id-token.util.js';
+import {
+  isEmailVerified,
+  mapIdTokenError,
+  remoteKeys,
+} from './id-token.util.js';
 
 describe('mapIdTokenError', () => {
   const verify = async (url: string, token?: string) => {
@@ -68,5 +72,13 @@ describe('mapIdTokenError', () => {
     ).rejects.toSatisfy(
       (e) => e instanceof AppException && e.code === 'UNAUTHENTICATED',
     );
+  });
+});
+
+describe('isEmailVerified', () => {
+  it('chỉ true hoặc "true" mới là đã xác minh', () => {
+    expect([true, 'true'].map(isEmailVerified)).toEqual([true, true]);
+    for (const v of [false, 'false', 0, 1, 'TRUE', null, undefined, {}])
+      expect(isEmailVerified(v), String(v)).toBe(false);
   });
 });
