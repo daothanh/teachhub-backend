@@ -143,6 +143,13 @@ resource "cloudflare_origin_ca_certificate" "origin" {
   hostnames          = [var.zone, "*.${var.zone}"]
   request_type       = "origin-ecc"
   requested_validity = 5475
+
+  # Provider Cloudflare đọc lại csr/requested_validity khác giá trị khai báo (validity còn lại, PEM chuẩn hóa) → mỗi
+  # lần apply đòi thay chứng chỉ, chứng chỉ cũ bị thu hồi trong khi VM còn dùng → 526. Muốn xoay chứng chỉ thì
+  # `tofu apply -replace=cloudflare_origin_ca_certificate.origin` rồi xuất lại dev-vars.json và chạy playbook.
+  lifecycle {
+    ignore_changes = [csr, requested_validity, hostnames, request_type]
+  }
 }
 
 # --- Bí mật của ứng dụng (sang Ansible qua output `ansible_vars`) ---
