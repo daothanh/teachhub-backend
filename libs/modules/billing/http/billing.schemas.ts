@@ -469,7 +469,7 @@ export const issuedInvoiceSchema = z
     studentId: z.uuid(),
     studentName: z.string(),
     totalAmount: vndSchema(
-      'VND, > 0 (hóa đơn 0 đ không bao giờ được phát hành)',
+      'VND. 0 chỉ khi số dư sổ (trả thừa) đã trả đủ kỳ này: hóa đơn có mã, trạng thái `paid`, không có QR (`qrPayload` rỗng), không nhắc nợ, không thông báo phụ huynh riêng',
     ),
     dueDate: z.iso.date(),
     transferNote,
@@ -483,7 +483,7 @@ export const issueSkippedSchema = z
     studentName: z.string(),
     reason: z.enum(['ZERO_AMOUNT', 'NOT_DRAFT']).meta({
       description:
-        '`ZERO_AMOUNT` = hóa đơn 0 đ, không gửi và không nhắc nợ (US-1.3 AC3, bản nháp vẫn còn). `NOT_DRAFT` = đã phát hành hoặc đã hủy từ trước (chỉ gặp khi chọn `invoiceIds`)',
+        '`ZERO_AMOUNT` = bản nháp không có khoản phát sinh nào (tổng các dòng ngoài `carry_over` bằng 0, vd. miễn giảm 100%), không gửi và không nhắc nợ (US-1.3 AC3, bản nháp vẫn còn). Bản nháp có phát sinh nhưng được số dư sổ trả đủ vẫn được chốt với `totalAmount` 0 và trạng thái `paid`. `NOT_DRAFT` = đã phát hành hoặc đã hủy từ trước (chỉ gặp khi chọn `invoiceIds`)',
     }),
   })
   .meta({ id: 'IssueSkipped' });

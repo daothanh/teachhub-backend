@@ -256,7 +256,7 @@ export async function loadPrevAdjustments(
     }
   }
 
-  // Phần đã điều chỉnh ở các hóa đơn sau (không tính hóa đơn hủy), theo học viên.
+  // Phần đã điều chỉnh ở các hóa đơn sau đã chốt (không tính nháp, hóa đơn hủy), theo học viên.
   const adjusted = new Map<string, Map<string, number>>();
   for (let i = 0; i < oldStudents.length; i += CHUNK) {
     const rows = await t
@@ -277,7 +277,8 @@ export async function loadPrevAdjustments(
         and(
           eq(invoiceLines.tenantId, tenantId),
           inArray(invoices.studentId, oldStudents.slice(i, i + CHUNK)),
-          ne(invoices.status, 'void'),
+          // Chỉ hóa đơn đã chốt mới tính là "đã điều chỉnh": dòng trong nháp chưa phát hành/bỏ qua chưa có hiệu lực.
+          inArray(invoices.status, ISSUED),
           eq(invoiceLines.kind, 'prev_adjustment'),
           isNotNull(invoiceLines.sessionId),
         ),

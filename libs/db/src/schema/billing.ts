@@ -220,12 +220,12 @@ export const invoices = pgTable(
       sql`(${t.installmentNo} is null) = (${t.installmentCount} is null)
         and (${t.installmentNo} is null or (${t.installmentCount} between 1 and 36 and ${t.installmentNo} between 1 and ${t.installmentCount}))`,
     ),
-    // Bản nháp chưa có gì của phát hành; từ `issued` trở đi phải đủ mã, nội dung chuyển khoản, QR, snapshot, giờ phát hành.
+    // Bản nháp chưa có gì của phát hành; từ `issued` trở đi phải đủ mã, nội dung chuyển khoản, QR, snapshot, giờ phát hành (hóa đơn 0 đ đã trả bằng số dư, S6-BE-03, không có QR).
     check(
       'invoices_issue_fields_check',
       sql`case when ${t.status} = 'draft'
         then ${t.code} is null and ${t.transferNote} is null and ${t.qrPayload} is null and ${t.payout} is null and ${t.issuedAt} is null
-        else ${t.code} is not null and ${t.transferNote} is not null and ${t.qrPayload} is not null and ${t.payout} is not null and ${t.issuedAt} is not null end`,
+        else ${t.code} is not null and ${t.transferNote} is not null and (${t.qrPayload} is not null or ${t.totalAmount} = 0) and ${t.payout} is not null and ${t.issuedAt} is not null end`,
     ),
     check(
       'invoices_void_fields_check',

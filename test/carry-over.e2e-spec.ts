@@ -28,6 +28,8 @@ type Inv = {
 const CLOSE_DEC = new Date('2026-12-31T19:00:00Z'); // kỳ 12/2026
 const CLOSE_JAN = new Date('2027-01-31T19:00:00Z'); // kỳ 01/2027
 const CLOSE_FEB = new Date('2027-02-28T19:00:00Z'); // kỳ 02/2027
+const CLOSE_MAR = new Date('2027-03-31T19:00:00Z'); // kỳ 03/2027
+const CLOSE_APR = new Date('2027-04-30T19:00:00Z'); // kỳ 04/2027
 
 // S6-BE-03 + S6-BE-05: số dư chuyển kỳ kết chuyển lúc PHÁT HÀNH (US-7.6, US-3.3 AC4), sổ học viên, công nợ (US-8.3).
 // Bất biến bảo toàn tiền theo học viên, kiểm sau từng bước (B, P, R, L tính từ DB, xem `invariant`):
@@ -62,6 +64,8 @@ describe('carry-over: chuyển kỳ lúc phát hành, sổ học viên, công n�
     sP: randomUUID(), // sửa điểm danh sau phát hành
     sQ: randomUUID(), // buổi bị hủy / xóa sau phát hành
     sV: randomUUID(), // hóa đơn cũ đã hủy
+    sU: randomUUID(), // như sQ nhưng nháp kỳ 01 không được chốt
+    sZ: randomUUID(), // miễn giảm 100%: nháp không có phát sinh
     bStu: randomUUID(),
   };
   const sessP = [randomUUID(), randomUUID(), randomUUID()];
@@ -174,6 +178,26 @@ describe('carry-over: chuyển kỳ lúc phát hành, sổ học viên, công n�
     const r = await pay(invoiceId, amount);
     expect(r.statusCode, r.body).toBe(201);
     return r.json() as { payment: { id: string }; remainingAmount: number };
+  };
+  /** Phát hành mọi nháp của kỳ trừ các học viên `except` (chọn theo `invoiceIds`). */
+  const issueExcept = async (month: string, except: string[]) => {
+    const rows = await q(
+      `select i.id from invoices i join billing_periods p on p.tenant_id = i.tenant_id and p.id = i.period_id
+        where i.tenant_id = $1 and p.period_month = $2 and i.status = 'draft' and i.student_id <> all($3::uuid[])`,
+      [A.tenantId, month, except],
+    );
+    const [p] = await q(
+      `select id from billing_periods where tenant_id = $1 and period_month = $2`,
+      [A.tenantId, month],
+    );
+    const r = await call(A, 'POST', `/billing-periods/${p.id}/issue`, {
+      invoiceIds: rows.map((x) => x.id),
+    });
+    expect(r.statusCode, r.body).toBe(200);
+    return r.json() as {
+      issuedCount: number;
+      skipped: { invoiceId: string; reason: string }[];
+    };
   };
   const issue = async (month: string) => {
     const [p] = await q(
@@ -296,10 +320,25 @@ describe('carry-over: chuyển kỳ lúc phát hành, sổ học viên, công n�
       [id.sP, 'Sửa Điểm', id.per],
       [id.sQ, 'Buổi Hủy', id.per2],
       [id.sV, 'Hủy Hóa Đơn', id.per2],
+      [id.sU, 'Nháp Treo', id.per2],
     ] as const) {
       await addStudent(A, sid, name);
       await enroll(cls, sid);
     }
+    await addStudent(A, id.sZ, 'Miễn Giảm');
+    await q(
+      `insert into enrollments (id, tenant_id, class_id, student_id, joined_on, fee_override)
+       values ($1, $2, $3, $4, '2026-11-01', $5)`,
+      [
+        randomUUID(),
+        A.tenantId,
+        id.small,
+        id.sZ,
+        JSON.stringify({
+          discounts: [{ kind: 'percent', percent: 100, description: 'Miễn' }],
+        }),
+      ],
+    );
     // Lý 9A: 3 buổi tháng 12 (buổi 3 vắng không phép, lớp không tính), 1 buổi tháng 1, 1 buổi tháng 2.
     for (const [i, d] of ['2026-12-03', '2026-12-10', '2026-12-17'].entries())
       await addSession(id.per, sessP[i]!, d);
@@ -333,7 +372,7 @@ describe('carry-over: chuyển kỳ lúc phát hành, sổ học viên, công n�
   });
 
   it('kỳ 12/2026: nháp không có dòng chuyển kỳ (trừ nợ cũ của sO); phát hành, thu một phần/trả thừa; sửa điểm danh và buổi sau phát hành', async () => {
-    expect(await job.run(CLOSE_DEC)).toBe(12);
+    expect(await job.run(CLOSE_DEC)).toBe(14);
     const dec = (sid: string) => invoiceOf(sid, '2026-12-01');
     for (const sid of [id.s1, id.s2, id.s3, id.s4, id.sP])
       expect(
@@ -355,7 +394,7 @@ describe('carry-over: chuyển kỳ lúc phát hành, sổ học viên, công n�
     ).toBe(0);
 
     const res = await issue('2026-12-01');
-    expect(res.issuedCount).toBe(12);
+    expect(res.issuedCount).toBe(13); // sZ (không có phát sinh) bị bỏ qua
     // sO: lúc phát hành mới kết chuyển; hạn nợ cũ nhất của hóa đơn = hạn hóa đơn nguồn.
     const soInv = await dec(id.sO);
     expect(soInv.oldest_due_date).toBe(oldDue);
@@ -381,6 +420,7 @@ describe('carry-over: chuyển kỳ lúc phát hành, sổ học viên, công n�
     await payOk((await dec(id.sL)).id, 150_000);
     expect((await pay((await dec(id.sP)).id, 200_000)).statusCode).toBe(201);
     expect((await pay((await dec(id.sQ)).id, 300_000)).statusCode).toBe(201);
+    expect((await pay((await dec(id.sU)).id, 300_000)).statusCode).toBe(201);
 
     // Sau phát hành: sửa vắng → có mặt (sP), hủy buổi và xóa hẳn buổi (sQ); hóa đơn của sV bị hủy.
     await q(
@@ -407,7 +447,7 @@ describe('carry-over: chuyển kỳ lúc phát hành, sổ học viên, công n�
     const ledgerBefore = (
       await q(`select count(*)::int n from student_ledger`)
     )[0].n;
-    expect(await job.run(CLOSE_JAN)).toBe(12);
+    expect(await job.run(CLOSE_JAN)).toBe(14);
     const row = (sid: string) => invoiceOf(sid, '2027-01-01');
     jan = Object.fromEntries(
       await Promise.all(
@@ -526,8 +566,8 @@ describe('carry-over: chuyển kỳ lúc phát hành, sổ học viên, công n�
     await invariant('sau M1');
   });
 
-  it('M2: điều chỉnh tay chỉ cộng dòng, tổng = max(0, Σ dòng); phát hành dùng số dư chốt (nháp 20 + trả thừa 50 + 40 → 10 ở kỳ 02; nháp 80 − 100 → 0 đ không kết chuyển)', async () => {
-    // sB: 50.000 + nợ 30.000 = 80.000, điều chỉnh −100.000 → 0 đ (clamped 20.000).
+  it('M2/(a)/(b)/(c): điều chỉnh tay chỉ cộng dòng; không phát sinh → bỏ qua; credit đủ trả → chốt 0 đ paid; điều chỉnh âm vượt phát sinh → credit ở sổ', async () => {
+    // sB: 50.000 + nợ 30.000 = 80.000, điều chỉnh −100.000 → xem trước 0 đ (clamped 20.000).
     expect((await api(id.sB, '2027-01-01')).totalAmount).toBe(80_000);
     const adj = await call(A, 'POST', `/invoices/${jan.sB!.id}/adjustments`, {
       amount: -100_000,
@@ -536,27 +576,51 @@ describe('carry-over: chuyển kỳ lúc phát hành, sổ học viên, công n�
     });
     expect(adj.statusCode, adj.body).toBe(201);
     expect(adj.json()).toMatchObject({ totalAmount: 0, clampedAmount: 20_000 });
-    // Phát hành kỳ 01: tổng ≤ 0 → không phát hành, không kết chuyển; nợ 30.000 vẫn ở hóa đơn cũ.
-    const ledgerBefore = (
-      await q(`select count(*)::int n from student_ledger`)
-    )[0].n;
-    const res = await issue('2027-01-01');
-    expect(res.skipped.map((s) => s.reason).sort(cmp)).toEqual([
-      'ZERO_AMOUNT',
-      'ZERO_AMOUNT',
-      'ZERO_AMOUNT',
-    ]);
-    expect(res.issuedCount).toBe(9);
-    for (const k of ['s3', 'sA', 'sB'] as const)
-      expect((await invoiceOf(id[k], '2027-01-01')).status).toBe('draft');
-    const decB = await invoiceOf(id.sB, '2026-12-01');
-    expect(Number(decB.carried_amount)).toBe(0);
-    expect((await api(id.sB, '2026-12-01')).remainingAmount).toBe(30_000);
-    expect(await ledgerOf(id.sB)).toEqual([]);
-    // Chỉ các hóa đơn phát hành ghi sổ: s1 (2 dòng), s2, sL, sO, sQ?, sP? (xem từng học viên bên dưới).
+    // Phát hành kỳ 01, không chốt sA (để dành vector 20 + 50 − 40 ở kỳ 02) và sU (nháp treo).
+    const res = await issueExcept('2027-01-01', [id.sA, id.sU]);
+    // (a) sZ: Σ dòng ngoài carry = 0 → bỏ qua, vẫn nháp, không ghi sổ.
+    expect(res.skipped.map((x) => x.reason)).toEqual(['ZERO_AMOUNT']);
+    expect(res.issuedCount).toBe(11);
+    expect((await invoiceOf(id.sZ, '2027-01-01')).status).toBe('draft');
+    expect(await ledgerOf(id.sZ)).toEqual([]);
+    // (b) s3: phát sinh 100.000, credit 300.000 → chốt 0 đ `paid`, có mã, không QR; ghi nợ đúng phần phát sinh; dư 200.000.
+    const s3 = await invoiceOf(id.s3, '2027-01-01');
+    expect(s3).toMatchObject({
+      status: 'paid',
+      paid_amount: '0',
+      qr_payload: null,
+    });
+    expect(s3.code).toMatch(/^TH-/);
+    expect(Number(s3.total_amount)).toBe(0);
     expect(
-      (await q(`select count(*)::int n from student_ledger`))[0].n,
-    ).toBeGreaterThan(ledgerBefore);
+      (await ledgerOf(id.s3)).map((l) => [l.kind, l.debit, l.credit]),
+    ).toEqual([
+      ['overpayment', 0, 300_000],
+      ['applied_to_invoice', 100_000, 0],
+    ]);
+    expect(await balanceOf(id.s3)).toBe(-200_000);
+    expect((await api(id.s3, '2027-01-01')).remainingAmount).toBe(0);
+    // (c) sB: phát sinh −50.000 (50.000 − 100.000) và nợ cũ 30.000 → 0 đ paid; nợ cũ được chuyển, phần âm thành credit ở sổ.
+    const sb = await invoiceOf(id.sB, '2027-01-01');
+    expect(sb).toMatchObject({ status: 'paid', qr_payload: null });
+    expect(Number((await invoiceOf(id.sB, '2026-12-01')).carried_amount)).toBe(
+      30_000,
+    );
+    expect(
+      (await ledgerOf(id.sB)).map((l) => [l.kind, l.debit, l.credit]),
+    ).toEqual([
+      ['unpaid_carried', 30_000, 0],
+      ['applied_to_invoice', 0, 50_000],
+    ]);
+    expect(await balanceOf(id.sB)).toBe(-20_000);
+    // Không còn nợ ở đâu: /receivables không có sB, s3.
+    const rec = await get<Receivables>(A, '/receivables?pageSize=100');
+    expect(
+      rec.items.some((i) => ([id.sB, id.s3] as string[]).includes(i.studentId)),
+    ).toBe(false);
+    // Nháp treo sU và sA vẫn nháp.
+    for (const k of ['sA', 'sU'] as const)
+      expect((await invoiceOf(id[k], '2027-01-01')).status).toBe('draft');
     await invariant('sau issue Jan');
   });
 
@@ -584,8 +648,8 @@ describe('carry-over: chuyển kỳ lúc phát hành, sổ học viên, công n�
       ['applied_to_invoice', 50_000, 0],
     ]);
     expect((await api(id.s2, '2027-01-01')).totalAmount).toBe(1_150_000);
-    // s3: hóa đơn 0 đ không phát hành, số dư trả thừa giữ nguyên 300.000.
-    expect(await balanceOf(id.s3)).toBe(-300_000);
+    // s3: đã chốt 0 đ (xem test trước), số dư còn 200.000.
+    expect(await balanceOf(id.s3)).toBe(-200_000);
     // s5: phụ huynh đã trả hóa đơn cũ → không kết chuyển gì.
     expect(Number((await invoiceOf(id.s5, '2026-12-01')).carried_amount)).toBe(
       0,
@@ -749,9 +813,55 @@ describe('carry-over: chuyển kỳ lúc phát hành, sổ học viên, công n�
       ['overpayment', 0, 50_000],
       ['applied_to_invoice', 50_000, 0],
     ]);
-    // s3: Feb 100.000 − 300.000 → vẫn 0 đ, dư giữ nguyên.
-    expect(await balanceOf(id.s3)).toBe(-300_000);
+    // s3: Feb 100.000 − credit 200.000 → chốt 0 đ paid, dư 100.000.
+    expect(await balanceOf(id.s3)).toBe(-100_000);
+    expect((await invoiceOf(id.s3, '2027-02-01')).status).toBe('paid');
+    // sU: nháp Jan không được chốt nên điều chỉnh kỳ trước CHƯA tính là đã điều chỉnh → nháp Feb vẫn có hai dòng.
+    expect(
+      (await linesOf((await feb(id.sU)).id))
+        .filter((l) => l.kind === 'prev_adjustment')
+        .map((l) => l.amount),
+    ).toEqual([-100_000, -100_000]);
     await invariant('sau Feb');
+  });
+
+  it('credit 300.000 × phát sinh 100.000: ba kỳ liên tiếp mỗi kỳ một hóa đơn paid 0 đ, credit về 0, không còn nợ; kỳ thứ 4 ra 100.000 bình thường', async () => {
+    // Kỳ 01, 02 đã chốt ở trên (dư 100.000); kỳ 03 là kỳ thứ ba.
+    const others = Object.values(id).filter((v) => v !== id.s3);
+    expect(await job.run(CLOSE_MAR)).toBeGreaterThanOrEqual(1);
+    const mar = await issueExcept('2027-03-01', others);
+    expect(mar.issuedCount).toBe(1);
+    for (const m of ['2027-01-01', '2027-02-01', '2027-03-01']) {
+      const inv = await invoiceOf(id.s3, m);
+      expect(inv, m).toMatchObject({
+        status: 'paid',
+        total_amount: '0',
+        paid_amount: '0',
+        qr_payload: null,
+      });
+      expect(inv.code).toMatch(/^TH-/);
+      expect((await api(id.s3, m)).remainingAmount).toBe(0);
+    }
+    expect(await balanceOf(id.s3)).toBe(0);
+    expect(
+      (await ledgerOf(id.s3)).map((l) => [l.kind, l.debit, l.credit]),
+    ).toEqual([
+      ['overpayment', 0, 300_000],
+      ['applied_to_invoice', 100_000, 0],
+      ['applied_to_invoice', 100_000, 0],
+      ['applied_to_invoice', 100_000, 0],
+    ]);
+    const rec = await get<Receivables>(A, '/receivables?pageSize=100');
+    expect(rec.items.some((i) => i.studentId === id.s3)).toBe(false);
+    await invariant('sau credit hết');
+    // Kỳ 04: credit đã hết → hóa đơn 100.000 bình thường, đã phát hành, có QR.
+    expect(await job.run(CLOSE_APR)).toBeGreaterThanOrEqual(1);
+    expect((await issueExcept('2027-04-01', others)).issuedCount).toBe(1);
+    const apr = await invoiceOf(id.s3, '2027-04-01');
+    expect(apr).toMatchObject({ status: 'issued', total_amount: '100000' });
+    expect(apr.qr_payload).not.toBeNull();
+    expect((await linesOf(apr.id)).map((l) => l.kind)).toEqual(['monthly']);
+    await invariant('sau kỳ 04');
   });
 
   it('S1 tuổi nợ: nợ chuyển qua 3 kỳ vẫn tính từ hạn gốc → nhóm over-60; /receivables và Σ đối soát', async () => {
@@ -908,10 +1018,8 @@ describe('carry-over: chuyển kỳ lúc phát hành, sổ học viên, công n�
     expect(pg1.entries.items).toHaveLength(1);
     expect(pg1.entries.total).toBe(4);
     const s3 = await get<StudentLedger>(A, `/students/${id.s3}/ledger`);
-    expect(s3).toMatchObject({
-      balanceAmount: -300_000,
-      creditAmount: 300_000,
-    });
+    expect(s3).toMatchObject({ balanceAmount: 0, creditAmount: 0 });
+    expect(s3.entries.total).toBe(4);
     const fresh = randomUUID();
     await addStudent(A, fresh, 'Chưa Có Sổ');
     const empty = await get<StudentLedger>(A, `/students/${fresh}/ledger`);
@@ -936,7 +1044,7 @@ describe('carry-over: chuyển kỳ lúc phát hành, sổ học viên, công n�
 
   it('ràng buộc DB 0027: carried_amount (nháp = 0, khớp sổ, paid + carried ≤ total, đối chiếu cả khi INSERT), unpaid_carried/applied hợp lệ, oldest_due_date bất biến', async () => {
     const oldS1 = await invoiceOf(id.s1, '2026-12-01');
-    const draft = await invoiceOf(id.s3, '2027-01-01');
+    const draft = await invoiceOf(id.sA, '2027-01-01'); // nháp chưa chốt
     const slack = await invoiceOf(id.s2, '2026-12-01'); // đã hủy thu: paid 0, còn chỗ cho carried
     await expect(
       q(`update invoices set carried_amount = 1000 where id = $1`, [slack.id]),
@@ -967,6 +1075,26 @@ describe('carry-over: chuyển kỳ lúc phát hành, sổ học viên, công n�
         [randomUUID(), A.tenantId, id.s2, oldS1.id],
       ),
     ).rejects.toThrow(/LEDGER_INVALID/);
+    // QR bắt buộc với hóa đơn đã phát hành có tiền; chỉ hóa đơn 0 đ (trả bằng số dư) mới được thiếu QR.
+    const [qs, qi] = [randomUUID(), randomUUID()];
+    await addStudent(A, qs, 'Thiếu QR');
+    await q(
+      `insert into invoices (id, tenant_id, period_id, student_id, total_amount) values ($1, $2, $3, $4, 1000)`,
+      [qi, A.tenantId, draft.period_id, qs],
+    );
+    await expect(
+      q(
+        `update invoices set status = 'issued', code = 'TH-QQQQQ2', transfer_note = 'TH QQQQQ2', qr_payload = null,
+           payout = '{"a":1}'::jsonb, issued_at = now() where id = $1`,
+        [qi],
+      ),
+    ).rejects.toThrow(/invoices_issue_fields_check/);
+    await q(`update invoices set total_amount = 0 where id = $1`, [qi]);
+    await q(
+      `update invoices set status = 'issued', code = 'TH-QQQQQ2', transfer_note = 'TH QQQQQ2', qr_payload = null,
+         payout = '{"a":1}'::jsonb, issued_at = now() where id = $1`,
+      [qi],
+    ); // hóa đơn 0 đ không cần QR
     const voided = await invoiceOf(id.sV, '2026-12-01');
     await expect(
       q(

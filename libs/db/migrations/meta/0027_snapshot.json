@@ -1,5 +1,5 @@
 {
-  "id": "8e7ec401-8665-4f4e-a2d5-16ae00a050ee",
+  "id": "4633a3de-300b-44a2-9e94-20be9a4779d7",
   "prevId": "2a85c8d6-d729-43d6-9b30-c0a1b20f622f",
   "version": "7",
   "dialect": "postgresql",
@@ -913,7 +913,7 @@
         },
         "invoices_issue_fields_check": {
           "name": "invoices_issue_fields_check",
-          "value": "case when \"invoices\".\"status\" = 'draft'\n        then \"invoices\".\"code\" is null and \"invoices\".\"transfer_note\" is null and \"invoices\".\"qr_payload\" is null and \"invoices\".\"payout\" is null and \"invoices\".\"issued_at\" is null\n        else \"invoices\".\"code\" is not null and \"invoices\".\"transfer_note\" is not null and \"invoices\".\"qr_payload\" is not null and \"invoices\".\"payout\" is not null and \"invoices\".\"issued_at\" is not null end"
+          "value": "case when \"invoices\".\"status\" = 'draft'\n        then \"invoices\".\"code\" is null and \"invoices\".\"transfer_note\" is null and \"invoices\".\"qr_payload\" is null and \"invoices\".\"payout\" is null and \"invoices\".\"issued_at\" is null\n        else \"invoices\".\"code\" is not null and \"invoices\".\"transfer_note\" is not null and (\"invoices\".\"qr_payload\" is not null or \"invoices\".\"total_amount\" = 0) and \"invoices\".\"payout\" is not null and \"invoices\".\"issued_at\" is not null end"
         },
         "invoices_void_fields_check": {
           "name": "invoices_void_fields_check",

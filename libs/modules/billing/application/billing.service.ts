@@ -40,6 +40,7 @@ import {
   transferNoteOf,
 } from '../domain/invoice-issue.js';
 import { remainingOf } from '../domain/payment.js';
+import { planCarryOver, stableUuid } from '../domain/carry-over.js';
 import {
   loadCarryState,
   nonCarrySums,
@@ -361,8 +362,8 @@ export class BillingService {
     );
     const fresh = new Map(
       drafts.map((r) => {
-        const st = states.get(r.studentId)!;
-        return [r.id, { carry: st.carry, sum: base.get(r.id)! + st.carry }];
+        const carry = states.get(r.studentId)!.carry;
+        return [r.id, planCarryOver(base.get(r.id)!, carry)] as const;
       }),
     );
     const todo: InvoiceRow[] = [];
@@ -373,20 +374,14 @@ export class BillingService {
           studentName: nameOf(r.studentId),
           reason: 'NOT_DRAFT',
         });
-      else if (fresh.get(r.id)!.sum <= 0) {
-        // Tổng ≤ 0: không phát hành, không kết chuyển gì (nợ/dư giữ nguyên chỗ cũ); làm mới bản nháp cho khớp số liệu hiện tại.
-        const f = fresh.get(r.id)!;
-        await setCarryLine(tx, tenantId, r.id, f.carry);
-        await tx
-          .update(invoices)
-          .set({ totalAmount: 0, clampedAmount: Math.max(0, -f.sum) })
-          .where(and(eq(invoices.tenantId, tenantId), eq(invoices.id, r.id)));
+      else if (!fresh.get(r.id)!.issuable)
+        // Σ dòng ngoài carry_over = 0 (vd. miễn giảm 100%): không phát hành, không kết chuyển (US-1.3 AC3).
         skipped.push({
           invoiceId: r.id,
           studentName: nameOf(r.studentId),
           reason: 'ZERO_AMOUNT',
         });
-      } else todo.push({ ...r, totalAmount: fresh.get(r.id)!.sum });
+      else todo.push({ ...r, totalAmount: fresh.get(r.id)!.total });
     }
 
     const codes = await this.freshCodes(tx, tenantId, todo.length);
@@ -402,16 +397,20 @@ export class BillingService {
     for (const [i, inv] of todo.entries()) {
       const code = codes[i]!;
       const transferNote = transferNoteOf(code);
-      const qrPayload = buildVietQrPayload({
-        bankBin: account.bankBin,
-        accountNo: account.accountNo,
-        amount: inv.totalAmount,
-        transferNote,
-      });
+      // Tổng 0 do số dư trả đủ: hóa đơn đã `paid`, không có QR (không còn gì để chuyển khoản).
+      const paidByCredit = inv.totalAmount === 0;
+      const qrPayload = paidByCredit
+        ? null
+        : buildVietQrPayload({
+            bankBin: account.bankBin,
+            accountNo: account.accountNo,
+            amount: inv.totalAmount,
+            transferNote,
+          });
       const st = states.get(inv.studentId)!;
       const f = fresh.get(inv.id)!;
       // Cập nhật dòng xem trước thành số chốt, rồi ghi sổ: nợ từng hóa đơn cũ (+carried_amount) và phần hóa đơn hấp thụ.
-      await setCarryLine(tx, tenantId, inv.id, f.carry);
+      await setCarryLine(tx, tenantId, inv.id, f.carryOver);
       for (const o of st.open) {
         await tx.insert(studentLedger).values({
           id: uuidv7(),
@@ -429,15 +428,15 @@ export class BillingService {
           })
           .where(and(eq(invoices.tenantId, tenantId), eq(invoices.id, o.id)));
       }
-      if (f.carry)
+      if (f.applied)
         await tx.insert(studentLedger).values({
           id: uuidv7(),
           tenantId,
           studentId: inv.studentId,
           invoiceId: inv.id,
           kind: 'applied_to_invoice',
-          debit: f.carry < 0 ? -f.carry : 0,
-          credit: f.carry > 0 ? f.carry : 0,
+          debit: f.applied < 0 ? -f.applied : 0,
+          credit: f.applied > 0 ? f.applied : 0,
           description: `Số dư chuyển vào hóa đơn kỳ ${period.periodMonth.slice(5, 7)}/${period.periodMonth.slice(0, 4)}`,
         });
       await tx
@@ -456,23 +455,35 @@ export class BillingService {
           issuedAt: new Date(),
         })
         .where(and(eq(invoices.tenantId, tenantId), eq(invoices.id, inv.id)));
-      events.push({
-        id: uuidv7(),
-        tenantId,
-        type: INVOICE_ISSUED,
-        payload: {
-          invoiceId: inv.id,
-          studentId: inv.studentId,
-          periodMonth: period.periodMonth,
-          totalAmount: inv.totalAmount,
-          dueDate: period.dueDate,
-        } satisfies InvoiceIssuedPayload,
-      });
+      if (paidByCredit)
+        await tx
+          .update(invoices)
+          .set({ status: 'paid' })
+          .where(and(eq(invoices.tenantId, tenantId), eq(invoices.id, inv.id)));
+      // shortcut: hóa đơn 0 đ đã trả bằng số dư không ghi `invoice_issued` (consumer đòi `totalAmount ≥ 1`); phụ huynh thấy nó đã
+      // `paid` ở danh sách hóa đơn nhưng không có push. Nới consumer nếu cần báo.
+      if (!paidByCredit)
+        events.push({
+          id: uuidv7(),
+          tenantId,
+          type: INVOICE_ISSUED,
+          payload: {
+            invoiceId: inv.id,
+            studentId: inv.studentId,
+            periodMonth: period.periodMonth,
+            totalAmount: inv.totalAmount,
+            dueDate: period.dueDate,
+          } satisfies InvoiceIssuedPayload,
+        });
       audits.push({
         id: inv.id,
         before: { status: 'draft', totalAmount: inv.totalAmount },
         // Không đưa số tài khoản vào audit_logs.
-        after: { status: 'issued', code, totalAmount: inv.totalAmount },
+        after: {
+          status: paidByCredit ? 'paid' : 'issued',
+          code,
+          totalAmount: inv.totalAmount,
+        },
       });
       issued.push({
         id: inv.id,
@@ -482,12 +493,12 @@ export class BillingService {
         totalAmount: inv.totalAmount,
         dueDate: period.dueDate,
         transferNote,
-        qrPayload,
+        qrPayload: qrPayload ?? '',
       });
     }
 
-    if (events.length) {
-      await tx.insert(outboxEvents).values(events);
+    if (events.length) await tx.insert(outboxEvents).values(events);
+    if (audits.length) {
       await tx.execute(
         sql`select app_private.audit_insert(${tenantId}::uuid, 'invoice', v.id::uuid, 'update', v.b::jsonb, v.a::jsonb)
           from (values ${sql.join(
@@ -673,7 +684,7 @@ export class BillingService {
           0,
           {
             ...(old ?? {
-              id: uuidv7(),
+              id: stableUuid(`carry_over:${inv.id}`),
               charged: true,
               notChargedReason: null,
               sessionId: null,

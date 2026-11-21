@@ -25,27 +25,29 @@ describe('planCarryOver (US-7.6)', () => {
     });
   });
 
-  it('AC4: trả thừa 300.000 > phát sinh 100.000 → hóa đơn 0 đ, không phát hành, không kết chuyển (dư ở nguyên sổ)', () => {
+  it('AC4: trả thừa 300.000 > phát sinh 100.000 → hóa đơn 0 đ đã chốt, ghi nợ 100.000, dư 200.000 ở sổ', () => {
     expect(planCarryOver(100_000, -300_000)).toMatchObject({
       total: 0,
       carryOver: -300_000,
-      issuable: false,
-      applied: 0,
+      issuable: true,
+      applied: -100_000,
     });
   });
 
-  it('AC4 ca biên: trả thừa đúng bằng phát sinh → 0 đ, không phát hành', () => {
+  it('AC4 ca biên: trả thừa đúng bằng phát sinh → 0 đ đã chốt, sổ về 0', () => {
     expect(planCarryOver(100_000, -100_000)).toMatchObject({
       total: 0,
       carryOver: -100_000,
-      applied: 0,
+      issuable: true,
+      applied: -100_000,
     });
   });
 
-  it('AC4 ca biên: hóa đơn 0 đ (phát sinh 0) vẫn giữ nguyên số dư trả thừa, không hấp thụ gì', () => {
+  it('US-1.3 AC3: phát sinh 0 → không phát hành (issuable false), số dư trả thừa giữ nguyên', () => {
     expect(planCarryOver(0, -80_000)).toMatchObject({
       total: 0,
       carryOver: -80_000,
+      issuable: false,
       applied: 0,
     });
   });
@@ -58,12 +60,17 @@ describe('planCarryOver (US-7.6)', () => {
     });
   });
 
-  it('điều chỉnh kỳ trước âm làm tổng ≤ 0 → 0 đ, không phát hành', () => {
-    // phát sinh 0 + chênh −50.000, số dư 0 → sổ có 50.000 trả thừa
+  it('điều chỉnh âm vượt phát sinh: phần âm thành credit ở sổ (ghi có), hóa đơn 0 đ', () => {
     expect(planCarryOver(-50_000, 0)).toMatchObject({
       total: 0,
       carryOver: 0,
-      applied: 0,
+      issuable: true,
+      applied: 50_000,
+    });
+    // −50.000 + nợ 30.000 → còn credit 20.000: ghi có 50.000 đối ứng với nợ 30.000 đã chuyển
+    expect(planCarryOver(-50_000, 30_000)).toMatchObject({
+      total: 0,
+      applied: 50_000,
     });
   });
 

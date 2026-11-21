@@ -1,9 +1,13 @@
+ALTER TABLE "invoices" DROP CONSTRAINT "invoices_issue_fields_check";--> statement-breakpoint
 ALTER TABLE "invoices" ADD COLUMN "carried_amount" bigint DEFAULT 0 NOT NULL;--> statement-breakpoint
 ALTER TABLE "invoices" ADD COLUMN "oldest_due_date" date;--> statement-breakpoint
 CREATE INDEX "invoices_debt_idx" ON "invoices" USING btree ("tenant_id","student_id") WHERE "invoices"."status" in ('issued', 'partially_paid', 'pending_confirmation');--> statement-breakpoint
 ALTER TABLE "invoices" ADD CONSTRAINT "invoices_carried_amount_check" CHECK ("invoices"."carried_amount" >= 0 and "invoices"."carried_amount" <= "invoices"."total_amount"
         and ("invoices"."carried_amount" = 0 or "invoices"."paid_amount" + "invoices"."carried_amount" <= "invoices"."total_amount")
-        and ("invoices"."status" <> 'draft' or "invoices"."carried_amount" = 0));
+        and ("invoices"."status" <> 'draft' or "invoices"."carried_amount" = 0));--> statement-breakpoint
+ALTER TABLE "invoices" ADD CONSTRAINT "invoices_issue_fields_check" CHECK (case when "invoices"."status" = 'draft'
+        then "invoices"."code" is null and "invoices"."transfer_note" is null and "invoices"."qr_payload" is null and "invoices"."payout" is null and "invoices"."issued_at" is null
+        else "invoices"."code" is not null and "invoices"."transfer_note" is not null and ("invoices"."qr_payload" is not null or "invoices"."total_amount" = 0) and "invoices"."payout" is not null and "invoices"."issued_at" is not null end);
 --> statement-breakpoint
 -- S6-BE-03: nợ chuyển kỳ qua sổ học viên, kết chuyển lúc PHÁT HÀNH. `invoices.carried_amount` là phần còn nợ của hóa đơn đã kết
 -- chuyển sang hóa đơn kỳ sau (công nợ chỉ tính ở hóa đơn sau, không tính hai lần); luôn = Σ(debit − credit) các dòng `unpaid_carried`
