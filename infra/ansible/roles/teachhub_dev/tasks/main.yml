@@ -38,12 +38,51 @@
     dest: "{{ app_dir }}/postgres-init/01-roles.sh"
     mode: "0755"
 
-# Chứa mật khẩu và khóa JWT → 0600.
+# User deploy (CD) chạy `docker compose` nên cần đọc compose.yml + backend.env: root:deploy 0640.
+- name: User deploy cho CD (chỉ nhóm docker, không sudo)
+  ansible.builtin.user:
+    name: deploy
+    shell: /bin/bash
+    groups: docker
+    append: true
+    password_lock: true
+  when: deploy_ssh_pubkey is defined
+
+# Dùng module builtin (không cần collection ansible.posix).
+- name: Thư mục .ssh của deploy
+  ansible.builtin.file:
+    path: /home/deploy/.ssh
+    state: directory
+    owner: deploy
+    group: deploy
+    mode: "0700"
+  when: deploy_ssh_pubkey is defined
+
+- name: Khóa SSH của deploy
+  ansible.builtin.copy:
+    content: "{{ deploy_ssh_pubkey }}\n"
+    dest: /home/deploy/.ssh/authorized_keys
+    owner: deploy
+    group: deploy
+    mode: "0600"
+  when: deploy_ssh_pubkey is defined
+
+# Tag image do CD ghi; force: false để chạy lại Ansible không đè tag đang chạy.
+- name: .env của compose (IMAGE_TAG)
+  ansible.builtin.copy:
+    content: "IMAGE_TAG=main\n"
+    dest: "{{ app_dir }}/.env"
+    force: false
+    owner: "{{ 'deploy' if deploy_ssh_pubkey is defined else 'root' }}"
+    mode: "0644"
+
+# Chứa mật khẩu và khóa JWT → không cho người ngoài đọc.
 - name: Compose + biến môi trường backend
   ansible.builtin.template:
     src: "{{ item }}.j2"
     dest: "{{ app_dir }}/{{ item }}"
-    mode: "0600"
+    group: "{{ 'deploy' if deploy_ssh_pubkey is defined else 'root' }}"
+    mode: "0640"
   loop: [compose.yml, backend.env]
   no_log: true
 

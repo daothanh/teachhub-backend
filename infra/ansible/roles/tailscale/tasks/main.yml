@@ -1,0 +1,30 @@
+# Tailscale cho CD (S0-OPS-02): runner GitHub vào SSH qua tailnet, không cần mở cổng 22 ra Internet.
+# Chỉ chạy khi có ts_authkey (auth key tagged `tag:dev`, tạo ở admin console Tailscale).
+- name: Cài và đăng ký Tailscale
+  when: ts_authkey is defined
+  block:
+    - name: Khóa apt của Tailscale
+      ansible.builtin.get_url:
+        url: https://pkgs.tailscale.com/stable/ubuntu/{{ ansible_distribution_release }}.noarmor.gpg
+        dest: /usr/share/keyrings/tailscale-archive-keyring.gpg
+        mode: "0644"
+
+    - name: Kho apt của Tailscale
+      ansible.builtin.apt_repository:
+        repo: "deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/ubuntu {{ ansible_distribution_release }} main"
+        filename: tailscale
+
+    - name: Gói tailscale
+      ansible.builtin.apt:
+        name: tailscale
+        update_cache: true
+
+    - name: Đăng ký vào tailnet (bỏ qua nếu đã vào)
+      ansible.builtin.shell: |
+        tailscale status >/dev/null 2>&1 && exit 0
+        tailscale up --authkey="$TS_AUTHKEY" --hostname=teachhub-dev --advertise-tags=tag:dev
+      environment:
+        TS_AUTHKEY: "{{ ts_authkey }}"
+      register: ts_up
+      changed_when: ts_up.rc == 0 and ts_up.stdout == ""
+      no_log: true

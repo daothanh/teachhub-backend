@@ -33,9 +33,26 @@ uvx --from ansible-core ansible-playbook -i "$(tofu -chdir=../terraform/dev outp
 curl -s https://api-dev.dayhoc.app/health/ready   # {"status":"ok",...}
 ```
 
-Playbook chạy lại được nhiều lần. Mỗi lần chạy, nó kéo image `main` mới nhất và chờ `/health/ready` trả OK. Deploy tự động khi merge thuộc S0-OPS-02.
+Playbook chạy lại được nhiều lần. Mỗi lần chạy, nó kéo image `main` mới nhất và chờ `/health/ready` trả OK. Deploy tự động khi merge xem mục CD bên dưới.
 
 Xem email OTP trong Mailpit: `ssh -L 8025:127.0.0.1:8025 root@<IP>`, rồi mở `http://localhost:8025`.
+
+## CD development (S0-OPS-02)
+
+Merge vào `main` → `image` build + đẩy GHCR (`sha-<40 hex>`, `main`) → `deploy-dev` (workflow_run, chỉ khi build thành công; hoặc chạy tay với input `tag`) → runner vào tailnet → SSH `deploy@VM` → `docker compose pull` → chạy `migrate` (vai trò `teachhub_owner`, thoát ≠ 0 thì dừng, api/worker giữ bản cũ) → ghi `IMAGE_TAG` vào `/opt/teachhub/.env` → `up -d api worker` → chờ `/health/ready` tối đa 120 giây (quá hạn thì job đỏ). Mỗi lần một deploy (`concurrency: deploy-dev`).
+
+Kết nối: cổng 22 công khai chỉ mở cho IP admin (Firewall Hetzner, giữ nguyên) nên runner đi qua Tailscale (`tailscale/github-action`, tag `tag:ci`). Tailscale chỉ cần kết nối ra ngoài, không mở thêm cổng. User `deploy` thuộc nhóm `docker`, không có sudo. Nhóm `docker` tương đương root trên VM nên khóa `DEV_SSH_PRIVATE_KEY` phải được bảo vệ như khóa root.
+
+Việc Owner phải làm một lần:
+
+1. Tailscale: tạo tailnet; thêm vào ACL `tagOwners` cho `tag:ci` và `tag:dev`, và rule `{"action":"accept","src":["tag:ci"],"dst":["tag:dev:22"]}`. Tạo **OAuth client** (scope `auth_keys` ghi, tag `tag:ci`) và một **auth key** dùng một lần, gắn `tag:dev`, cho VM.
+2. Khóa SSH deploy: `ssh-keygen -t ed25519 -f deploy_key -N ""`; khóa công khai truyền cho Ansible, khóa riêng làm secret.
+3. Chạy lại Ansible (an toàn, idempotent): thêm `-e "deploy_ssh_pubkey='$(cat deploy_key.pub)'" -e ts_authkey=<tskey-auth-...>`. VM vào tailnet với tên `teachhub-dev`.
+4. Lấy known_hosts của VM qua tailnet: `ssh-keyscan -t ed25519 teachhub-dev` (hoặc IP Tailscale `100.x.y.z`).
+5. GitHub → Settings → Environments → tạo `development`, thêm secrets: `DEV_SSH_HOST` (IP/tên tailnet của VM), `DEV_SSH_USER` (`deploy`), `DEV_SSH_PRIVATE_KEY` (khóa riêng), `DEV_SSH_KNOWN_HOSTS` (kết quả bước 4), `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`.
+6. Gói GHCR `teachhub-backend` phải cấp quyền đọc cho repo này (Package settings → Manage Actions access), để `GITHUB_TOKEN` kéo được image private.
+
+Ansible đặt `IMAGE_TAG=main` trong `.env` chỉ khi file chưa có; CD sau đó giữ tag SHA đang chạy, nên chạy lại Ansible không làm lùi phiên bản.
 
 ## R25: thử hạn mức tạo máy
 
