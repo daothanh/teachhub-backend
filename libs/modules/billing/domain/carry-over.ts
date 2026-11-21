@@ -18,7 +18,10 @@ export function planCarryOver(charges: number, balance: number) {
   return {
     /** Σ có dấu trước khi cắt về 0. */
     sum,
-    total: Math.max(0, sum),
+    /** Tổng lưu/hiển thị: nháp không có phát sinh (`charges = 0`) luôn 0 (không phát hành được, không bao giờ "còn tiền"). */
+    total: charges === 0 ? 0 : Math.max(0, sum),
+    /** Phần âm bị cắt (cùng công thức ở job, xem trước, `adjust`, `issue`). */
+    clamped: charges === 0 ? 0 : Math.max(0, -sum),
     /** Dòng `carry_over` (có dấu); 0 = không có dòng. */
     carryOver: balance,
     issuable: charges !== 0,

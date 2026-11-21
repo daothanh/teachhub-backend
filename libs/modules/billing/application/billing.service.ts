@@ -40,11 +40,15 @@ import {
   transferNoteOf,
 } from '../domain/invoice-issue.js';
 import { remainingOf } from '../domain/payment.js';
-import { planCarryOver, stableUuid } from '../domain/carry-over.js';
 import {
-  loadCarryState,
-  nonCarrySums,
+  planCarryOver,
+  prevAdjustmentDescription,
+  stableUuid,
+} from '../domain/carry-over.js';
+import {
+  previewDrafts,
   setCarryLine,
+  setPrevAdjustmentLines,
 } from './carry-over.queries.js';
 import { buildVietQrPayload } from '../domain/vietqr.js';
 
@@ -218,7 +222,7 @@ export class BillingService {
       charged: true,
       adjustmentReason: body.adjustmentReason,
     });
-    // Dòng `carry_over` của bản nháp chỉ là xem trước: làm mới theo số liệu hiện tại rồi tổng = max(0, Σ dòng).
+    // Hai dòng xem trước (điều chỉnh kỳ trước, chuyển kỳ) làm mới theo số liệu hiện tại; tổng = max(0, Σ dòng), cùng công thức job/GET/issue.
     const [period] = await tx
       .select({ periodMonth: billingPeriods.periodMonth })
       .from(billingPeriods)
@@ -228,32 +232,23 @@ export class BillingService {
           eq(billingPeriods.id, inv.periodId),
         ),
       );
-    const carry = (
-      await loadCarryState(
-        tx,
-        actor.tenantId,
-        [inv.studentId],
-        period!.periodMonth,
-      )
-    ).get(inv.studentId)!.carry;
-    await setCarryLine(tx, actor.tenantId, id, carry);
-    const [agg] = await tx
-      .select({ n: sql<string>`sum(${invoiceLines.amount})::text` })
-      .from(invoiceLines)
-      .where(
-        and(
-          eq(invoiceLines.tenantId, actor.tenantId),
-          eq(invoiceLines.invoiceId, id),
-        ),
-      );
-    const sum = Number(agg?.n ?? 0);
-    if (Math.abs(sum) > MAX_VND) {
+    const { previews } = await previewDrafts(
+      tx,
+      actor.tenantId,
+      [{ id, studentId: inv.studentId }],
+      period!.periodMonth,
+    );
+    const pv = previews.get(id)!;
+    await setPrevAdjustmentLines(tx, actor.tenantId, id, pv.adjustments);
+    await setCarryLine(tx, actor.tenantId, id, pv.carry);
+    const plan = planCarryOver(pv.charges, pv.carry);
+    if (Math.abs(plan.sum) > MAX_VND) {
       throw new AppException('VALIDATION_FAILED', undefined, {
         amount: ['Tổng hóa đơn vượt giới hạn cho phép.'],
       });
     }
-    const totalAmount = Math.max(0, sum);
-    const clampedAmount = Math.max(0, -sum);
+    const totalAmount = plan.total;
+    const clampedAmount = plan.clamped;
     await tx
       .update(invoices)
       .set({ totalAmount, clampedAmount })
@@ -348,22 +343,17 @@ export class BillingService {
     const drafts = rows.filter((r) => r.status === 'draft');
     // Kết chuyển tại lúc phát hành (D6): khóa các hóa đơn cũ còn nợ một lần cho cả lô (`ORDER BY id FOR UPDATE`, sau khóa kỳ và
     // hóa đơn nháp) rồi tính lại số dư dưới khóa; số dư xem trước trong bản nháp có thể đã cũ.
-    const states = await loadCarryState(
+    const { previews, states } = await previewDrafts(
       tx,
       tenantId,
-      [...new Set(drafts.map((r) => r.studentId))],
+      drafts,
       period.periodMonth,
       true,
     );
-    const base = await nonCarrySums(
-      tx,
-      tenantId,
-      drafts.map((r) => r.id),
-    );
     const fresh = new Map(
       drafts.map((r) => {
-        const carry = states.get(r.studentId)!.carry;
-        return [r.id, planCarryOver(base.get(r.id)!, carry)] as const;
+        const pv = previews.get(r.id)!;
+        return [r.id, planCarryOver(pv.charges, pv.carry)] as const;
       }),
     );
     const todo: InvoiceRow[] = [];
@@ -410,6 +400,12 @@ export class BillingService {
       const st = states.get(inv.studentId)!;
       const f = fresh.get(inv.id)!;
       // Cập nhật dòng xem trước thành số chốt, rồi ghi sổ: nợ từng hóa đơn cũ (+carried_amount) và phần hóa đơn hấp thụ.
+      await setPrevAdjustmentLines(
+        tx,
+        tenantId,
+        inv.id,
+        previews.get(inv.id)!.adjustments,
+      );
       await setCarryLine(tx, tenantId, inv.id, f.carryOver);
       for (const o of st.open) {
         await tx.insert(studentLedger).values({
@@ -493,7 +489,7 @@ export class BillingService {
         totalAmount: inv.totalAmount,
         dueDate: period.dueDate,
         transferNote,
-        qrPayload: qrPayload ?? '',
+        qrPayload: qrPayload ?? '', // '' thay null: nullable ở response bị oasdiff coi là breaking
       });
     }
 
@@ -511,7 +507,7 @@ export class BillingService {
       );
     }
 
-    // Kỳ đóng khi không còn bản nháp nào có tiền để phát hành (bản nháp 0 đ không chặn).
+    // Kỳ đóng khi không còn bản nháp nào chốt được (còn khoản phát sinh ≠ 0); nháp không có phát sinh không chặn.
     const [left] = await tx
       .select({ n: sql<number>`count(*)::int` })
       .from(invoices)
@@ -520,7 +516,9 @@ export class BillingService {
           eq(invoices.tenantId, tenantId),
           eq(invoices.periodId, periodId),
           eq(invoices.status, 'draft'),
-          sql`${invoices.totalAmount} > 0`,
+          sql`coalesce((select sum(l.amount) from invoice_lines l
+                         where l.tenant_id = ${invoices.tenantId} and l.invoice_id = ${invoices.id}
+                           and l.kind <> 'carry_over'), 0) <> 0`,
         ),
       );
     if (!left?.n && period.status !== 'closed')
@@ -672,34 +670,62 @@ export class BillingService {
     let totalAmount = inv.totalAmount;
     let clampedAmount = inv.clampedAmount;
     if (inv.status === 'draft') {
-      // Dòng `carry_over` của bản nháp là xem trước: tính lại theo số liệu hiện tại, không ghi (GET không đổi dữ liệu).
-      const carry = (
-        await loadCarryState(tx, tenantId, [inv.studentId], period!.periodMonth)
-      ).get(inv.studentId)!.carry;
-      const old = shown.find((l) => l.kind === 'carry_over');
-      shown = shown.filter((l) => l.kind !== 'carry_over');
-      if (carry)
-        shown.splice(
-          old ? lines.findIndex((l) => l.kind === 'carry_over') : shown.length,
-          0,
-          {
-            ...(old ?? {
-              id: stableUuid(`carry_over:${inv.id}`),
-              charged: true,
-              notChargedReason: null,
-              sessionId: null,
-              sessionDate: null,
-              className: null,
-              adjustmentReason: null,
-            }),
-            kind: 'carry_over',
-            description: carry > 0 ? 'Nợ kỳ trước' : 'Trả thừa kỳ trước',
-            amount: carry,
-          },
+      // Hai dòng xem trước (điều chỉnh kỳ trước, chuyển kỳ) tính lại theo số liệu hiện tại, không ghi (GET không đổi dữ liệu).
+      const { previews } = await previewDrafts(
+        tx,
+        tenantId,
+        [{ id: inv.id, studentId: inv.studentId }],
+        period!.periodMonth,
+      );
+      const pv = previews.get(inv.id)!;
+      const virtual = (
+        kind: 'carry_over' | 'prev_adjustment',
+        key: string,
+        description: string,
+        amount: number,
+        more: Partial<Invoice['lines'][number]> = {},
+      ): Invoice['lines'][number] => ({
+        id: stableUuid(`${kind}:${inv.id}:${key}`),
+        kind,
+        description,
+        amount,
+        charged: true,
+        notChargedReason: null,
+        sessionId: null,
+        sessionDate: null,
+        className: null,
+        adjustmentReason: null,
+        ...more,
+      });
+      shown = shown.filter(
+        (l) => l.kind !== 'carry_over' && l.kind !== 'prev_adjustment',
+      );
+      for (const a of pv.adjustments)
+        shown.push(
+          virtual(
+            'prev_adjustment',
+            a.sessionId,
+            prevAdjustmentDescription(a),
+            a.amount,
+            {
+              sessionId: a.sessionId,
+              sessionDate: a.date || null,
+              className: a.className,
+            },
+          ),
         );
-      const sum = shown.reduce((n, l) => n + l.amount, 0);
-      totalAmount = Math.max(0, sum);
-      clampedAmount = Math.max(0, -sum);
+      if (pv.carry)
+        shown.push(
+          virtual(
+            'carry_over',
+            'carry',
+            pv.carry > 0 ? 'Nợ kỳ trước' : 'Trả thừa kỳ trước',
+            pv.carry,
+          ),
+        );
+      const plan = planCarryOver(pv.charges, pv.carry);
+      totalAmount = plan.total;
+      clampedAmount = plan.clamped;
     }
     return {
       id: inv.id,
@@ -750,22 +776,12 @@ export class BillingService {
           eq(invoices.status, 'draft'),
         ),
       );
-    const base = await nonCarrySums(
-      tx,
-      tenantId,
-      drafts.map((d) => d.id),
-    );
-    const states = await loadCarryState(
-      tx,
-      tenantId,
-      [...new Set(drafts.map((d) => d.studentId))],
-      periodMonth,
-    );
+    const { previews } = await previewDrafts(tx, tenantId, drafts, periodMonth);
     return new Map(
-      drafts.map((d) => [
-        d.id,
-        Math.max(0, base.get(d.id)! + states.get(d.studentId)!.carry),
-      ]),
+      drafts.map((d) => {
+        const pv = previews.get(d.id)!;
+        return [d.id, planCarryOver(pv.charges, pv.carry).total];
+      }),
     );
   }
 

@@ -320,8 +320,8 @@ export class BillingCloseJob {
           adjustmentReason: null,
         });
       }
-      // Tổng hóa đơn = Σ tổng từng ghi danh (calculator đã cắt về ≥ 0) rồi cắt lần cuối cùng với dòng điều chỉnh khi sửa.
-      d.total += r.result.total;
+      // Tổng = Σ dòng thô của mọi ghi danh, cắt ở mức hóa đơn (cùng công thức với xem trước, `adjust` và `issue`).
+      d.total += r.result.lines.reduce((n, l) => n + l.amount, 0);
       if (r.installmentNo && r.installmentCount)
         d.courses.push({ no: r.installmentNo, count: r.installmentCount });
       drafts.set(enr.studentId, d);
@@ -349,7 +349,8 @@ export class BillingCloseJob {
     const invoiced = await invoicedStudents(bp.id);
 
     let draftCount = 0;
-    let draftTotalAmount = 0;
+    let readyCount = 0;
+    let readyTotalAmount = 0;
     const lineRows: (typeof invoiceLines.$inferInsert)[] = [];
     const todo = [...drafts.values()].filter((d) => !invoiced.has(d.studentId));
     const todoIds = todo.map((d) => d.studentId);
@@ -398,7 +399,7 @@ export class BillingCloseJob {
           periodId: bp.id,
           studentId: d.studentId,
           totalAmount: plan.total,
-          clampedAmount: Math.max(0, -plan.sum),
+          clampedAmount: plan.clamped,
           installmentNo: course?.no ?? null,
           installmentCount: course?.count ?? null,
         })
@@ -406,7 +407,11 @@ export class BillingCloseJob {
         .returning({ id: invoices.id });
       if (!row) continue; // đã có bản nháp (chạy chồng): bỏ qua
       draftCount += 1;
-      draftTotalAmount += plan.total;
+      // Chỉ nháp chốt được (có khoản phát sinh ≠ 0) tính vào thông báo "bản nháp sẵn sàng".
+      if (plan.issuable) {
+        readyCount += 1;
+        readyTotalAmount += plan.total;
+      }
       let position = d.lines.length;
       for (const l of d.lines) lineRows.push({ ...l, invoiceId: id });
       const extra = (
@@ -435,8 +440,8 @@ export class BillingCloseJob {
       await t.insert(invoiceLines).values(lineRows.slice(i, i + LINE_CHUNK));
     if (!draftCount) return 0;
 
-    // Kỳ đã `closed` mà có bản nháp có tiền mới (học viên vào muộn) thì quay lại `drafting`.
-    if (bp.status === 'closed' && draftTotalAmount > 0)
+    // Kỳ đã `closed` mà có bản nháp chốt được mới (học viên vào muộn) thì quay lại `drafting`.
+    if (bp.status === 'closed' && readyCount > 0)
       await t
         .update(billingPeriods)
         .set({ status: 'drafting' })
@@ -447,11 +452,13 @@ export class BillingCloseJob {
           ),
         );
 
+    if (!readyCount) return draftCount; // chỉ có nháp không phát sinh: không báo giáo viên
+
     const payload: BillingDraftsReadyPayload = {
       periodId: bp.id,
       periodMonth: bp.periodMonth,
-      draftCount,
-      draftTotalAmount,
+      draftCount: readyCount,
+      draftTotalAmount: readyTotalAmount,
     };
     await recordOutboxEvent(t, {
       tenantId,

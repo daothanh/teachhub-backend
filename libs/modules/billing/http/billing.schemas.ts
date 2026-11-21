@@ -469,7 +469,7 @@ export const issuedInvoiceSchema = z
     studentId: z.uuid(),
     studentName: z.string(),
     totalAmount: vndSchema(
-      'VND. 0 chỉ khi số dư sổ (trả thừa) đã trả đủ kỳ này: hóa đơn có mã, trạng thái `paid`, không có QR (`qrPayload` rỗng), không nhắc nợ, không thông báo phụ huynh riêng',
+      'VND. 0 chỉ khi số dư sổ (trả thừa) đã trả đủ kỳ này: hóa đơn có mã, trạng thái `paid`, không có QR (`qrPayload` là chuỗi rỗng ở phản hồi `issue`: đổi thành nullable bị oasdiff coi là breaking; `GET /invoices/{id}` trả null), không nhắc nợ, không thông báo phụ huynh riêng',
     ),
     dueDate: z.iso.date(),
     transferNote,

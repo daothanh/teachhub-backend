@@ -12,6 +12,7 @@ import {
 import { uuidv7 } from '@teachhub/core';
 import {
   attendance,
+  classes,
   billingPeriods,
   enrollments,
   invoiceLines,
@@ -30,6 +31,7 @@ import {
   diffSessionCharges,
   type IssuedSession,
   type PrevAdjustment,
+  prevAdjustmentDescription,
   type RecalculatedSession,
 } from '../domain/carry-over.js';
 import type { FeeType } from '../domain/invoice-calculator.js';
@@ -485,4 +487,149 @@ export async function setCarryLine(
         carry,
       ),
     );
+}
+
+/** `loadPrevAdjustments` với danh sách lớp tự đọc (cho `issue`, `adjust`, xem trước nháp). */
+export async function loadPrevAdjustmentsFor(
+  t: Tx,
+  tenantId: string,
+  periodMonth: string,
+  studentIds: string[],
+): Promise<Map<string, PrevAdjustment[]>> {
+  if (!studentIds.length) return new Map();
+  const rows = await t
+    .select()
+    .from(classes)
+    .where(and(eq(classes.tenantId, tenantId), isNotNull(classes.feeType)));
+  return loadPrevAdjustments(
+    t,
+    tenantId,
+    periodMonth,
+    studentIds,
+    new Map(rows.map((c) => [c.id, c])),
+  );
+}
+
+/** Σ các dòng KHÔNG phải `carry_over` và KHÔNG phải `prev_adjustment` (phát sinh + điều chỉnh tay) của từng hóa đơn. */
+export async function baseSums(
+  t: Tx,
+  tenantId: string,
+  invoiceIds: string[],
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>(invoiceIds.map((id) => [id, 0]));
+  for (let i = 0; i < invoiceIds.length; i += CHUNK)
+    for (const r of await t
+      .select({
+        id: invoiceLines.invoiceId,
+        n: sql<string>`sum(${invoiceLines.amount})::text`,
+      })
+      .from(invoiceLines)
+      .where(
+        and(
+          eq(invoiceLines.tenantId, tenantId),
+          inArray(invoiceLines.invoiceId, invoiceIds.slice(i, i + CHUNK)),
+          sql`${invoiceLines.kind} not in ('carry_over', 'prev_adjustment')`,
+        ),
+      )
+      .groupBy(invoiceLines.invoiceId))
+      out.set(r.id, Number(r.n));
+  return out;
+}
+
+export interface DraftPreview {
+  /** Điều chỉnh kỳ trước tính lại theo số liệu hiện tại (đã loại phần có ở hóa đơn đã chốt). */
+  adjustments: PrevAdjustment[];
+  /** Σ dòng ngoài carry_over: phát sinh + điều chỉnh tay + điều chỉnh kỳ trước (tính lại). */
+  charges: number;
+  /** Số dư chuyển kỳ xem trước. */
+  carry: number;
+}
+
+/** Xem trước của các bản nháp (không ghi): điều chỉnh kỳ trước và số dư chuyển kỳ tính lại từ số liệu hiện tại. */
+export async function previewDrafts(
+  t: Tx,
+  tenantId: string,
+  drafts: { id: string; studentId: string }[],
+  periodMonth: string,
+  lock = false,
+): Promise<{
+  previews: Map<string, DraftPreview>;
+  states: Map<string, CarryState>;
+}> {
+  const studentIds = [...new Set(drafts.map((d) => d.studentId))];
+  const states = await loadCarryState(
+    t,
+    tenantId,
+    studentIds,
+    periodMonth,
+    lock,
+  );
+  const adj = await loadPrevAdjustmentsFor(
+    t,
+    tenantId,
+    periodMonth,
+    studentIds,
+  );
+  const base = await baseSums(
+    t,
+    tenantId,
+    drafts.map((d) => d.id),
+  );
+  return {
+    states,
+    previews: new Map(
+      drafts.map((d) => {
+        const adjustments = adj.get(d.studentId) ?? [];
+        return [
+          d.id,
+          {
+            adjustments,
+            charges:
+              base.get(d.id)! + adjustments.reduce((n, a) => n + a.amount, 0),
+            carry: states.get(d.studentId)!.carry,
+          },
+        ] as const;
+      }),
+    ),
+  };
+}
+
+/** Thay các dòng `prev_adjustment` của BẢN NHÁP bằng `adjustments` (nối vào cuối). Gọi khi đã khóa hóa đơn. */
+export async function setPrevAdjustmentLines(
+  t: Tx,
+  tenantId: string,
+  invoiceId: string,
+  adjustments: PrevAdjustment[],
+): Promise<void> {
+  const where = and(
+    eq(invoiceLines.tenantId, tenantId),
+    eq(invoiceLines.invoiceId, invoiceId),
+  );
+  await t
+    .delete(invoiceLines)
+    .where(and(where, eq(invoiceLines.kind, 'prev_adjustment')));
+  if (!adjustments.length) return;
+  const [m] = await t
+    .select({
+      max: sql<number>`coalesce(max(${invoiceLines.position}), 0)::int`,
+    })
+    .from(invoiceLines)
+    .where(where);
+  await t.insert(invoiceLines).values(
+    adjustments.map((a, i) =>
+      newLine(
+        tenantId,
+        invoiceId,
+        (m?.max ?? 0) + 1 + i,
+        'prev_adjustment',
+        prevAdjustmentDescription(a),
+        a.amount,
+        {
+          sessionId: a.sessionId,
+          sessionDate: a.date || null,
+          className: a.className,
+        },
+      ),
+    ),
+  );
 }

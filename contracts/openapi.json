@@ -12795,7 +12795,7 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 100000000000,
-            "description": "VND. 0 chỉ khi số dư sổ (trả thừa) đã trả đủ kỳ này: hóa đơn có mã, trạng thái `paid`, không có QR (`qrPayload` rỗng), không nhắc nợ, không thông báo phụ huynh riêng"
+            "description": "VND. 0 chỉ khi số dư sổ (trả thừa) đã trả đủ kỳ này: hóa đơn có mã, trạng thái `paid`, không có QR (`qrPayload` là chuỗi rỗng ở phản hồi `issue`: đổi thành nullable bị oasdiff coi là breaking; `GET /invoices/{id}` trả null), không nhắc nợ, không thông báo phụ huynh riêng"
           },
           "dueDate": {
             "type": "string",
@@ -14221,7 +14221,7 @@
           "summary"
         ],
         "additionalProperties": false,
-        "description": "Công nợ của tenant (T11): mỗi dòng một học viên còn nợ, sắp theo số nợ giảm dần mặc định, kèm tổng theo nhóm tuổi nợ (US-8.3 AC1, AC2). Nợ = Σ `remainingAmount` các hóa đơn `issued`/`partially_paid` của học viên; khoản đã nằm trong dòng `carry_over` của hóa đơn kỳ sau chỉ tính ở hóa đơn kỳ sau, không tính hai lần. Học viên không còn nợ không có dòng",
+        "description": "Công nợ của tenant (T11): mỗi dòng một học viên còn nợ, sắp theo số nợ giảm dần mặc định, kèm tổng theo nhóm tuổi nợ (US-8.3 AC1, AC2). Nợ ròng của học viên = max(0, Σ `remainingAmount` các hóa đơn `issued`/`partially_paid` + số dư sổ học viên): số dư âm (trả thừa) giảm nợ, số dư dương (nợ ở sổ, vd. hủy thanh toán sau khi trả thừa đã được trừ) tăng nợ; khoản đã nằm trong dòng `carry_over` của hóa đơn kỳ sau chỉ tính ở hóa đơn kỳ sau, không tính hai lần. Nhóm tuổi nợ và `summary` theo nợ ròng. Học viên có nợ ròng 0 không có dòng",
         "example": {
           "items": [
             {
@@ -14284,7 +14284,7 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 100000000000,
-            "description": "Tổng số còn nợ, > 0"
+            "description": "Nợ ròng của học viên, > 0"
           },
           "openInvoiceCount": {
             "type": "integer",
@@ -14359,7 +14359,13 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 100000000000,
-            "description": "Tổng nợ hiện tại; 0 khi hết nợ"
+            "description": "Nợ ròng = max(0, `invoiceOutstandingAmount` + `ledgerBalanceAmount`); 0 khi hết nợ. Khớp `outstandingAmount` của dòng ở `GET /receivables`"
+          },
+          "invoiceOutstandingAmount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "Σ `remainingAmount` các hóa đơn còn nợ (không gồm phần đã chuyển sang hóa đơn kỳ sau)"
           },
           "ledgerBalanceAmount": {
             "type": "integer",
@@ -14401,6 +14407,7 @@
           "studentId",
           "studentName",
           "outstandingAmount",
+          "invoiceOutstandingAmount",
           "ledgerBalanceAmount",
           "dunningEnabled",
           "enrollments",

@@ -17,7 +17,7 @@
 //    còn nợ `ORDER BY id FOR UPDATE`, tính lại số dư dưới khóa, ghi `unpaid_carried` (nợ, gắn hóa đơn cũ) + `invoices.carried_amount`
 //    của hóa đơn cũ, đặt dòng `carry_over` và tổng chốt, ghi `applied_to_invoice` (đối ứng, gắn hóa đơn mới) và
 //    `oldest_due_date` = hạn cũ nhất của các hóa đơn nguồn (tuổi nợ T11 không bị "làm mới" khi chuyển kỳ). Σ dòng ngoài carry_over = 0 (vd.
-//    miễn giảm 100%): không phát hành (ZERO_AMOUNT, US-1.3 AC3), không kết chuyển. Còn lại luôn chốt: tổng = max(0, Σ dòng ngoài
+//    miễn giảm 100%; nháp lưu total = 0, không chặn đóng kỳ, không tính vào thông báo bản nháp sẵn sàng): không phát hành (ZERO_AMOUNT, US-1.3 AC3), không kết chuyển. Còn lại luôn chốt: tổng = max(0, Σ dòng ngoài
 //    carry + số dư); tổng ≤ 0 (số dư đủ trả, hoặc điều chỉnh tay âm vượt phát sinh) thì hóa đơn có mã, `total = 0`, `paid`, không QR,
 //    không `invoice_issued`; `applied_to_invoice` đưa số dư sổ về min(0, tổng): ghi nợ đúng phần phát sinh được số dư trả, hoặc ghi
 //    có phần âm của điều chỉnh tay; phần dư ở lại sổ cho kỳ sau. Hệ quả: `remainingAmount` hóa đơn cũ = tổng − đã thu − carried_amount
@@ -27,7 +27,7 @@
 //    Σ remainingAmount + số dư sổ.
 // D7 Điều chỉnh kỳ trước (US-3.3 AC4): điểm danh/buổi sửa sau khi hóa đơn kỳ cũ (12 tháng gần nhất, chưa hủy) đã phát hành → tính lại
 //    bằng cùng calculator và so với dòng buổi đã phát hành; chênh lệch (buổi mới tính / bỏ tính / bị hủy / bị xóa) thành dòng
-//    `prev_adjustment` ở bản nháp mới, trừ phần đã điều chỉnh ở các hóa đơn sau đã chốt (dòng trong nháp chưa chốt chưa tính; shortcut: hai nháp chưa chốt có thể cùng chứa một điều chỉnh); hóa đơn cũ không đổi. Chỉ lớp theo buổi. Giáo viên thấy
+//    `prev_adjustment` ở bản nháp mới, trừ phần đã điều chỉnh ở các hóa đơn sau đã chốt (dòng trong nháp chưa chốt chưa tính); hóa đơn cũ không đổi. Các dòng này trong nháp chỉ là xem trước: GET/`adjust` tính lại, và `issue()` xóa rồi tính lại dưới khóa tenant cho từng nháp sắp chốt (chốt nháp nào trước cũng không điều chỉnh hai lần, điểm danh đổi sau khi tạo nháp thì chốt theo số mới). Chỉ lớp theo buổi. Giáo viên thấy
 //    số tiền chênh ở dòng trong nháp. shortcut: chưa có thông báo riêng "đã điều chỉnh".
 import {
   type AttendanceStatus,

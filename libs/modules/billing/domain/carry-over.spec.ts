@@ -52,6 +52,14 @@ describe('planCarryOver (US-7.6)', () => {
     });
   });
 
+  it('phát sinh 0 thì tổng lưu luôn 0 dù có nợ cũ (nháp không chốt được)', () => {
+    expect(planCarryOver(0, 100_000)).toMatchObject({
+      total: 0,
+      clamped: 0,
+      issuable: false,
+    });
+  });
+
   it('không có số dư: không có dòng, không bút toán', () => {
     expect(planCarryOver(900_000, 0)).toMatchObject({
       total: 900_000,

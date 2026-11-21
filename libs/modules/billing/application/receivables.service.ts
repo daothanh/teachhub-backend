@@ -32,8 +32,7 @@ const OPEN = sql`('issued', 'partially_paid', 'pending_confirmation')`;
 const escapeLike = (v: string) => v.replace(/[\\%_]/g, '\\$&');
 
 /**
- * Công nợ (T11, US-8.3) và sổ học viên (US-7.6), chỉ đọc. Nợ = Σ còn nợ (`total − paid − carried`) của hóa đơn đã phát hành
- * chưa thu đủ: phần đã chuyển sang hóa đơn kỳ sau (`carried_amount`) chỉ tính ở hóa đơn kỳ sau nên không đếm hai lần.
+ * Công nợ (T11, US-8.3) và sổ học viên (US-7.6), chỉ đọc. Nợ ròng = max(0, Σ còn nợ hóa đơn + số dư sổ); còn nợ = `total − paid − carried`: phần đã chuyển sang hóa đơn kỳ sau chỉ tính ở hóa đơn kỳ sau nên không đếm hai lần.
  * Mọi truy vấn lọc `tenant_id` tường minh (RLS là lớp thứ hai); học viên của tenant khác → 404.
  * shortcut: nhắc nợ (`reminders`) trả rỗng và `dunningEnabled` luôn true tới khi S6-BE-04 có bảng nhắc nợ.
  */
@@ -69,7 +68,7 @@ export class ReceivablesService {
       ), led as (
         select l.student_id, sum(l.debit - l.credit)::bigint as balance
           from student_ledger l where l.tenant_id = ${tenantId}::uuid
-         group by l.student_id having sum(l.debit - l.credit) > 0
+         group by l.student_id
       ), led_due as (
         select l.student_id, min(coalesce(i.oldest_due_date, p.due_date)) as due
           from student_ledger l
@@ -78,13 +77,14 @@ export class ReceivablesService {
          where l.tenant_id = ${tenantId}::uuid and l.debit > 0
          group by l.student_id
       ), debt as (
-        -- Nợ = Σ còn nợ hóa đơn + nợ ở sổ (số dư dương); học viên chỉ có nợ ở sổ vẫn có dòng (tuổi nợ theo hạn hóa đơn gắn bút toán).
+        -- Nợ ròng = max(0, Σ còn nợ hóa đơn + số dư sổ): sổ âm (trả thừa) giảm nợ, sổ dương (nợ ở sổ) tăng nợ; nợ ròng 0 thì không có dòng.
         select coalesce(o.student_id, g.student_id) as student_id,
                coalesce(o.amount, 0) + coalesce(g.balance, 0) as amount,
                greatest(1, coalesce(o.invoice_count, 0))::int as invoice_count,
                coalesce(least(o.due, case when g.balance is not null then d.due end), ${today}::date) as oldest_due
           from open_inv o full join led g on g.student_id = o.student_id
           left join led_due d on d.student_id = coalesce(o.student_id, g.student_id)
+         where coalesce(o.amount, 0) + coalesce(g.balance, 0) > 0
       ), base as (
         select d.student_id, s.full_name, d.amount, d.invoice_count, d.oldest_due::text as oldest_due,
                greatest(0, ${today}::date - d.oldest_due)::int as overdue,
@@ -222,11 +222,11 @@ export class ReceivablesService {
         ? 0
         : remainingOf(r.i.totalAmount, r.i.paidAmount, r.i.carriedAmount);
     const { balance } = await this.ledgerStats(tx, tenantId, studentId);
-    // Nợ = Σ còn nợ hóa đơn + nợ ở sổ (số dư dương), khớp `GET /receivables`.
-    const outstanding =
-      invRows
-        .filter((r) => OPEN_STATUSES.includes(r.i.status))
-        .reduce((n, r) => n + remaining(r), 0) + Math.max(0, balance);
+    // Nợ ròng = max(0, Σ còn nợ hóa đơn + số dư sổ), khớp `GET /receivables`.
+    const invoiceOutstanding = invRows
+      .filter((r) => OPEN_STATUSES.includes(r.i.status))
+      .reduce((n, r) => n + remaining(r), 0);
+    const outstanding = Math.max(0, invoiceOutstanding + balance);
     const code = new Map(invRows.map((r) => [r.i.id, r.i.code]));
 
     const payRows = invRows.length
@@ -271,6 +271,7 @@ export class ReceivablesService {
       studentId,
       studentName: stu.fullName,
       outstandingAmount: outstanding,
+      invoiceOutstandingAmount: invoiceOutstanding,
       ledgerBalanceAmount: balance,
       dunningEnabled: true,
       enrollments: enr.map((e) => ({ ...e, dunningEnabled: true })),
