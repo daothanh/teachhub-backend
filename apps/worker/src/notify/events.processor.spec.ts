@@ -5,12 +5,14 @@ import { EventsProcessor } from './events.processor.js';
 // Các index module nạp CoreModule (đọc env lúc import): chỉ cần hằng tên sự kiện và kiểu notifier.
 vi.mock('@teachhub/modules/billing', () => ({
   BILLING_DRAFTS_READY: 'billing_drafts_ready',
+  INVOICE_ISSUED: 'invoice_issued',
 }));
 vi.mock('@teachhub/modules/schedule', () => ({
   SCHEDULE_CHANGED: 'schedule_changed',
 }));
 vi.mock('@teachhub/modules/notifications', () => ({
   BillingReadyNotifier: class {},
+  InvoiceIssuedNotifier: class {},
 }));
 
 const job = (name: string, data: unknown) => ({ name, data }) as Job;
@@ -18,7 +20,12 @@ const job = (name: string, data: unknown) => ({ name, data }) as Job;
 describe('EventsProcessor: phân loại sự kiện outbox', () => {
   const make = () => {
     const handle = vi.fn().mockResolvedValue(undefined);
-    return { handle, p: new EventsProcessor({ handle } as never) };
+    const issued = vi.fn().mockResolvedValue(undefined);
+    return {
+      handle,
+      issued,
+      p: new EventsProcessor({ handle } as never, { handle: issued } as never),
+    };
   };
 
   it('billing_drafts_ready → BillingReadyNotifier.handle với nguyên dữ liệu job', async () => {
@@ -26,6 +33,14 @@ describe('EventsProcessor: phân loại sự kiện outbox', () => {
     const data = { eventId: 'e', tenantId: 't', payload: {} };
     await p.process(job('billing_drafts_ready', data));
     expect(handle).toHaveBeenCalledExactlyOnceWith(data);
+  });
+
+  it('invoice_issued → InvoiceIssuedNotifier.handle, không đụng BillingReadyNotifier', async () => {
+    const { p, handle, issued } = make();
+    const data = { eventId: 'e', tenantId: 't', payload: {} };
+    await p.process(job('invoice_issued', data));
+    expect(issued).toHaveBeenCalledExactlyOnceWith(data);
+    expect(handle).not.toHaveBeenCalled();
   });
 
   it('schedule_changed → chỉ ghi log, không gọi notifier', async () => {
