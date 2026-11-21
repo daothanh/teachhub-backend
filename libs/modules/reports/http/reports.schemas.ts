@@ -25,7 +25,7 @@ export type ReportMonthQuery = z.infer<typeof reportMonthQuerySchema>;
 
 const collectedAmount = (description: string) =>
   signedVndSchema(
-    `${description} Có dấu: bằng Σ \`amount\` của \`revenue_ledger\` có \`entry_date\` trong tháng, gồm cả dòng đảo do hủy thanh toán (hủy thanh toán của tháng trước làm tháng này giảm), nên hiếm khi âm`,
+    `${description} Có dấu: bằng Σ \`amount\` của \`revenue_ledger\` có \`entry_date\` trong tháng, gồm cả dòng đảo do hủy thanh toán: dòng đảo mang ngày ghi của khoản thu gốc (hủy là sửa sai, US-9.5 AC1) nên trừ khỏi tháng của khoản đó, không phải tháng hủy; vì vậy không bao giờ âm`,
   );
 
 // ---- Tổng quan tháng (T12, US-8.1) ----
@@ -85,7 +85,7 @@ export const revenueEntrySchema = z
     method: paymentMethodSchema,
     entryDate: z.iso.date().meta({
       description:
-        'Ngày ghi sổ theo múi giờ tenant: `paidOn` của thanh toán với `payment`; ngày hủy với `reversal`',
+        'Ngày ghi sổ theo múi giờ tenant: `paidOn` của thanh toán, với cả `payment` lẫn `reversal` (dòng đảo mang ngày của khoản thu gốc)',
     }),
     amount: signedVndSchema('Có dấu: dương với `payment`, âm với `reversal`'),
   })

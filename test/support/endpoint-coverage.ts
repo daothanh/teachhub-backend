@@ -330,20 +330,20 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
     test: 'chỉ chủ tenant; 404 chéo tenant; RLS: tenant B không thấy sổ/công nợ của A',
   },
   'GET /v1/reports/month-overview': {
-    notApplicable:
-      'hợp đồng S6-FL-06, thân hàm trả 501 tới task backend `reports` Sprint 7; test chéo tenant làm cùng task đó',
+    file: 'reports.e2e-spec.ts',
+    test: 'chéo tenant: B không thấy số liệu của A',
   },
   'GET /v1/reports/payments': {
-    notApplicable:
-      'hợp đồng S6-FL-06, thân hàm trả 501 tới task backend `reports` Sprint 7; test chéo tenant làm cùng task đó',
+    file: 'reports.e2e-spec.ts',
+    test: 'chéo tenant: B không thấy số liệu của A',
   },
   'GET /v1/reports/revenue-by-class': {
-    notApplicable:
-      'hợp đồng S6-FL-06, thân hàm trả 501 tới task backend `reports` Sprint 7; test chéo tenant làm cùng task đó',
+    file: 'reports.e2e-spec.ts',
+    test: 'chéo tenant: B không thấy số liệu của A',
   },
   'GET /v1/reports/revenue-12m': {
-    notApplicable:
-      'hợp đồng S6-FL-06, thân hàm trả 501 tới task backend `reports` Sprint 7; test chéo tenant làm cùng task đó',
+    file: 'reports.e2e-spec.ts',
+    test: 'chéo tenant: B không thấy số liệu của A',
   },
   'GET /v1/plan-usage': {
     notApplicable:
