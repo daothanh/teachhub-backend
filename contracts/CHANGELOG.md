@@ -308,3 +308,11 @@ Sửa sau review (PR #185):
 - `GET /receivables`: nợ ròng theo học viên = max(0, Σ `remainingAmount` các hóa đơn còn nợ + số dư sổ): số dư âm (trả thừa) giảm nợ, số dư dương (nợ ở sổ, vd. hủy thanh toán sau khi trả thừa đã được trừ) tăng nợ; nợ ròng 0 thì không có dòng; học viên chỉ có nợ ở sổ vẫn có dòng (`openInvoiceCount` ≥ 1). Số dư âm bù vào hóa đơn cũ nhất trước (FIFO): hạn cũ nhất, tuổi nợ và `openInvoiceCount` tính theo hóa đơn còn nợ sau khi bù. Nhóm tuổi nợ và `summary` theo nợ ròng. `GET /receivables/{studentId}` thêm `invoiceOutstandingAmount` (Σ `remainingAmount` hóa đơn còn nợ); `outstandingAmount` là nợ ròng, `ledgerBalanceAmount` là số dư sổ. Tuổi nợ dùng hạn cũ nhất của khoản nợ gốc: hóa đơn nhận khoản chuyển kỳ mang hạn nợ cũ nhất của các hóa đơn nguồn, nên nợ chuyển nhiều kỳ vẫn vào nhóm `over-60`.
 - Thanh toán trên hóa đơn đã chuyển nợ: còn thu được phần `remainingAmount` (hủy khoản thu thì nợ quay lại đúng phần chưa chuyển); hết còn nợ → 409 `INVOICE_NOT_PAYABLE`, thu quá phần còn nợ → 422 `VALIDATION_FAILED`. Hủy hóa đơn đã chuyển nợ hoặc mang dòng `carry_over` ≠ 0 → 409 `CONFLICT_STALE` (chưa hỗ trợ trả khoản chuyển kỳ về).
 - `GET /receivables/{studentId}`: `reminders` rỗng và `dunningEnabled` luôn `true` tới khi S6-BE-04 có bảng nhắc nợ.
+
+Đã chốt (S6-BE-04, nhắc nợ; hợp đồng không đổi):
+
+- Giờ gửi mỗi mốc cố định 09:00 giờ tenant của ngày (hạn + `offsetDays`); job `billing.dunning` chạy mỗi 15 phút và chỉ gửi trong khung 07:00 đến 21:30 giờ tenant, ngoài khung thì dồn sang khung kế.
+- Job nghỉ lâu hoặc khung giờ dồn nhiều mốc cho cùng một hóa đơn: chỉ gửi mốc muộn nhất, các mốc sớm hơn bị hủy (không dội nhiều tin cùng lúc).
+- Hóa đơn còn nợ thật nhưng chưa có mốc nào (phát hành trước khi có tính năng, hoặc lúc đó tenant/học viên tắt nhắc rồi bật lại) được job tự lập các mốc tương lai theo lịch tenant hiện hành, không tạo mốc quá khứ.
+- Đổi lịch `offsetsDays` không áp cho mốc đã lập; tắt rồi bật lại nhắc của tenant không lập lại mốc đã hủy của hóa đơn cũ. Bật lại nhắc của học viên và hủy thanh toán lập lại các mốc chưa tới đã hủy.
+- Thông báo `payment_reminder` do hệ thống đứng tên "DayHoc nhắc…"; trước khi gửi, hệ thống kiểm lại nợ thật (`total − paid − carried`), hết nợ hoặc hóa đơn hủy thì bỏ qua. Email có số còn nợ, hạn và đường dẫn mở đúng hóa đơn (`teachhub://invoices/{id}`); push chỉ chữ chung.

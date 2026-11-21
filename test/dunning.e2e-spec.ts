@@ -156,6 +156,15 @@ describe('dunning: nhắc nợ tự động', () => {
     return id;
   };
 
+  const freshTenant = async (): Promise<Who> => {
+    const s = await seedTenant(t.worker);
+    await q(
+      `insert into payout_accounts (id, tenant_id, bank_bin, account_no, account_name, is_primary) values ($1, $2, '970436', '0011223344', 'GV', true)`,
+      [randomUUID(), s.tenantId],
+    );
+    return { ...s, token: await t.tokenFor(s.userId) };
+  };
+
   beforeAll(async () => {
     t = await startTestApp();
     const schema = await import('../libs/db/src/schema/index.js');
@@ -163,13 +172,15 @@ describe('dunning: nhắc nợ tự động', () => {
     const { JobRuns } = await import('../libs/infra/src/job-runs.js');
     const { DunningJob } =
       await import('../libs/modules/billing/application/dunning.job.js');
+    const { DunningService } =
+      await import('../libs/modules/billing/application/dunning.service.js');
     jobPool = new pg.Pool({
       connectionString: t.db.url('teachhub_worker'),
     });
     const tx = new TxService(
       drizzle(jobPool, { schema, casing: 'snake_case' }),
     );
-    job = new DunningJob(tx, new JobRuns(tx));
+    job = new DunningJob(tx, new JobRuns(tx), new DunningService());
     const mk = async (): Promise<Who> => {
       const s = await seedTenant(t.worker);
       await q(
@@ -785,7 +796,94 @@ describe('dunning: nhắc nợ tự động', () => {
     expect(mails[0]!.subject).toBe('DayHoc nhắc học phí');
     expect(mails[0]!.text).toContain('DayHoc nhắc');
     expect(mails[0]!.text).toContain('1.000.000 đ');
+    expect(mails[0]!.text).toContain(`teachhub://invoices/${invoiceId}`);
     expect(mails[0]!.text).not.toContain('Lê Gia Bảo');
+  });
+
+  it('M1: hóa đơn đã phát hành không có lịch (trước 0028) → lượt job đầu lập các mốc tương lai, không gửi dồn', async () => {
+    const who = await freshTenant();
+    seq++;
+    const studentId = randomUUID();
+    const periodId = randomUUID();
+    const invoiceId = randomUUID();
+    const due = addDays(today, 5);
+    await q(
+      `insert into students (id, tenant_id, full_name) values ($1, $2, 'HS cũ')`,
+      [studentId, who.tenantId],
+    );
+    await q(
+      `insert into billing_periods (id, tenant_id, period_month, close_date, due_date) values ($1, $2, '2050-01-01', '2050-01-01', $3)`,
+      [periodId, who.tenantId, addDays(today, -2)],
+    );
+    await q(
+      `insert into invoices (id, tenant_id, period_id, student_id, total_amount) values ($1, $2, $3, $4, 800000)`,
+      [invoiceId, who.tenantId, periodId, studentId],
+    );
+    await q(
+      `update invoices set status = 'issued', code = 'TH-ABCDEF', transfer_note = 'TH ABCDEF', qr_payload = '000201',
+         payout = '{"bankBin":"970436","accountNo":"0011001234567","accountName":"GV"}'::jsonb, issued_at = now() where id = $1`,
+      [invoiceId],
+    );
+    void due;
+    expect(await steps(invoiceId)).toHaveLength(0);
+    // Hạn cách đây 2 ngày: d−1, d0 đã qua nên chỉ lập d+3, d+7; lượt đầu không gửi gì cho hóa đơn này.
+    expect(await sentFor(invoiceId, new Date())).toBe(0);
+    expect(await statuses(invoiceId)).toEqual({ 3: 'pending', 7: 'pending' });
+    expect(await sentFor(invoiceId, at(addDays(today, 1), '09:05'))).toBe(1);
+  });
+
+  it('S4: notifier kiểm lại nợ lúc xử lý: thu đủ sau khi job chốt mốc → không tạo thông báo, push, email', async () => {
+    const { PaymentReminderNotifier } =
+      await import('../libs/modules/notifications/application/payment-reminder-notifier.service.js');
+    const { AbsenceNotifier } =
+      await import('../libs/modules/notifications/application/absence-notifier.service.js');
+    const schema = await import('../libs/db/src/schema/index.js');
+    const { TxService } = await import('../libs/db/src/tx.service.js');
+    const sentOut: unknown[] = [];
+    const tx = new TxService(
+      drizzle(jobPool, { schema, casing: 'snake_case' }),
+    );
+    const notifier = new PaymentReminderNotifier(
+      tx,
+      new AbsenceNotifier(tx, {
+        enabled: true,
+        send: (ms: unknown[]) => {
+          sentOut.push(...ms);
+          return Promise.resolve(
+            ms.map(() => ({ ok: true as const, messageId: 'm' })),
+          );
+        },
+      } as never),
+      { send: (m: unknown) => (sentOut.push(m), Promise.resolve()) } as never,
+    );
+    const parent = randomUUID();
+    await q(`insert into users (id, email) values ($1, $2)`, [
+      parent,
+      `${parent}@example.com`,
+    ]);
+    await q(
+      `insert into memberships (id, user_id, role) values ($1, $2, 'parent')`,
+      [randomUUID(), parent],
+    );
+    const { invoiceId, studentId, due } = await mkIssued(A);
+    await q(
+      `insert into guardians (id, tenant_id, student_id, full_name, email, user_id) values ($1, $2, $3, 'PH', 'ph@example.com', $4)`,
+      [randomUUID(), A.tenantId, studentId, parent],
+    );
+    await job.run(at(addDays(due, -1), '09:05'));
+    const [ev] = await reminders(invoiceId);
+    await pay(A, invoiceId, 1_000_000); // thu đủ sau khi mốc đã chốt
+    await notifier.handle({
+      eventId: ev!.id,
+      tenantId: A.tenantId,
+      payload: ev!.payload,
+    });
+    expect(
+      await q(`select 1 from notifications where recipient_user_id = $1`, [
+        parent,
+      ]),
+    ).toHaveLength(0);
+    expect(sentOut).toHaveLength(0);
   });
 
   it('thanh toán và nhắc nợ không phá đối soát: Σ paid_amount = Σ payments còn hiệu lực', async () => {

@@ -124,6 +124,7 @@ export class PaymentsService {
     const status = statusAfter(inv.totalAmount, paidAmount);
     await this.setPaid(tx, tenantId, invoiceId, status, paidAmount);
     // Hết nợ thì hủy các mốc nhắc chưa gửi (US-7.5 AC2); thu một phần vẫn nhắc số còn lại.
+    // Race nhỏ: job nhắc đã chốt mốc (đọc nợ trước commit này) thì lời nhắc đó vẫn đi; notifier kiểm lại nợ lúc xử lý nên chỉ còn khe hẹp.
     const dunningCancelled =
       (await this.dunning.reconcile(tx, tenantId, [invoiceId])).cancelled > 0;
     const remainingAmount = remainingOf(

@@ -19,6 +19,7 @@ import {
   splitDue,
 } from '../domain/dunning.js';
 import { remainingOf } from '../domain/payment.js';
+import { DunningService } from './dunning.service.js';
 
 export const JOB_BILLING_DUNNING = 'billing.dunning';
 
@@ -53,6 +54,9 @@ interface DueRow extends Record<string, unknown> {
  * worker (BYPASSRLS) nên mọi truy vấn lọc `tenant_id` tường minh; "bây giờ" và khung giờ theo múi giờ từng tenant, ngoài khung
  * thì không gửi (mốc dồn sang khung kế). Mỗi tenant một giao dịch: đánh dấu `sent` và ghi outbox `payment_reminder` cùng commit,
  * nên chạy lại không nhắc trùng (`FOR UPDATE SKIP LOCKED` chặn hai worker song song; dòng đã `sent` không bị chọn lại).
+ * shortcut: duyệt mọi tenant mỗi lượt và khung giờ tính theo múi giờ tenant, nhưng cron chạy theo giờ VN (07:00–21:45) nên tenant
+ * ở múi giờ khác VN chỉ được gửi trong phần giao của hai khung; MVP chỉ có tenant VN, thêm cron theo múi giờ khi mở nước khác.
+ * Race nhỏ: lời nhắc được chốt dựa trên số nợ đọc lúc quét; thu tiền commit ngay sau đó vẫn có thể nhắc nhầm một lần (notifier kiểm lại nợ lúc gửi).
  * Hóa đơn hết đáng nhắc tại lúc gửi (thu đủ, hủy, chuyển nợ, tắt nhắc) thì hủy mốc thay vì gửi.
  */
 @Injectable()
@@ -62,33 +66,33 @@ export class DunningJob {
   constructor(
     private readonly tx: TxService,
     private readonly runs: JobRuns,
+    private readonly dunning: DunningService,
   ) {}
 
   /** Trả số lời nhắc đã gửi. */
   run(now = new Date()): Promise<number> {
     return this.runs.track(JOB_BILLING_DUNNING, async () => {
-      const due = await this.tx.run({ userId: null }, (t) =>
+      const all = await this.tx.run({ userId: null }, (t) =>
         t
-          .selectDistinct({
-            id: dunningJobs.tenantId,
+          .select({
+            id: tenants.id,
             tz: tenants.timezone,
             settings: tenants.settings,
           })
-          .from(dunningJobs)
-          .innerJoin(tenants, eq(tenants.id, dunningJobs.tenantId))
-          .where(
-            sql`${dunningJobs.status} = 'pending' and ${dunningJobs.scheduledFor} <= ${now} and ${isNull(tenants.deletedAt)}`,
-          ),
+          .from(tenants)
+          .where(isNull(tenants.deletedAt)),
       );
       let sent = 0;
       let failed = 0;
-      for (const tenant of due) {
-        if (!inSendWindow(minuteOfDay(now, tenant.tz))) continue;
+      for (const tenant of all) {
         const enabled = parseDunningSettings(tenant.settings).enabled;
+        const inWindow = inSendWindow(minuteOfDay(now, tenant.tz));
         try {
-          sent += await this.tx.run({ userId: null }, (t) =>
-            this.sendTenant(t, tenant.id, now, enabled),
-          );
+          // Lập lịch cho hóa đơn chưa có mốc rồi gửi, cùng một giao dịch; lập lịch không bị khung giờ chặn, gửi thì có.
+          sent += await this.tx.run({ userId: null }, async (t) => {
+            await this.dunning.scheduleMissing(t, tenant.id);
+            return inWindow ? this.sendTenant(t, tenant.id, now, enabled) : 0;
+          });
         } catch (e) {
           failed += 1;
           this.log.error(`tenant ${tenant.id}: ${errorCode(e)}`);

@@ -85,7 +85,8 @@ export class CronProcessor
         // Mốc thời gian của job cố định qua các lần BullMQ thử lại: kỳ được chọn không đổi giữa lần chạy và lần thử lại.
         return this.billingClose.run(new Date(job.timestamp));
       case JOB_BILLING_DUNNING:
-        return this.dunning.run(new Date(job.timestamp));
+        // Giờ chạy thật, không `job.timestamp`: lần BullMQ thử lại muộn không được coi là còn trong khung giờ gửi.
+        return this.dunning.run(new Date());
       case JOB_PURGE_IDEMPOTENCY:
         return this.purge.run();
       case JOB_PURGE_STALE_DEVICES:

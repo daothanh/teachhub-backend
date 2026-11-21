@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { uuidv7 } from '@teachhub/core';
 import { TxService } from '@teachhub/db';
 import { Mailer } from '@teachhub/infra';
-import { reminderCopy } from '@teachhub/modules/billing';
+import { isDunnable, reminderCopy } from '@teachhub/modules/billing';
 import { deliverEmail } from './email-delivery.js';
 import {
   AbsenceNotifier,
@@ -52,7 +52,28 @@ export class PaymentReminderNotifier {
 
   async handle(job: unknown): Promise<void> {
     const { eventId, tenantId, payload } = paymentReminderJobSchema.parse(job);
+    let remaining = payload.remainingAmount;
     const pending = await this.tx.run({ userId: null }, async (tx) => {
+      // Kiểm lại nợ thật lúc xử lý: thu đủ, hủy hóa đơn hoặc chuyển nợ sau khi job chốt mốc thì không nhắc nữa.
+      const inv = (
+        await tx.execute<{
+          status: string;
+          total_amount: string;
+          paid_amount: string;
+          carried_amount: string;
+        }>(
+          sql`select status, total_amount::text, paid_amount::text, carried_amount::text from invoices where tenant_id = ${tenantId} and id = ${payload.invoiceId}`,
+        )
+      ).rows[0];
+      if (!inv) return [];
+      const facts = {
+        status: inv.status,
+        totalAmount: Number(inv.total_amount),
+        paidAmount: Number(inv.paid_amount),
+        carriedAmount: Number(inv.carried_amount),
+      };
+      if (!isDunnable(facts)) return [];
+      remaining = facts.totalAmount - facts.paidAmount - facts.carriedAmount;
       const student = (
         await tx.execute<{ full_name: string }>(
           sql`select full_name from students where tenant_id = ${tenantId} and id = ${payload.studentId} and status <> 'left'`,
@@ -79,7 +100,7 @@ export class PaymentReminderNotifier {
         studentId: payload.studentId,
         studentName: student.full_name,
         offsetDays: payload.offsetDays,
-        remainingAmount: payload.remainingAmount,
+        remainingAmount: remaining,
         dueDate: payload.dueDate,
       };
       const out: Recipient[] = [];
@@ -113,7 +134,7 @@ export class PaymentReminderNotifier {
       return out;
     });
 
-    const mailText = reminderCopy(payload).body;
+    const mailText = `${reminderCopy({ ...payload, remainingAmount: remaining }).body}\n\nMở đúng hóa đơn trong ứng dụng DayHoc: teachhub://invoices/${payload.invoiceId}`;
     let failed = 0;
     for (const p of pending) {
       try {

@@ -134,9 +134,34 @@ export class DunningService {
   }
 
   /**
+   * Job gọi mỗi lượt (M1): hóa đơn còn nợ thật, nhắc được, tenant và học viên bật nhắc mà CHƯA có dòng `dunning_jobs` nào
+   * (phát hành trước migration 0028, hoặc lúc đó tenant/học viên tắt nhắc rồi bật lại) được lập các mốc tương lai theo lịch
+   * tenant hiện hành; không tạo mốc quá khứ nên không gửi dồn. Trả số hóa đơn được lập.
+   * shortcut: hóa đơn mà mọi mốc đều đã qua không có dòng nào nên bị quét lại mỗi lượt (rẻ nhờ `invoices_debt_idx`); đánh dấu
+   * hóa đơn "đã lập lịch" khi số hóa đơn mở đủ lớn để quét này đáng kể.
+   */
+  async scheduleMissing(tx: Tx, tenantId: string): Promise<number> {
+    const { settings, tz } = await this.tenant(tx, tenantId);
+    if (!settings.enabled) return 0;
+    const ids = (
+      await tx.execute<{ id: string }>(sql`
+        select i.id from invoices i
+        where i.tenant_id = ${tenantId} and i.status in ('issued', 'partially_paid')
+          and i.total_amount - i.paid_amount - i.carried_amount > 0
+          and not exists (select 1 from dunning_jobs d where d.tenant_id = i.tenant_id and d.invoice_id = i.id)`)
+    ).rows.map((r) => r.id);
+    if (!ids.length) return 0;
+    const facts = (await this.facts(tx, tenantId, ids)).filter(isDunnable);
+    const off = await this.disabledStudents(tx, tenantId, facts);
+    const list = facts.filter((f) => !off.has(f.studentId));
+    await this.insertSteps(tx, tenantId, list, settings.offsetsDays, tz);
+    return list.length;
+  }
+
+  /**
    * Đưa lời nhắc của các hóa đơn về đúng trạng thái hiện tại (gọi sau khi đổi số đã thu, hủy hóa đơn, kết chuyển nợ, bật/tắt).
    * Không còn đáng nhắc → hủy mốc `pending` (kèm lý do). Còn đáng nhắc → lập lại mốc chưa tới đã hủy vì một trong `revive`
-   * (vd. `settled` khi hủy thanh toán), và lập lịch mới nếu hóa đơn chưa từng có mốc. Trả số mốc vừa hủy / lập lại.
+   * (vd. `settled` khi hủy thanh toán). Trả số mốc vừa hủy / lập lại.
    */
   async reconcile(
     tx: Tx,
@@ -196,28 +221,7 @@ export class DunningService {
           )
           .returning({ id: dunningJobs.id })
       ).length;
-    // Hóa đơn chưa có dòng nào (phát hành lúc học viên đang tắt nhắc) được lập theo lịch hiện hành khi bật lại.
-    const have = new Set(
-      (
-        await tx
-          .selectDistinct({ id: dunningJobs.invoiceId })
-          .from(dunningJobs)
-          .where(
-            and(
-              eq(dunningJobs.tenantId, tenantId),
-              inArray(dunningJobs.invoiceId, liveIds),
-            ),
-          )
-      ).map((r) => r.id),
-    );
-    if (revive.includes('student_disabled'))
-      await this.insertSteps(
-        tx,
-        tenantId,
-        live.filter((f) => !have.has(f.id)),
-        settings.offsetsDays,
-        tz,
-      );
+    // Hóa đơn chưa từng có mốc (phát hành trước 0028, hoặc lúc nhắc đang tắt) do `scheduleMissing` của job lập ở lượt sau.
     return out;
   }
 
