@@ -9,3 +9,7 @@
 ## Sự kiện hết lượt thử ở consumer
 
 Khi job `urgent` hết lượt thử, worker ghi log error và đặt `failed_at` cùng `last_error = consumer_exhausted: ...` trên dòng `outbox_events`. Hiện chưa có màn hình hay cảnh báo đọc các dòng này, và `requeueFailed` của relay không đẩy lại chúng vì dòng đã `dispatched_at`. Khi cần: thêm cảnh báo theo số dòng loại này và lệnh chạy lại thủ công.
+
+## Dọn phản hồi idempotency chứa bí mật
+
+- Dòng `idempotency_keys` của route nhạy cảm (tạo/gửi lại lời mời, có token và mã mời, lưu mã hóa) chỉ phát lại được 10 phút, nhưng job dọn hiện tại chỉ xóa theo hạn chung của bảng. Cần job (hoặc hạ hạn) xóa các dòng này sau 10 phút để không giữ bản mã lâu hơn cần thiết.

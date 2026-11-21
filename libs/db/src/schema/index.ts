@@ -8,3 +8,4 @@ export * from './schedule.js';
 export * from './attendance.js';
 export * from './notifications.js';
 export * from './billing.js';
+export * from './invites.js';

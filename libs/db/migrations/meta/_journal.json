@@ -176,6 +176,13 @@
       "when": 1795084442699,
       "tag": "0024_billing_schema",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1795229320988,
+      "tag": "0025_invites_consents",
+      "breakpoints": true
     }
   ]
 }
