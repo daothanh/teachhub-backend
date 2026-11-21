@@ -23,10 +23,12 @@ export interface OutboxJobData {
   payload: AttendanceRecordedPayload;
 }
 
-interface Pending {
+export interface Pending {
   notificationId: string;
   userId: string;
   type: string;
+  /** Mặc định khẩn (báo vắng); tin thường (vd. học phí sẵn sàng) đặt `false`. */
+  urgent?: boolean;
 }
 
 /** Lỗi tạm thời của FCM: ném để BullMQ thử lại cả job (dòng đã `failed` sẽ được nhận lại, không gửi trùng cái đã `sent`). */
@@ -183,7 +185,7 @@ export class AbsenceNotifier {
   }
 
   /** `true` = xong (đã gửi hoặc không gửi được vĩnh viễn); `false` = lỗi tạm hoặc đang có người khác gửi, cần thử lại. */
-  private async deliver(p: Pending): Promise<boolean> {
+  async deliver(p: Pending): Promise<boolean> {
     const claim = await this.tx.run({ userId: null }, async (tx) => {
       const ins = await tx.execute(sql`
         insert into notification_deliveries (id, notification_id, channel)
@@ -223,7 +225,7 @@ export class AbsenceNotifier {
         ? await this.push.send(
             devices.map((token) => ({
               token,
-              urgent: true,
+              urgent: p.urgent ?? true,
               data: { notificationId: p.notificationId, type: p.type },
             })),
           )
