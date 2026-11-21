@@ -19,6 +19,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import type { FastifyRequest } from 'fastify';
+import { Throttle } from '@nestjs/throttler';
 import { z } from 'zod';
 import {
   ApiErrors,
@@ -72,6 +73,8 @@ const AdminAuth = (permission: string) =>
 // đã có thân hàm (S7), bài quy định và tra cứu hỗ trợ còn trả 501 (đã qua guard) tới task admin riêng.
 @ApiTags('admin')
 @Public()
+// Chặt hơn mặc định: BFF nội bộ chỉ cần vài request/phút; chặn dò secret theo IP (khuyến nghị thêm allowlist IP ở Cloudflare).
+@Throttle({ default: { limit: 30, ttl: 60_000 } })
 @UseGuards(AdminGuard)
 @Controller('admin')
 export class AdminController {
@@ -85,7 +88,7 @@ export class AdminController {
       'Quyền IAM: `/teachhub/admin/bank-transfer`. `status` mặc định `pending`.',
   })
   @ApiOkResponse({ standardSchema: bankTransferOrderPageSchema })
-  @ApiErrors('VALIDATION_FAILED')
+  @ApiErrors('VALIDATION_FAILED', 'RATE_LIMITED')
   listBankTransferOrders(
     @Query({ schema: bankTransferListQuerySchema })
     query: BankTransferListQuery,
@@ -103,11 +106,19 @@ export class AdminController {
       'Quyền IAM: `/teachhub/admin/bank-transfer`. Một giao dịch: đơn → `confirmed` (ghi `x-admin-user-id`), `subscriptions` → Pro, `audit_logs`, rồi push cho giáo viên. ' +
       'Body bắt buộc `amount`, `bankTransactionRef`, `expectedUpdatedAt`; đơn không còn `pending` hoặc `expectedUpdatedAt` lệch `updatedAt` → 409 `CONFLICT_STALE`. ' +
       'Kỳ Pro 12 tháng (giá Pro là giá một năm): đang Pro còn hạn thì cộng nối từ hạn hiện tại, không rút ngắn; `amount` phải bằng số tiền của đơn, lệch → 422 `VALIDATION_FAILED` ở trường `amount`. ' +
-      'Gọi lại cùng `bankTransactionRef` và `amount` bởi cùng người xác nhận → 200 với kết quả cũ (không cộng kỳ lần hai); khác đi → 409 `CONFLICT_STALE`.',
+      'Gọi lại cùng `bankTransactionRef` và `amount` bởi cùng người xác nhận → 200 với kết quả cũ (không cộng kỳ lần hai); khác đi → 409 `CONFLICT_STALE`. ' +
+      '`bankTransactionRef` đã dùng cho đơn khác → 409 `BANK_TRANSACTION_REF_USED`; tenant đang Pro `active` qua App Store/Google Play còn hạn → 409 `SUBSCRIPTION_STORE_MANAGED` (không cộng nối, không đổi nguồn); dùng thử hoặc chuyển khoản thì cộng nối. Giới hạn 30 lần/phút/IP cho cả nhóm `/admin`.',
   })
   @ApiOkResponse({ standardSchema: bankTransferConfirmedSchema })
   @ApiIdempotencyKey()
-  @ApiErrors('VALIDATION_FAILED', 'NOT_FOUND', 'CONFLICT_STALE')
+  @ApiErrors(
+    'VALIDATION_FAILED',
+    'NOT_FOUND',
+    'CONFLICT_STALE',
+    'BANK_TRANSACTION_REF_USED',
+    'SUBSCRIPTION_STORE_MANAGED',
+    'RATE_LIMITED',
+  )
   confirmBankTransferOrder(
     @Param('id', { schema: idParam }) id: string,
     @Body({ schema: confirmBankTransferRequestSchema })
@@ -120,7 +131,11 @@ export class AdminController {
       throw new AppException('VALIDATION_FAILED', undefined, {
         'Idempotency-Key': ['Bắt buộc, dạng UUID'],
       });
-    return this.bankTransfers.confirm(adminUserOf(req), id, body);
+    return this.bankTransfers.confirm(
+      { userId: adminUserOf(req), requestId: req.id, ip: req.ip },
+      id,
+      body,
+    );
   }
 
   // Bổ sung ngoài bảng Spec §5.4: trang admin cần liệt kê bài để chọn bài phát hành.

@@ -5,6 +5,9 @@ import { startTestApp, type TestApp } from './support/app.js';
 import { seedTenant, type SeededTenant } from './support/seed.js';
 
 const ADMIN_SECRET = 'bi-mat-bff-admin-test-0123';
+const ADMIN_SECRET_OLD = 'bi-mat-bff-admin-cu-0123456';
+const ADMIN = '0194b5a0-0000-7000-8000-000000000042';
+const ADMIN_2 = '0194b5a0-0000-7000-8000-000000000099';
 const PERM = '/teachhub/admin/bank-transfer';
 type Who = SeededTenant & { token: string };
 
@@ -26,7 +29,9 @@ describe('subscription: vòng đời gói', () => {
 
   beforeAll(async () => {
     Object.assign(process.env, {
+      RATE_LIMIT_SCALE: '1',
       ADMIN_API_SECRET: ADMIN_SECRET,
+      ADMIN_API_SECRET_PREVIOUS: ADMIN_SECRET_OLD,
       PRO_PRICE_VND: '250000',
       PAYEE_BANK_BIN: '970436',
       PAYEE_BANK_NAME: 'Vietcombank',
@@ -273,11 +278,14 @@ describe('subscription: vòng đời gói', () => {
       Object.fromEntries(
         Object.entries({
           'x-admin-secret': ADMIN_SECRET,
-          'x-admin-user-id': 'iam-user-0042',
+          'x-admin-user-id': ADMIN,
           'x-admin-permissions': PERM,
           ...over,
         }).filter(([, v]) => v !== undefined),
       ) as Record<string, string>;
+    // Mỗi lệnh gọi một IP riêng: giới hạn 30/phút/IP của nhóm /admin không dồn các test vào nhau.
+    let ipSeq = 0;
+    const rip = () => `10.1.${Math.floor(++ipSeq / 250)}.${(ipSeq % 250) + 1}`;
     const list = (
       over: Record<string, string | undefined> = {},
       status = 'pending',
@@ -286,12 +294,14 @@ describe('subscription: vòng đời gói', () => {
         method: 'GET',
         url: `/v1/admin/bank-transfer-orders?status=${status}&pageSize=100`,
         headers: adminHeaders(over),
+        remoteAddress: rip(),
       });
     const mkOrder = async (who: Who) => {
       const r = await t.app.inject({
         method: 'POST',
         url: '/v1/subscription/bank-transfer-orders',
         payload: { planCode: 'pro' },
+        remoteAddress: rip(),
         headers: {
           authorization: `Bearer ${who.token}`,
           'idempotency-key': randomUUID(),
@@ -314,6 +324,7 @@ describe('subscription: vòng đời gói', () => {
         url: `/v1/admin/bank-transfer-orders/${id}/confirm`,
         payload: body,
         headers: adminHeaders({ 'idempotency-key': randomUUID(), ...over }),
+        remoteAddress: rip(),
       });
     const body = (o: { amount: number; updatedAt: string }, ref = 'FT001') => ({
       amount: o.amount,
@@ -338,6 +349,8 @@ describe('subscription: vòng đời gói', () => {
         { 'x-admin-secret': 'sai-bi-mat-sai-bi-mat' },
         { 'x-admin-user-id': undefined },
         { 'x-admin-user-id': '   ' },
+        { 'x-admin-user-id': 'iam-user-0042' },
+        { 'x-admin-user-id': '0194b5a0-0000-7000-8000-00000000004' },
       ])
         expect((await list(over)).statusCode, JSON.stringify(over)).toBe(401);
       for (const perm of [
@@ -362,6 +375,7 @@ describe('subscription: vòng đời gói', () => {
           method: 'GET',
           url: '/v1/admin/legal-articles',
           headers: adminHeaders({ 'x-admin-permissions': perm }),
+          remoteAddress: rip(),
         });
       expect((await legal(PERM)).statusCode).toBe(403);
       expect((await legal('/teachhub/admin/legal-articles')).statusCode).toBe(
@@ -384,7 +398,7 @@ describe('subscription: vòng đời gói', () => {
       const res = r.json();
       expect(res.order).toMatchObject({
         status: 'confirmed',
-        confirmedBy: 'iam-user-0042',
+        confirmedBy: ADMIN,
         bankTransactionRef: 'FT-A1',
       });
       expect(res.subscription).toMatchObject({
@@ -416,7 +430,7 @@ describe('subscription: vòng đời gói', () => {
         audit.some(
           (a) =>
             a.entity === 'bank_transfer_orders' &&
-            a.after_data.confirmed_by === 'iam-user-0042',
+            a.after_data.confirmed_by === ADMIN,
         ),
       ).toBe(true);
       expect(
@@ -460,7 +474,7 @@ describe('subscription: vòng đời gói', () => {
       ).toHaveLength(1);
       // Admin khác xác nhận lại đơn đã xong cũng là 409, không cộng kỳ.
       const stranger = await confirm(id, body(o, 'FT-B1'), {
-        'x-admin-user-id': 'iam-user-9999',
+        'x-admin-user-id': ADMIN_2,
       });
       expect(stranger.statusCode).toBe(409);
       expect((await subOf(w)).current_period_end).toEqual(end1);
@@ -547,6 +561,104 @@ describe('subscription: vòng đời gói', () => {
         await app.end();
       }
       expect(await subOf(w)).toMatchObject({ status: 'free' });
+    });
+
+    it('secret cũ (ADMIN_API_SECRET_PREVIOUS) vẫn được chấp nhận khi xoay vòng; secret khác vẫn 401', async () => {
+      expect(
+        (await list({ 'x-admin-secret': ADMIN_SECRET_OLD })).statusCode,
+      ).toBe(200);
+      expect(
+        (await list({ 'x-admin-secret': 'bi-mat-khac-hoan-toan-1' }))
+          .statusCode,
+      ).toBe(401);
+    });
+
+    it('nhóm /admin bị giới hạn 30 request/phút/IP → 429; IP khác không ảnh hưởng', async () => {
+      const ip = '10.9.9.9';
+      const hit = () =>
+        t.app.inject({
+          method: 'GET',
+          url: '/v1/admin/bank-transfer-orders',
+          headers: adminHeaders(),
+          remoteAddress: ip,
+        });
+      for (let i = 0; i < 30; i++) expect((await hit()).statusCode).toBe(200);
+      const blocked = await hit();
+      expect(blocked.statusCode).toBe(429);
+      expect(blocked.json().code).toBe('RATE_LIMITED');
+      expect((await list()).statusCode).toBe(200);
+    });
+
+    it('mã giao dịch đã dùng cho đơn khác → 409 BANK_TRANSACTION_REF_USED, đơn sau vẫn pending, không đổi gói; chỉ mục duy nhất tồn tại', async () => {
+      const [a, b] = [await mk(), await mk()];
+      const [ia, ib] = [await mkOrder(a), await mkOrder(b)];
+      expect(
+        (await confirm(ia, body(await find(ia), 'FT-DUP'))).statusCode,
+      ).toBe(200);
+      const r = await confirm(ib, body(await find(ib), 'FT-DUP'));
+      expect(r.statusCode).toBe(409);
+      expect(r.json().code).toBe('BANK_TRANSACTION_REF_USED');
+      expect((await find(ib)).status).toBe('pending');
+      expect(await subOf(b)).toMatchObject({ status: 'free' });
+      await expect(
+        q(
+          `update bank_transfer_orders set status = 'confirmed', bank_transaction_ref = 'FT-DUP' where id = $1`,
+          [ib],
+        ),
+      ).rejects.toMatchObject({ code: '23505' });
+    });
+
+    it('Pro active qua App Store/Google Play còn hạn → 409 SUBSCRIPTION_STORE_MANAGED, không cộng nối, không đổi nguồn; dùng thử và chuyển khoản thì cộng nối', async () => {
+      const cur = new Date(Date.now() + 100 * 86_400_000);
+      const set = (who: Who, status: string, source: string | null) =>
+        q(
+          `update subscriptions set status = $2, source = $3, plan_code = 'pro', current_period_end = $4 where tenant_id = $1`,
+          [who.tenantId, status, source, cur],
+        );
+      for (const source of ['app_store', 'play_store']) {
+        const w = await mk();
+        await set(w, 'active', source);
+        const id = await mkOrder(w);
+        const r = await confirm(id, body(await find(id), `FT-S-${source}`));
+        expect(r.statusCode, r.body).toBe(409);
+        expect(r.json().code).toBe('SUBSCRIPTION_STORE_MANAGED');
+        expect(await subOf(w)).toMatchObject({ source });
+        expect((await subOf(w)).current_period_end).toEqual(cur);
+        expect((await find(id)).status).toBe('pending');
+        expect(
+          await q(
+            `select 1 from outbox_events where tenant_id = $1 and type = 'subscription_activated'`,
+            [w.tenantId],
+          ),
+        ).toHaveLength(0);
+      }
+      for (const [status, source] of [
+        ['trialing', null],
+        ['active', 'bank_transfer'],
+      ] as const) {
+        const w = await mk();
+        await set(w, status, source);
+        const id = await mkOrder(w);
+        const r = await confirm(id, body(await find(id), `FT-OK-${status}`));
+        expect(r.statusCode, r.body).toBe(200);
+        expect(new Date(r.json().subscription.currentPeriodEnd).getTime()).toBe(
+          MONTH12(cur),
+        );
+        expect(await subOf(w)).toMatchObject({
+          source: 'bank_transfer',
+          status: 'active',
+        });
+      }
+      // Store hết hạn (kỳ đã qua) thì xác nhận được như tenant hết hạn.
+      const x = await mk();
+      await q(
+        `update subscriptions set status = 'active', source = 'app_store', plan_code = 'pro', current_period_end = now() - interval '1 day' where tenant_id = $1`,
+        [x.tenantId],
+      );
+      const idx = await mkOrder(x);
+      expect(
+        (await confirm(idx, body(await find(idx), 'FT-X'))).statusCode,
+      ).toBe(200);
     });
   });
 });

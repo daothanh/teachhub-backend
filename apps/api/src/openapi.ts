@@ -29,7 +29,7 @@ export function buildOpenApiDocument(app: INestApplication) {
         in: 'header',
         name: 'x-admin-user-id',
         description:
-          'Định danh nhân sự trên IAM Tasco. Bắt buộc, không rỗng; ghi vào `audit_logs`.',
+          'Định danh nhân sự trên IAM Tasco, bắt buộc là UUID (sai → 401); ghi vào `audit_logs`.',
       },
       'adminUserId',
     )

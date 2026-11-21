@@ -11,6 +11,7 @@ import { Reflector } from '@nestjs/core';
 import type { FastifyRequest } from 'fastify';
 import { AppException, type Env } from '@teachhub/core';
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PERMISSION = 'adminPermission';
 const digest = (s: string) => createHash('sha256').update(s).digest();
 const header = (req: FastifyRequest, name: string): string =>
@@ -22,7 +23,7 @@ export const RequiresAdminPermission = (permission: string) =>
 
 /**
  * Xác thực BFF admin (Spec §5.2e). Ba header phải có đủ: `x-admin-secret` (so thời gian hằng, băm SHA-256; chưa cấu hình
- * `ADMIN_API_SECRET` → 401 như sai secret), `x-admin-user-id` (không rỗng, ≤ 128 ký tự) → thiếu/sai: 401 `UNAUTHENTICATED`;
+ * `ADMIN_API_SECRET` → 401 như sai secret), `x-admin-user-id` (UUID của nhân sự IAM) → thiếu/sai: 401 `UNAUTHENTICATED`;
  * `x-admin-permissions` phải đúng URI quyền của route → khác: 403 `FORBIDDEN`. Route không khai quyền (quên decorator) bị từ chối.
  * Dùng với `@Public()` (không JWT người dùng).
  */
@@ -35,15 +36,16 @@ export class AdminGuard implements CanActivate {
 
   canActivate(context: ExecutionContext): boolean {
     const req = context.switchToHttp().getRequest<FastifyRequest>();
-    const secret = this.config.get('ADMIN_API_SECRET');
     const given = header(req, 'x-admin-secret');
-    if (
-      !secret ||
-      !given ||
-      !timingSafeEqual(digest(given), digest(secret)) ||
-      !header(req, 'x-admin-user-id') ||
-      header(req, 'x-admin-user-id').length > 128
-    )
+    // Cả hai secret đều được so (không dừng sớm) để thời gian không lộ secret nào khớp.
+    const secrets = [
+      this.config.get('ADMIN_API_SECRET'),
+      this.config.get('ADMIN_API_SECRET_PREVIOUS'),
+    ];
+    const secretOk = secrets
+      .map((s) => !!s && !!given && timingSafeEqual(digest(given), digest(s)))
+      .some(Boolean);
+    if (!secretOk || !UUID.test(header(req, 'x-admin-user-id')))
       throw new AppException('UNAUTHENTICATED');
     const need = this.reflector.getAllAndOverride<string | undefined>(
       PERMISSION,

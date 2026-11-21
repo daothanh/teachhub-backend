@@ -22,13 +22,18 @@ class Probe {
   bare() {}
 }
 
+const OLD = 'bi-mat-bff-admin-cu-0123456';
 const check = (
   headers: Record<string, string>,
   handler: () => void = Probe.prototype.guarded,
   secret: string | null = SECRET,
+  previous: string | undefined = undefined,
 ) => {
   const guard = new AdminGuard(
-    { get: () => secret ?? undefined } as never,
+    {
+      get: (k: string) =>
+        k === 'ADMIN_API_SECRET_PREVIOUS' ? previous : (secret ?? undefined),
+    } as never,
     new Reflector(),
   );
   try {
@@ -43,7 +48,7 @@ const check = (
 };
 const ok = {
   'x-admin-secret': SECRET,
-  'x-admin-user-id': 'iam-1',
+  'x-admin-user-id': '0194b5a0-0000-7000-8000-000000000042',
   'x-admin-permissions': '/teachhub/admin/bank-transfer',
 };
 
@@ -53,12 +58,18 @@ describe('AdminGuard', () => {
     ['thiếu secret', { ...ok, 'x-admin-secret': '' }],
     ['sai secret', { ...ok, 'x-admin-secret': 'sai-bi-mat-sai-bi-mat' }],
     ['thiếu user id', { ...ok, 'x-admin-user-id': ' ' }],
-    ['user id quá dài', { ...ok, 'x-admin-user-id': 'a'.repeat(129) }],
+    ['user id không phải UUID', { ...ok, 'x-admin-user-id': 'iam-user-0042' }],
   ])('%s → UNAUTHENTICATED', (_, h) =>
     expect(check(h)).toBe('UNAUTHENTICATED'),
   );
   it('chưa cấu hình ADMIN_API_SECRET → UNAUTHENTICATED (fail closed)', () =>
     expect(check(ok, Probe.prototype.guarded, null)).toBe('UNAUTHENTICATED'));
+  it('xoay secret: secret cũ chỉ được nhận khi cấu hình ADMIN_API_SECRET_PREVIOUS', () => {
+    const old = { ...ok, 'x-admin-secret': OLD };
+    expect(check(old)).toBe('UNAUTHENTICATED');
+    expect(check(old, Probe.prototype.guarded, SECRET, OLD)).toBe(true);
+    expect(check(ok, Probe.prototype.guarded, SECRET, OLD)).toBe(true);
+  });
   it('quyền khác route, thiếu quyền, hoặc route không khai quyền → FORBIDDEN', () => {
     expect(
       check({ ...ok, 'x-admin-permissions': '/teachhub/admin/support' }),

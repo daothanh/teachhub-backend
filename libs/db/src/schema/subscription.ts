@@ -108,6 +108,10 @@ export const bankTransferOrders = pgTable(
       .on(t.tenantId)
       .where(sql`${t.status} = 'pending'`),
     uniqueIndex('bank_transfer_orders_note_uq').on(t.transferNote),
+    // Một mã giao dịch ngân hàng chỉ xác nhận được một đơn.
+    uniqueIndex('bank_transfer_orders_ref_uq')
+      .on(t.bankTransactionRef)
+      .where(sql`${t.bankTransactionRef} is not null`),
     index('bank_transfer_orders_status_idx').on(t.status, t.createdAt),
   ],
 );

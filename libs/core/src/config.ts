@@ -104,6 +104,11 @@ export const envSchema = z
       emptyToUndefined,
       z.string().min(16).optional(),
     ),
+    /** Secret admin cũ, vẫn được chấp nhận trong lúc xoay vòng (đặt secret mới ở ADMIN_API_SECRET, gỡ biến này sau khi BFF đã đổi). */
+    ADMIN_API_SECRET_PREVIOUS: z.preprocess(
+      emptyToUndefined,
+      z.string().min(16).optional(),
+    ),
     /** Bí mật webhook RevenueCat (header `Authorization`). Thiếu = webhook trả 401 cho mọi request (fail closed). */
     REVENUECAT_WEBHOOK_SECRET: z.preprocess(
       emptyToUndefined,

@@ -405,3 +405,11 @@ Admin xác nhận chuyển khoản (Sprint 7; `openapi.json` chỉ đổi mô t�
 - **Idempotent**: gọi lại `confirm` với cùng `bankTransactionRef`, `amount` và cùng `x-admin-user-id` → 200 với kết quả cũ (không cộng kỳ lần hai, không thêm sự kiện push); khác đi, hoặc admin khác → 409 `CONFLICT_STALE` (đơn không còn `pending`). `Idempotency-Key` bắt buộc đúng dạng UUID nhưng không lưu bảng `idempotency_keys` (admin không có user); an toàn nhờ trạng thái đơn.
 - **Audit**: trigger audit của `bank_transfer_orders` và `subscriptions` ghi `audit_logs` (actor trống vì không có user app; người xác nhận nằm trong `after_data.confirmed_by`).
 - **Từ chối/hủy đơn**: hợp đồng chỉ có `pending`/`confirmed` và không có endpoint từ chối, nên chưa làm; thêm khi hợp đồng bổ sung.
+
+Gia cố admin sau review bảo mật (migration `0032_bank_transfer_ref_unique`; `openapi.json` chỉ đổi mô tả và thêm phản hồi 409/429 + hai mã lỗi mới trong `error_codes.json`, `oasdiff breaking` sạch):
+
+- **Giới hạn**: cả nhóm `/v1/admin/**` 30 request/phút/IP (`@Throttle`, trên mặc định 300), vượt → 429 `RATE_LIMITED`. **Khuyến nghị hạ tầng (làm sau)**: chặn `/v1/admin/*` bằng allowlist IP của BFF ở Cloudflare.
+- **Xoay secret**: env tùy chọn `ADMIN_API_SECRET_PREVIOUS` cũng được chấp nhận (so thời gian hằng cả hai secret). Quy trình: đặt secret mới ở `ADMIN_API_SECRET`, secret cũ sang `..._PREVIOUS`, đổi BFF, rồi gỡ `..._PREVIOUS`.
+- **`x-admin-user-id` phải là UUID** (không phải → 401). Audit: ngoài `confirmed_by` trong `after_data` của `bank_transfer_orders` (đã kiểm bằng e2e), hàm confirm ghi thêm một dòng `audit_logs` `entity = bank_transfer_order_confirm` có `confirmed_by`, `request_id`, `ip` (IP sau `trustProxy`), `bank_transaction_ref`, `amount`.
+- **Mã giao dịch duy nhất**: unique một phần `bank_transfer_orders(bank_transaction_ref) where not null`; mã đã dùng cho đơn khác → 409 `BANK_TRANSACTION_REF_USED` (kể cả khi hai đơn đua nhau: bắt `unique_violation`, đơn vẫn `pending`).
+- **Không chồng lên kỳ của store**: tenant đang `active` từ `app_store`/`play_store` còn hạn → 409 `SUBSCRIPTION_STORE_MANAGED` (không cộng nối, không đổi `source`, không outbox). Dùng thử, chuyển khoản, hoặc kỳ store đã hết hạn thì xác nhận như cũ (cộng nối nếu còn hạn). Thay quyết định trước đó "đổi `source` thành `bank_transfer`" cho kỳ store.
