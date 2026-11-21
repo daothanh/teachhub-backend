@@ -183,6 +183,13 @@
       "when": 1795229320988,
       "tag": "0025_invites_consents",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1795244622062,
+      "tag": "0026_payments_ledgers",
+      "breakpoints": true
     }
   ]
 }

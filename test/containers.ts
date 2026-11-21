@@ -18,7 +18,9 @@ export interface TestDb {
 }
 
 /** PostgreSQL 17 với vai trò như local (docker/postgres-init) và đã chạy migration. */
-export async function startTestDb(): Promise<TestDb> {
+export async function startTestDb(
+  migrationsFolder = 'libs/db/migrations',
+): Promise<TestDb> {
   const container = await new PostgreSqlContainer('postgres:17-alpine').start();
   const url = (role: string) =>
     `postgres://${role}:${role}@${container.getHost()}:${container.getPort()}/teachhub`;
@@ -49,11 +51,22 @@ export async function startTestDb(): Promise<TestDb> {
   await adminDb.query(afterConnect ?? '');
   await adminDb.end();
 
-  const owner = new pg.Pool({ connectionString: url('teachhub_owner') });
-  await migrate(drizzle(owner), { migrationsFolder: 'libs/db/migrations' });
-  await owner.end();
+  const db = { container, url };
+  await migrateTestDb(db, migrationsFolder);
+  return db;
+}
 
-  return { container, url };
+/** Chạy migration còn thiếu bằng teachhub_owner (thư mục khác mặc định: kiểm nâng cấp trên dữ liệu có sẵn). */
+export async function migrateTestDb(
+  db: Pick<TestDb, 'url'>,
+  folder = 'libs/db/migrations',
+): Promise<void> {
+  const owner = new pg.Pool({ connectionString: db.url('teachhub_owner') });
+  try {
+    await migrate(drizzle(owner), { migrationsFolder: folder });
+  } finally {
+    await owner.end();
+  }
 }
 
 // Cùng image đã ghim trong docker-compose.yml (minio/minio không còn trên Docker Hub).

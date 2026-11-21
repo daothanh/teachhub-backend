@@ -22,7 +22,7 @@ const actorSchema = z
   .meta({
     id: 'PaymentActor',
     description:
-      '`recordedBy` = người ghi, `voidedBy` = người hủy (null khi chưa hủy): id và tên hiển thị; null khi không xác định được (vd. tài khoản đã xóa)',
+      '`recordedBy` = người ghi, `voidedBy` = người hủy (null khi chưa hủy): id và tên hiển thị. Tên là ảnh chụp lúc ghi/hủy, giữ nguyên khi người đó đổi tên hoặc xóa tài khoản (không còn null vì tài khoản đã xóa)',
   });
 
 export const paymentSchema = z
@@ -76,7 +76,7 @@ export const recordPaymentRequestSchema = z
     method: paymentMethodSchema,
     paidOn: z.iso.date().optional().meta({
       description:
-        'Ngày thu; bỏ trống = hôm nay theo múi giờ tenant. Sau hôm nay → 422 `VALIDATION_FAILED`',
+        'Ngày thu; bỏ trống = hôm nay theo múi giờ tenant. Phải từ ngày phát hành hóa đơn (theo múi giờ tenant) đến hôm nay, ngoài khoảng đó → 422 `VALIDATION_FAILED` ở `paidOn`',
       example: '2027-01-05',
     }),
     note: z.string().trim().max(300).optional(),

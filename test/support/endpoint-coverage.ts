@@ -286,16 +286,16 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
     test: 'cô lập tenant: B không đọc, sửa, xóa tài khoản của A (404, dữ liệu A không đổi)',
   },
   'POST /v1/invoices/{id}/payments': {
-    notApplicable:
-      'hợp đồng S5-FL-09, thân hàm trả 501 tới S6-BE-02; test chéo tenant/học viên làm cùng task đó',
+    file: 'payments.e2e-spec.ts',
+    test: 'tenant B không ghi, đọc, hủy thanh toán/hóa đơn của A (404, dữ liệu A không đổi); id lạ cũng 404',
   },
   'GET /v1/invoices/{id}/payments': {
-    notApplicable:
-      'hợp đồng S5-FL-09, thân hàm trả 501 tới S6-BE-02; test chéo tenant/học viên làm cùng task đó',
+    file: 'payments.e2e-spec.ts',
+    test: 'tenant B không ghi, đọc, hủy thanh toán/hóa đơn của A (404, dữ liệu A không đổi); id lạ cũng 404',
   },
   'POST /v1/payments/{id}/void': {
-    notApplicable:
-      'hợp đồng S5-FL-09, thân hàm trả 501 tới S6-BE-02; test chéo tenant/học viên làm cùng task đó',
+    file: 'payments.e2e-spec.ts',
+    test: 'tenant B không ghi, đọc, hủy thanh toán/hóa đơn của A (404, dữ liệu A không đổi); id lạ cũng 404',
   },
   'GET /v1/students/{id}/ledger': {
     notApplicable:

@@ -38,6 +38,7 @@ import {
   type InvoiceIssuedPayload,
   transferNoteOf,
 } from '../domain/invoice-issue.js';
+import { remainingOf } from '../domain/payment.js';
 import { buildVietQrPayload } from '../domain/vietqr.js';
 
 const MAX_ADJUSTMENTS = 20;
@@ -549,10 +550,11 @@ export class BillingService {
       studentId: inv.studentId,
       studentName: student?.fullName ?? '',
       totalAmount: inv.totalAmount,
-      // Sprint 5 chưa có thanh toán nên đúng là 0; S6-BE-02 thay bằng Σ payments chưa hủy.
-      paidAmount: 0,
+      paidAmount: inv.paidAmount,
       remainingAmount:
-        inv.status === 'void' || inv.status === 'draft' ? 0 : inv.totalAmount,
+        inv.status === 'void' || inv.status === 'draft'
+          ? 0
+          : remainingOf(inv.totalAmount, inv.paidAmount),
       dueDate: period!.dueDate,
       issuedAt: at(inv.issuedAt),
       payout: inv.payout as Invoice['payout'],

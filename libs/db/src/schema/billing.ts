@@ -16,6 +16,7 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
+import { users } from './identity.js';
 import { students } from './students.js';
 import { tenants } from './tenancy.js';
 
@@ -109,6 +110,8 @@ export const invoices = pgTable(
     totalAmount: bigint({ mode: 'number' }).notNull().default(0),
     /** Phần âm bị cắt để total_amount không âm. */
     clampedAmount: bigint({ mode: 'number' }).notNull().default(0),
+    /** Σ thanh toán chưa hủy (S6-BE-02), cập nhật cùng giao dịch ghi/hủy thanh toán dưới `FOR UPDATE`; có thể > total_amount khi trả thừa. */
+    paidAmount: bigint({ mode: 'number' }).notNull().default(0),
     installmentNo: integer(),
     installmentCount: integer(),
     transferNote: text(),
@@ -178,6 +181,19 @@ export const invoices = pgTable(
     check(
       'invoices_clamped_amount_check',
       sql`${t.clampedAmount} >= 0 and ${t.clampedAmount} <= ${sql.raw(MAX_VND)}`,
+    ),
+    check(
+      'invoices_paid_amount_check',
+      sql`${t.paidAmount} >= 0 and ${t.paidAmount} <= ${sql.raw(MAX_VND)}`,
+    ),
+    // Trạng thái khớp số đã thu; `pending_confirmation` (US-7.7, chưa làm) chưa thu đủ. paid_amount = Σ payments chưa hủy do constraint trigger.
+    check(
+      'invoices_paid_status_check',
+      sql`case ${t.status}
+        when 'partially_paid' then ${t.paidAmount} > 0 and ${t.paidAmount} < ${t.totalAmount}
+        when 'paid' then ${t.paidAmount} >= ${t.totalAmount}
+        when 'pending_confirmation' then ${t.paidAmount} < ${t.totalAmount}
+        else ${t.paidAmount} = 0 end`,
     ),
     check('invoices_code_check', sql`${t.code} ~ '^TH-[0-9A-HJKMNP-TV-Z]{6}$'`),
     check(
@@ -262,6 +278,170 @@ export const invoiceLines = pgTable(
     check(
       'invoice_lines_adjustment_reason_check',
       sql`(${t.adjustmentReason} is not null) = (${t.kind} = 'manual_adjustment')`,
+    ),
+  ],
+);
+
+const methods = `'bank_transfer', 'cash'`;
+
+/**
+ * Một lần thu tiền của hóa đơn (US-7.4). Không xóa: hủy = đặt `voided_*` một lần (trigger payments_guard), kèm bút toán đảo ở
+ * hai sổ. `recorded_by`/`voided_by` là user của tenant (tên đọc qua app_private.tenant_user_names).
+ */
+export const payments = pgTable(
+  'payments',
+  {
+    id: uuid().primaryKey(),
+    tenantId: uuid()
+      .notNull()
+      .references(() => tenants.id),
+    invoiceId: uuid().notNull(),
+    amount: bigint({ mode: 'number' }).notNull(),
+    method: text().notNull(),
+    paidOn: date({ mode: 'string' }).notNull(),
+    note: text(),
+    recordedBy: uuid()
+      .notNull()
+      .references(() => users.id),
+    /** Ảnh chụp tên hiển thị lúc ghi/hủy: không phụ thuộc membership hay tài khoản còn hay không. */
+    recordedByName: text().notNull(),
+    recordedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    voidedAt: timestamp({ withTimezone: true }),
+    voidReason: text(),
+    voidedBy: uuid().references(() => users.id),
+    voidedByName: text(),
+  },
+  (t) => [
+    foreignKey({
+      name: 'payments_tenant_invoice_fk',
+      columns: [t.tenantId, t.invoiceId],
+      foreignColumns: [invoices.tenantId, invoices.id],
+    }),
+    unique('payments_tenant_id_id_uq').on(t.tenantId, t.id),
+    index('payments_tenant_paid_on_idx').on(t.tenantId, t.paidOn),
+    index('payments_invoice_idx').on(
+      t.tenantId,
+      t.invoiceId,
+      t.recordedAt.desc(),
+      t.id.desc(),
+    ),
+    index('payments_recorded_by_idx').on(t.recordedBy),
+    index('payments_voided_by_idx')
+      .on(t.voidedBy)
+      .where(sql`${t.voidedBy} is not null`),
+    check(
+      'payments_amount_check',
+      sql`${t.amount} > 0 and ${t.amount} <= ${sql.raw(MAX_VND)}`,
+    ),
+    check('payments_method_check', sql`${t.method} in (${sql.raw(methods)})`),
+    check('payments_note_check', sql`char_length(${t.note}) <= 300`),
+    check(
+      'payments_void_fields_check',
+      sql`(${t.voidedAt} is null) = (${t.voidReason} is null) and (${t.voidedAt} is null) = (${t.voidedBy} is null)
+        and (${t.voidedAt} is null) = (${t.voidedByName} is null)
+        and (${t.voidReason} is null or char_length(${t.voidReason}) between 1 and 300)`,
+    ),
+  ],
+);
+
+/**
+ * Sổ cái công nợ học viên, chỉ ghi thêm (trigger chặn UPDATE/DELETE/TRUNCATE). Số dư = Σ(debit − credit): dương = nợ cũ,
+ * âm = trả thừa chờ trừ kỳ sau. S6-BE-02 ghi `overpayment` (credit) và `payment_void` (debit); các loại còn lại do S6-BE-03.
+ */
+export const studentLedger = pgTable(
+  'student_ledger',
+  {
+    id: uuid().primaryKey(),
+    tenantId: uuid()
+      .notNull()
+      .references(() => tenants.id),
+    studentId: uuid().notNull(),
+    invoiceId: uuid(),
+    paymentId: uuid(),
+    kind: text().notNull(),
+    debit: bigint({ mode: 'number' }).notNull().default(0),
+    credit: bigint({ mode: 'number' }).notNull().default(0),
+    description: text().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    foreignKey({
+      name: 'student_ledger_tenant_student_fk',
+      columns: [t.tenantId, t.studentId],
+      foreignColumns: [students.tenantId, students.id],
+    }),
+    foreignKey({
+      name: 'student_ledger_tenant_invoice_fk',
+      columns: [t.tenantId, t.invoiceId],
+      foreignColumns: [invoices.tenantId, invoices.id],
+    }),
+    foreignKey({
+      name: 'student_ledger_tenant_payment_fk',
+      columns: [t.tenantId, t.paymentId],
+      foreignColumns: [payments.tenantId, payments.id],
+    }),
+    index('student_ledger_student_idx').on(
+      t.tenantId,
+      t.studentId,
+      t.createdAt.desc(),
+      t.id.desc(),
+    ),
+    index('student_ledger_invoice_idx')
+      .on(t.tenantId, t.invoiceId)
+      .where(sql`${t.invoiceId} is not null`),
+    index('student_ledger_payment_idx')
+      .on(t.tenantId, t.paymentId)
+      .where(sql`${t.paymentId} is not null`),
+    check(
+      'student_ledger_kind_check',
+      sql`${t.kind} in ('unpaid_carried', 'overpayment', 'prev_adjustment', 'applied_to_invoice', 'payment_void')`,
+    ),
+    // Mỗi dòng đúng một vế khác 0.
+    check(
+      'student_ledger_amount_check',
+      sql`${t.debit} between 0 and ${sql.raw(MAX_VND)} and ${t.credit} between 0 and ${sql.raw(MAX_VND)} and (${t.debit} > 0) <> (${t.credit} > 0)`,
+    ),
+  ],
+);
+
+/**
+ * Sổ doanh thu (US-9.5 AC1), chỉ ghi thêm. `amount` có dấu: dòng thu > 0, dòng đảo khi hủy < 0 và mang `entry_date`,
+ * `fiscal_year` của dòng thu gốc (hủy thanh toán là sửa sai, doanh thu của năm đó không còn khoản này).
+ */
+export const revenueLedger = pgTable(
+  'revenue_ledger',
+  {
+    id: uuid().primaryKey(),
+    tenantId: uuid()
+      .notNull()
+      .references(() => tenants.id),
+    paymentId: uuid().notNull(),
+    kind: text().notNull(),
+    amount: bigint({ mode: 'number' }).notNull(),
+    entryDate: date({ mode: 'string' }).notNull(),
+    fiscalYear: integer().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    foreignKey({
+      name: 'revenue_ledger_tenant_payment_fk',
+      columns: [t.tenantId, t.paymentId],
+      foreignColumns: [payments.tenantId, payments.id],
+    }),
+    // Mỗi thanh toán tối đa một dòng thu và một dòng đảo.
+    unique('revenue_ledger_payment_kind_uq').on(t.paymentId, t.kind),
+    index('revenue_ledger_year_idx').on(t.tenantId, t.fiscalYear, t.entryDate),
+    check(
+      'revenue_ledger_kind_check',
+      sql`${t.kind} in ('payment', 'reversal')`,
+    ),
+    check(
+      'revenue_ledger_amount_check',
+      sql`case ${t.kind} when 'payment' then ${t.amount} between 1 and ${sql.raw(MAX_VND)} else ${t.amount} between -${sql.raw(MAX_VND)} and -1 end`,
+    ),
+    check(
+      'revenue_ledger_year_check',
+      sql`${t.fiscalYear} = extract(year from ${t.entryDate})::int`,
     ),
   ],
 );

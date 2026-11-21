@@ -259,8 +259,9 @@ Quyết định khi soạn (cần TL chốt nếu muốn khác; tài liệu khô
 Thanh toán:
 
 - `POST /invoices/{id}/payments` trả 201 với `PaymentResult` (`payment`, trạng thái và số liệu hóa đơn sau thao tác, `overpaidAmount`, `dunningCancelled`). Không có cờ "thu đủ" riêng: thu đủ = `amount` bằng số còn nợ, app điền sẵn số đó khi bấm "Đã thu đủ". Bỏ `revenueYtd` và `taxAlerts` khỏi ví dụ Spec §5.4 vì US-9.5 AC2 đến AC4 đã cắt khỏi Sprint 6 (thêm trường vào phản hồi sau này không phá client).
-- Trả thừa được nhận (US-7.6 AC2 cần tiền trả thừa): hóa đơn `paid`, phần thừa vào `student_ledger`. Hóa đơn đã `paid` không nhận thêm thanh toán → 409 `INVOICE_NOT_PAYABLE`. `paidOn` mặc định hôm nay theo múi giờ tenant và không được sau hôm nay. Có `note` tùy chọn ≤ 300 ký tự.
+- Trả thừa được nhận (US-7.6 AC2 cần tiền trả thừa): hóa đơn `paid`, phần thừa vào `student_ledger`. Hóa đơn đã `paid` không nhận thêm thanh toán → 409 `INVOICE_NOT_PAYABLE`. `paidOn` mặc định hôm nay theo múi giờ tenant, phải từ ngày phát hành hóa đơn (múi giờ tenant) đến hôm nay, ngoài khoảng đó → 422 `VALIDATION_FAILED` ở `paidOn` (S6-BE-02, chỉ siết mô tả). Có `note` tùy chọn ≤ 300 ký tự.
 - `POST /payments/{id}/void` trả 200 cùng `PaymentResult`; hủy lại thanh toán đã hủy vẫn 200 (như hủy hóa đơn). Hủy sau khi phần trả thừa đã bị trừ vào hóa đơn kỳ sau vẫn cho phép, sổ học viên có thể thành nợ. Hóa đơn còn nợ trở lại thì lập lại mốc nhắc chưa tới. Không báo phụ huynh khi hủy.
+- `recordedBy`/`voidedBy` của `Payment`: tên là ảnh chụp lúc ghi/hủy, vẫn giữ sau khi tài khoản bị xóa (S6-BE-02, chỉ đổi mô tả; `voidedBy` null khi chưa hủy).
 - Biên nhận cho phụ huynh nằm trong `GET /family/invoices/{id}` (`payments`), không có endpoint riêng; thông báo `payment_recorded` mở đúng hóa đơn đó. Không có số biên nhận riêng.
 - Sổ doanh thu (US-9.5 AC1) chỉ ghi, chưa có endpoint đọc: `GET /compliance/revenue-book` của Spec thuộc E9 cùng AC2 đến AC4.
 
