@@ -100,10 +100,14 @@ export class InviteAcceptanceController {
         idempotencyKey: header(req),
       },
       (exec) =>
-        this.idem.run(req, reply, ctx, async (t) => ({
-          status: 200,
-          body: await exec(t),
-        })),
+        this.idem.run(
+          req,
+          reply,
+          ctx,
+          async (t) => ({ status: 200, body: await exec(t) }),
+          // Phản hồi có tên học viên (dữ liệu của trẻ): lưu mã hóa, phát lại tối đa 10 phút.
+          { sensitive: true },
+        ),
     );
   }
 
@@ -145,10 +149,14 @@ export class InviteAcceptanceController {
         idempotencyKey: header(req),
       },
       (exec) =>
-        this.idem.run(req, reply, ctx, async (t) => ({
-          status: 200,
-          body: await exec(t),
-        })),
+        this.idem.run(
+          req,
+          reply,
+          ctx,
+          async (t) => ({ status: 200, body: await exec(t) }),
+          // Phản hồi có tên học viên (dữ liệu của trẻ): lưu mã hóa, phát lại tối đa 10 phút.
+          { sensitive: true },
+        ),
     );
   }
 }

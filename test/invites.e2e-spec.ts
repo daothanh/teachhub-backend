@@ -547,6 +547,43 @@ describe('lời mời phụ huynh và đồng ý điều khoản', () => {
       expect((await accept(p, i1.token)).statusCode).toBe(410);
     });
 
+    it('accept/redeem-code: dòng idempotency không chứa tên trẻ, token hay mã dạng rõ; requestHash không phải SHA-256 trơn', async () => {
+      const s = await student(A, 2);
+      const i = await invite(A, s.id, s.guardians[0]!.id);
+      const p = await mkParent('Chị Lan');
+      const ok = await accept(p, i.token);
+      expect(ok.statusCode, ok.body).toBe(200);
+      const rows = await t.worker.query(
+        `select response_body::text b, request_hash h from idempotency_keys where user_id = $1`,
+        [p.userId],
+      );
+      expect(rows.rows.length).toBeGreaterThan(0);
+      for (const r of rows.rows) {
+        expect(r.b).not.toContain('Nguyễn Minh Anh');
+        expect(r.b).not.toContain(s.id);
+        expect(r.h).not.toBe(
+          createHash('sha256')
+            .update(JSON.stringify({ body: { token: i.token } }))
+            .digest('hex'),
+        );
+      }
+      const i2 = await invite(A, s.id, s.guardians[1]!.id);
+      const q = await mkParent('Chị Hoa');
+      const rc = await redeem(q, i2.shortCode);
+      expect(rc.statusCode, rc.body).toBe(200);
+      const r2 = await t.worker.query(
+        `select response_body::text b, request_hash h from idempotency_keys where user_id = $1`,
+        [q.userId],
+      );
+      expect(r2.rows.length).toBeGreaterThan(0);
+      for (const r of r2.rows) {
+        expect(r.b).not.toContain('Nguyễn Minh Anh');
+        expect(r.h).not.toBe(
+          createHash('sha256').update(i2.shortCode).digest('hex'),
+        );
+      }
+    });
+
     it('hai người nhận song song cùng token: đúng một người thắng, người kia 410', async () => {
       const s = await student(A, 1);
       const inv = await invite(A, s.id, s.guardians[0]!.id);

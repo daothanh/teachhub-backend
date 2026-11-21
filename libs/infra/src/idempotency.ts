@@ -2,6 +2,7 @@ import {
   createCipheriv,
   createDecipheriv,
   createHash,
+  createHmac,
   randomBytes,
 } from 'node:crypto';
 import { Global, Inject, Injectable, Module } from '@nestjs/common';
@@ -116,15 +117,19 @@ export class Idempotency {
     }
     const endpoint = `${req.method} ${req.routeOptions.url}`;
     const aad = `${userId}|${endpoint}|${key}`;
-    const requestHash = createHash('sha256')
-      // Cùng key + cùng body nhưng khác đích (id trên đường dẫn) hoặc khác tenant không phải cùng một yêu cầu.
-      .update(
-        canonical({
-          body: req.body,
-          params: req.params,
-          tenantId: ctx.tenantId ?? null,
-        }),
-      )
+    // Cùng key + cùng body nhưng khác đích (id trên đường dẫn) hoặc khác tenant không phải cùng một yêu cầu.
+    const payload = canonical({
+      body: req.body,
+      params: req.params,
+      tenantId: ctx.tenantId ?? null,
+    });
+    // Route nhạy cảm: body có token/mã mời (không gian nhỏ) nên băm có khóa, không để SHA-256 trơn dò ngược được.
+    const requestHash = (
+      opts.sensitive
+        ? createHmac('sha256', this.encKey())
+        : createHash('sha256')
+    )
+      .update(payload)
       .digest('hex');
 
     const replay = async (): Promise<T | undefined> => {
