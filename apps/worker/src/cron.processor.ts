@@ -8,7 +8,9 @@ import {
 import {
   BillingCloseJob,
   BillingReconcileJob,
+  DunningJob,
   JOB_BILLING_CLOSE,
+  JOB_BILLING_DUNNING,
   JOB_BILLING_RECONCILE,
 } from '@teachhub/modules/billing';
 import {
@@ -35,6 +37,7 @@ export class CronProcessor
     private readonly generate: GenerateSessionsJob,
     private readonly billingClose: BillingCloseJob,
     private readonly billingReconcile: BillingReconcileJob,
+    private readonly dunning: DunningJob,
     private readonly purge: PurgeIdempotencyKeysJob,
     private readonly purgeDevices: PurgeStaleDevicesJob,
   ) {
@@ -58,6 +61,12 @@ export class CronProcessor
       JOB_BILLING_CLOSE,
       { pattern: '0 2 * * *', tz: TZ },
       { name: JOB_BILLING_CLOSE, opts },
+    );
+    // Mỗi 15 phút từ 07:00 đến 21:30; job tự bỏ lần 21:45 vì ngoài khung.
+    await this.queue.upsertJobScheduler(
+      JOB_BILLING_DUNNING,
+      { pattern: '*/15 7-21 * * *', tz: TZ },
+      { name: JOB_BILLING_DUNNING, opts },
     );
     await this.queue.upsertJobScheduler(
       JOB_BILLING_RECONCILE,
@@ -85,6 +94,9 @@ export class CronProcessor
         return this.billingClose.run(new Date(job.timestamp));
       case JOB_BILLING_RECONCILE:
         return this.billingReconcile.run();
+      case JOB_BILLING_DUNNING:
+        // Giờ chạy thật, không `job.timestamp`: lần BullMQ thử lại muộn không được coi là còn trong khung giờ gửi.
+        return this.dunning.run(new Date());
       case JOB_PURGE_IDEMPOTENCY:
         return this.purge.run();
       case JOB_PURGE_STALE_DEVICES:

@@ -2,6 +2,7 @@ export * from './domain/invoice-calculator.js';
 export * from './domain/vietqr.js';
 export * from './domain/invoice-issue.js';
 export * from './domain/payment.js';
+export * from './domain/dunning.js';
 export * from './billing.module.js';
 export {
   feeAmountSchema,
@@ -23,3 +24,4 @@ export {
   BillingReconcileJob,
   JOB_BILLING_RECONCILE,
 } from './application/billing-reconcile.job.js';
+export { DunningJob, JOB_BILLING_DUNNING } from './application/dunning.job.js';

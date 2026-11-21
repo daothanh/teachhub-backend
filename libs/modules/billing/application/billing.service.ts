@@ -51,6 +51,7 @@ import {
   setPrevAdjustmentLines,
 } from './carry-over.queries.js';
 import { buildVietQrPayload } from '../domain/vietqr.js';
+import { DunningService } from './dunning.service.js';
 
 const MAX_ADJUSTMENTS = 20;
 const DEFAULT_TZ = 'Asia/Ho_Chi_Minh';
@@ -70,6 +71,8 @@ type LineRow = typeof invoiceLines.$inferSelect;
  */
 @Injectable()
 export class BillingService {
+  constructor(private readonly dunning: DunningService) {}
+
   async listPeriods(
     tx: Tx,
     tenantId: string,
@@ -382,6 +385,7 @@ export class BillingService {
       accountName: account.accountName,
     };
     const issued: IssueInvoicesResult['invoices'] = [];
+    const carriedIds = new Set<string>();
     const events: (typeof outboxEvents.$inferInsert)[] = [];
     const audits: { id: string; before: object; after: object }[] = [];
     for (const [i, inv] of todo.entries()) {
@@ -408,6 +412,7 @@ export class BillingService {
       );
       await setCarryLine(tx, tenantId, inv.id, f.carryOver);
       for (const o of st.open) {
+        carriedIds.add(o.id);
         await tx.insert(studentLedger).values({
           id: uuidv7(),
           tenantId,
@@ -494,6 +499,13 @@ export class BillingService {
     }
 
     if (events.length) await tx.insert(outboxEvents).values(events);
+    // Nhắc nợ (US-7.5): hóa đơn mới có lịch riêng; hóa đơn cũ vừa chuyển nợ sang hóa đơn mới không còn nợ nên hết nhắc.
+    await this.dunning.reconcile(tx, tenantId, [...carriedIds]);
+    await this.dunning.scheduleIssued(
+      tx,
+      tenantId,
+      issued.map((i) => i.id),
+    );
     if (audits.length) {
       await tx.execute(
         sql`select app_private.audit_insert(${tenantId}::uuid, 'invoice', v.id::uuid, 'update', v.b::jsonb, v.a::jsonb)
@@ -600,6 +612,7 @@ export class BillingService {
       .update(invoices)
       .set({ status: 'void', voidedAt: new Date(), voidReason: body.reason })
       .where(and(eq(invoices.tenantId, actor.tenantId), eq(invoices.id, id)));
+    await this.dunning.reconcile(tx, actor.tenantId, [id]);
     await writeAudit(tx, {
       tenantId: actor.tenantId,
       entity: 'invoice',

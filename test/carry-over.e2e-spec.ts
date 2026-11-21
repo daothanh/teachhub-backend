@@ -1396,9 +1396,14 @@ describe('carry-over: chuyển kỳ lúc phát hành, sổ học viên, công n�
       studentId: id.s1,
       studentName: 'Nợ Một',
       ledgerBalanceAmount: 0,
-      reminders: [],
+      dunningEnabled: true,
     });
-    expect(h.enrollments.map((e) => e.className)).toEqual(['Toán 9A']);
+    // Nhắc nợ (S6-BE-04): hóa đơn phát hành qua API có lịch; hóa đơn đã chuyển nợ sang kỳ sau thì mốc bị hủy.
+    expect(h.reminders.length).toBeGreaterThan(0);
+    expect(h.reminders.map((r) => r.invoiceCode).every(Boolean)).toBe(true);
+    expect(h.enrollments.map((e) => [e.className, e.dunningEnabled])).toEqual([
+      ['Toán 9A', true],
+    ]);
     expect(h.invoices.map((i) => [i.periodMonth, i.totalAmount])).toEqual([
       ['2027-02-01', 2_600_000],
       ['2027-01-01', 1_400_000],

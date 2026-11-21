@@ -7,6 +7,7 @@ vi.mock('@teachhub/modules/billing', () => ({
   BILLING_DRAFTS_READY: 'billing_drafts_ready',
   INVOICE_ISSUED: 'invoice_issued',
   PAYMENT_RECORDED: 'payment_recorded',
+  PAYMENT_REMINDER: 'payment_reminder',
 }));
 vi.mock('@teachhub/modules/schedule', () => ({
   SCHEDULE_CHANGED: 'schedule_changed',
@@ -15,6 +16,7 @@ vi.mock('@teachhub/modules/notifications', () => ({
   BillingReadyNotifier: class {},
   InvoiceIssuedNotifier: class {},
   PaymentRecordedNotifier: class {},
+  PaymentReminderNotifier: class {},
 }));
 
 const job = (name: string, data: unknown) => ({ name, data }) as Job;
@@ -24,14 +26,17 @@ describe('EventsProcessor: phân loại sự kiện outbox', () => {
     const handle = vi.fn().mockResolvedValue(undefined);
     const issued = vi.fn().mockResolvedValue(undefined);
     const paid = vi.fn().mockResolvedValue(undefined);
+    const reminder = vi.fn().mockResolvedValue(undefined);
     return {
       handle,
       issued,
       paid,
+      reminder,
       p: new EventsProcessor(
         { handle } as never,
         { handle: issued } as never,
         { handle: paid } as never,
+        { handle: reminder } as never,
       ),
     };
   };
@@ -58,6 +63,14 @@ describe('EventsProcessor: phân loại sự kiện outbox', () => {
     expect(paid).toHaveBeenCalledExactlyOnceWith(data);
     expect(handle).not.toHaveBeenCalled();
     expect(issued).not.toHaveBeenCalled();
+  });
+
+  it('payment_reminder → PaymentReminderNotifier.handle, không đụng notifier tiền khác', async () => {
+    const { p, paid, reminder } = make();
+    const data = { eventId: 'e', tenantId: 't', payload: {} };
+    await p.process(job('payment_reminder', data));
+    expect(reminder).toHaveBeenCalledExactlyOnceWith(data);
+    expect(paid).not.toHaveBeenCalled();
   });
 
   it('schedule_changed → chỉ ghi log, không gọi notifier', async () => {

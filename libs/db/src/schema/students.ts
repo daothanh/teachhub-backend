@@ -118,6 +118,8 @@ export const enrollments = pgTable(
     leftOn: date({ mode: 'string' }),
     /** Mức riêng của học viên (FeeOverride); null = kế thừa lớp. */
     feeOverride: jsonb(),
+    /** Nhắc nợ (S6-BE-04, US-7.5 AC3): học viên chỉ không được nhắc khi mọi ghi danh đang mở đều `false`. */
+    dunningEnabled: boolean().notNull().default(true),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
