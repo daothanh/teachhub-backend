@@ -44,6 +44,9 @@ export const students = pgTable(
     note: text(),
     status: text().notNull().default('active'),
     statusEffectiveOn: date({ mode: 'string' }),
+    /** Trigger `students_status_changed` ghi khi `status` đổi (không ghi lúc INSERT): lúc đổi và trạng thái trước đó. Billing xét trạng thái theo kỳ bằng hai cột này. */
+    statusChangedAt: timestamp({ withTimezone: true }),
+    statusBefore: text(),
     leftReason: text(),
     isReadonly: boolean().notNull().default(false),
     createdBy: uuid(),

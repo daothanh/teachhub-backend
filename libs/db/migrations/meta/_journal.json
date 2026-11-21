@@ -239,6 +239,13 @@
       "when": 1795276597002,
       "tag": "0033_billing_not_marked",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1795277983265,
+      "tag": "0034_students_status_changed",
+      "breakpoints": true
     }
   ]
 }

@@ -142,6 +142,33 @@ export function latestClosablePeriod(
   };
 }
 
+export type StudentStatus = 'active' | 'paused' | 'left';
+
+export interface StudentStatusRow {
+  status: string;
+  statusBefore: string | null;
+  /** Mốc hiệu lực: `status_effective_on` hoặc ngày địa phương của `status_changed_at`; null = chưa có mốc. */
+  changedOn: string | null;
+}
+
+/**
+ * Trạng thái học viên áp cho kỳ kết thúc `periodEnd` (D4): `paused` = chỉ tính buổi theo buổi; `leftOn` = ngày rời (buổi từ
+ * ngày này không tính, ngày ≤ đầu kỳ thì ghi danh tự bị loại); null = học viên không có dòng nào trong kỳ (rời lớp, mốc không rõ).
+ */
+export function studentPeriodState(
+  s: StudentStatusRow,
+  periodEnd: string,
+): { paused: boolean; leftOn: string | null } | null {
+  const asOf = (
+    s.changedOn && s.changedOn > periodEnd
+      ? (s.statusBefore ?? 'active')
+      : s.status
+  ) as StudentStatus;
+  if (asOf === 'left')
+    return s.changedOn ? { paused: false, leftOn: s.changedOn } : null;
+  return { paused: asOf === 'paused', leftOn: null };
+}
+
 // ---- Cấu hình học phí đọc từ jsonb ----
 
 const bool = (v: unknown) => (typeof v === 'boolean' ? v : undefined);

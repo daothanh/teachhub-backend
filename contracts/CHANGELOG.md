@@ -2,6 +2,10 @@
 
 `contracts/openapi.json` sinh từ schema zod bằng `pnpm openapi:gen`; file này ghi endpoint thêm mới theo sprint. Chỉ thêm, không đổi endpoint cũ (CI chặn bằng `oasdiff`).
 
+## Billing: việc theo dõi sau S5 (issue #179, chỉ đổi hành vi server, không đổi schema hay endpoint; `oasdiff` sạch)
+
+- Trạng thái học viên khi chốt kỳ xét THEO KỲ: học viên chuyển `left`/`paused` sau ngày cuối kỳ M (giữa ngày 1 tháng M+1 và ngày chốt) vẫn bị tính kỳ M theo trạng thái trước đó. `left` trong kỳ: chỉ tính buổi trước ngày rời; `paused`: chỉ buổi theo buổi đã dạy (như cũ). Mốc đổi lấy từ cột mới `students.status_changed_at` (trigger ghi khi `status` đổi; migration `0034_students_status_changed`, thêm cả `status_before`) hoặc `status_effective_on` nếu có. Học viên đã đổi trạng thái trước migration (không có mốc) giữ cách cũ.
+
 ## Ngoại lệ một lần: hợp nhất thông báo và not_marked
 
 Hai thay đổi `oasdiff breaking` báo ERR, được Owner/TL chấp nhận MỘT LẦN vì chưa có bản app nào phát hành ra ngoài (xem "Đã chốt khi duyệt" ở Sprint 7). Sau PR này mọi thay đổi lại phải sạch `oasdiff` mà không cần ngoại lệ.

@@ -6,6 +6,7 @@ import {
   parseBillingSettings,
   parseFeeOverride,
   latestClosablePeriod,
+  studentPeriodState,
   toCalcAttendance,
 } from './billing-period.js';
 
@@ -387,5 +388,75 @@ describe('computeEnrollmentInvoice: bản nháp từ buổi và điểm danh', (
       override: { chargeExcused: false },
       discounts: [{ kind: 'amount', value: 50000, description: 'a' }],
     });
+  });
+});
+
+describe('studentPeriodState: trạng thái học viên theo kỳ (D4, issue #179)', () => {
+  const st = (
+    status: string,
+    before: string | null,
+    changedOn: string | null,
+  ) =>
+    studentPeriodState(
+      { status, statusBefore: before, changedOn },
+      DEC.periodEnd,
+    );
+
+  it('đổi sang left/paused SAU cuối kỳ (giữa ngày 1 và ngày chốt) → kỳ vẫn xét như trước khi đổi', () => {
+    expect(st('left', 'active', '2027-01-03')).toEqual({
+      paused: false,
+      leftOn: null,
+    });
+    expect(st('paused', 'active', '2027-01-03')).toEqual({
+      paused: false,
+      leftOn: null,
+    });
+    expect(st('left', 'paused', '2027-01-03')).toEqual({
+      paused: true,
+      leftOn: null,
+    });
+  });
+
+  it('left trong kỳ → leftOn = ngày rời; paused từ trong kỳ → chỉ buổi theo buổi', () => {
+    expect(st('left', 'active', '2026-12-20')).toEqual({
+      paused: false,
+      leftOn: '2026-12-20',
+    });
+    expect(st('paused', 'active', '2026-12-05')).toEqual({
+      paused: true,
+      leftOn: null,
+    });
+  });
+
+  it('chưa có mốc (học viên đổi trước migration 0034): left không tính, paused theo D4', () => {
+    expect(st('left', null, null)).toBeNull();
+    expect(st('paused', null, null)).toEqual({ paused: true, leftOn: null });
+    expect(st('active', null, null)).toEqual({ paused: false, leftOn: null });
+  });
+
+  it('vector tiền: học viên left ngày 03/01 (sau kỳ) vẫn bị tính 8 buổi × 150.000 − vắng → 1.200.000', () => {
+    const state = st('left', 'active', '2027-01-03')!;
+    const r = computeEnrollmentInvoice(
+      perSession(),
+      enr({ leftOn: state.leftOn }),
+      DEC,
+      eightTaught,
+      att,
+      { paused: state.paused },
+    );
+    expect(r!.result.lines.reduce((n, l) => n + l.amount, 0)).toBe(1_200_000);
+  });
+
+  it('vector tiền: left ngày 05/12 (trong kỳ) chỉ tính buổi trước 05/12 (4 buổi → 600.000)', () => {
+    const state = st('left', 'active', '2026-12-05')!;
+    const r = computeEnrollmentInvoice(
+      perSession(),
+      enr({ leftOn: state.leftOn }),
+      DEC,
+      eightTaught,
+      new Map(),
+      { paused: state.paused },
+    );
+    expect(r!.result.lines.reduce((n, l) => n + l.amount, 0)).toBe(600_000);
   });
 });

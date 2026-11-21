@@ -882,6 +882,72 @@ describe('billing: job billing.close + API kỳ thu, hóa đơn, điều chỉnh
     expect(await periodsOf(C)).toHaveLength(1);
   });
 
+  it('S3 (issue #179): học viên chuyển left/paused sau cuối kỳ (giữa ngày 1 và ngày chốt) vẫn bị tính kỳ M; left giữa kỳ chỉ tính buổi trước ngày rời; trigger ghi mốc', async () => {
+    const H = await seedTenant(t.worker);
+    await q(
+      `update tenants set settings = '{"billingCloseDay": 5}' where id = $1`,
+      [H.tenantId],
+    );
+    const [per, mon] = [randomUUID(), randomUUID()];
+    await addClass(H, per, 'H-Toán', ['per_session', 100_000, null]);
+    await addClass(H, mon, 'H-Văn', ['monthly', 400_000, null]);
+    const [lateLeft, latePaused, midLeft, insertedLeft] = [
+      randomUUID(),
+      randomUUID(),
+      randomUUID(),
+      randomUUID(),
+    ];
+    for (const [id, name] of [
+      [lateLeft, 'Lan'],
+      [latePaused, 'Mai'],
+      [midLeft, 'Nga'],
+      [insertedLeft, 'Oanh'],
+    ] as const)
+      await addStudent(H, id, name, name === 'Oanh' ? 'left' : 'active');
+    for (const id of [lateLeft, midLeft, insertedLeft])
+      await enroll(H, per, id);
+    await enroll(H, mon, latePaused);
+    for (const d of ['2026-12-10', '2026-12-25'])
+      await q(
+        `insert into sessions (id, tenant_id, class_id, session_date, starts_at, ends_at, status)
+         values ($1, $2, $3, $4, $5, $6, 'taught')`,
+        [randomUUID(), H.tenantId, per, d, `${d}T11:00:00Z`, `${d}T12:00:00Z`],
+      );
+    await q(`update students set status = 'left' where id = any($1)`, [
+      [lateLeft, midLeft],
+    ]);
+    await q(`update students set status = 'paused' where id = $1`, [
+      latePaused,
+    ]);
+    // INSERT với status khác 'active' không có mốc (cách cũ: left không tính).
+
+    expect(
+      await q(
+        `select full_name, status_before, status_changed_at is not null as has_at from students where tenant_id = $1 order by full_name`,
+        [H.tenantId],
+      ),
+    ).toEqual([
+      { full_name: 'Lan', status_before: 'active', has_at: true },
+      { full_name: 'Mai', status_before: 'active', has_at: true },
+      { full_name: 'Nga', status_before: 'active', has_at: true },
+      { full_name: 'Oanh', status_before: null, has_at: false },
+    ]);
+    // Lan, Mai đổi trạng thái 03/01/2027 (sau kỳ 12/2026, trước ngày chốt 05/01); Nga rời 20/12/2026.
+    await q(
+      `update students set status_changed_at = '2027-01-03T03:00:00Z' where id = any($1)`,
+      [[lateLeft, latePaused]],
+    );
+    await q(
+      `update students set status_changed_at = '2026-12-20T03:00:00Z' where id = $1`,
+      [midLeft],
+    );
+    await job.run(new Date('2027-01-04T19:00:00Z')); // 02:00 ngày 05/01/2027 giờ VN
+    const totals = Object.fromEntries(
+      (await invoicesOf(H)).map((i) => [i.full_name, Number(i.total_amount)]),
+    );
+    expect(totals).toEqual({ Lan: 200_000, Mai: 400_000, Nga: 100_000 });
+  });
+
   it('S2: hai job chạy song song cùng lúc không sinh bản nháp trùng', async () => {
     const F = await seedTenant(t.worker);
     const [cls, stu] = [randomUUID(), randomUUID()];

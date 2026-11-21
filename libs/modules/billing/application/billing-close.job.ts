@@ -8,7 +8,6 @@ import {
   isNotNull,
   isNull,
   lte,
-  ne,
   or,
   sql,
 } from 'drizzle-orm';
@@ -36,6 +35,7 @@ import {
   type PeriodDates,
   parseBillingSettings,
   latestClosablePeriod,
+  studentPeriodState,
 } from '../domain/billing-period.js';
 import {
   planCarryOver,
@@ -109,7 +109,7 @@ export class BillingCloseJob {
         );
         try {
           created += await this.tx.run({ userId: null }, (t) =>
-            this.closeTenant(t, tenant.id, period),
+            this.closeTenant(t, tenant.id, tenant.tz, period),
           );
         } catch (e) {
           failed += 1;
@@ -128,6 +128,7 @@ export class BillingCloseJob {
   private async closeTenant(
     t: Tx,
     tenantId: string,
+    tz: string,
     period: PeriodDates,
   ): Promise<number> {
     const periodWhere = and(
@@ -154,7 +155,10 @@ export class BillingCloseJob {
         joinedOn: enrollments.joinedOn,
         leftOn: enrollments.leftOn,
         feeOverride: enrollments.feeOverride,
-        paused: sql<boolean>`${students.status} = 'paused'`,
+        status: students.status,
+        statusBefore: students.statusBefore,
+        statusEffectiveOn: students.statusEffectiveOn,
+        statusChangedAt: students.statusChangedAt,
       })
       .from(enrollments)
       .innerJoin(
@@ -173,7 +177,6 @@ export class BillingCloseJob {
             isNull(enrollments.leftOn),
             gt(enrollments.leftOn, period.periodMonth),
           ),
-          ne(students.status, 'left'),
         ),
       );
     if (!enrollmentRows.length) return 0;
@@ -277,10 +280,30 @@ export class BillingCloseJob {
           classById.get(b.classId)?.name ?? '',
         ) || a.studentId.localeCompare(b.studentId),
     );
-    for (const enr of ordered) {
-      if (existing.has(enr.studentId)) continue;
-      const c = classById.get(enr.classId);
+    for (const row of ordered) {
+      if (existing.has(row.studentId)) continue;
+      const c = classById.get(row.classId);
       if (!c) continue;
+      // D4: trạng thái học viên theo kỳ (mốc đổi tính theo ngày địa phương của tenant).
+      const state = studentPeriodState(
+        {
+          status: row.status,
+          statusBefore: row.statusBefore,
+          changedOn:
+            row.statusEffectiveOn ??
+            (row.statusChangedAt ? localDate(row.statusChangedAt, tz) : null),
+        },
+        period.periodEnd,
+      );
+      if (!state || (state.leftOn && state.leftOn <= period.periodMonth))
+        continue;
+      const enr = {
+        ...row,
+        leftOn:
+          state.leftOn && (!row.leftOn || state.leftOn < row.leftOn)
+            ? state.leftOn
+            : row.leftOn,
+      };
       const fee: ClassFee = {
         className: c.name,
         feeType: c.feeType as FeeType,
@@ -293,7 +316,7 @@ export class BillingCloseJob {
         period,
         sessionsByClass.get(c.id) ?? [],
         attByStudent.get(enr.studentId) ?? new Map(),
-        { paused: enr.paused },
+        { paused: state.paused },
       );
       if (!r || !r.result.lines.length) continue;
       const d = drafts.get(enr.studentId) ?? {
