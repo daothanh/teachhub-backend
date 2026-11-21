@@ -285,4 +285,48 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
     file: 'payout-accounts.e2e-spec.ts',
     test: 'cô lập tenant: B không đọc, sửa, xóa tài khoản của A (404, dữ liệu A không đổi)',
   },
+  'POST /v1/invoices/{id}/payments': {
+    notApplicable:
+      'hợp đồng S5-FL-09, thân hàm trả 501 tới S6-BE-02; test chéo tenant/học viên làm cùng task đó',
+  },
+  'GET /v1/invoices/{id}/payments': {
+    notApplicable:
+      'hợp đồng S5-FL-09, thân hàm trả 501 tới S6-BE-02; test chéo tenant/học viên làm cùng task đó',
+  },
+  'POST /v1/payments/{id}/void': {
+    notApplicable:
+      'hợp đồng S5-FL-09, thân hàm trả 501 tới S6-BE-02; test chéo tenant/học viên làm cùng task đó',
+  },
+  'GET /v1/students/{id}/ledger': {
+    notApplicable:
+      'hợp đồng S5-FL-09, thân hàm trả 501 tới S6-BE-03; test chéo tenant/học viên làm cùng task đó',
+  },
+  'GET /v1/tenant/settings/dunning': {
+    notApplicable:
+      'hợp đồng S5-FL-09, thân hàm trả 501 tới S6-BE-04; test chéo tenant/học viên làm cùng task đó',
+  },
+  'PUT /v1/tenant/settings/dunning': {
+    notApplicable:
+      'hợp đồng S5-FL-09, thân hàm trả 501 tới S6-BE-04; test chéo tenant/học viên làm cùng task đó',
+  },
+  'GET /v1/tenant/settings/dunning/preview': {
+    notApplicable:
+      'hợp đồng S5-FL-09, thân hàm trả 501 tới S6-BE-04; test chéo tenant/học viên làm cùng task đó',
+  },
+  'PUT /v1/enrollments/{id}/dunning': {
+    notApplicable:
+      'hợp đồng S5-FL-09, thân hàm trả 501 tới S6-BE-04; test chéo tenant/học viên làm cùng task đó',
+  },
+  'GET /v1/invoices/{id}/dunning': {
+    notApplicable:
+      'hợp đồng S5-FL-09, thân hàm trả 501 tới S6-BE-04; test chéo tenant/học viên làm cùng task đó',
+  },
+  'GET /v1/receivables': {
+    notApplicable:
+      'hợp đồng S5-FL-09, thân hàm trả 501 tới S6-BE-05; test chéo tenant/học viên làm cùng task đó',
+  },
+  'GET /v1/receivables/{studentId}': {
+    notApplicable:
+      'hợp đồng S5-FL-09, thân hàm trả 501 tới S6-BE-05; test chéo tenant/học viên làm cùng task đó',
+  },
 };

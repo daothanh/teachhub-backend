@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
+  ApiBody,
   ApiCreatedResponse,
   ApiNoContentResponse,
   ApiOkResponse,
@@ -141,6 +142,8 @@ export class PayoutAccountsController {
     description:
       'Xóa tài khoản chính khi còn tài khoản khác thì tài khoản tạo sớm nhất còn lại thành chính. Xóa tài khoản cuối cùng cho phép: lần chốt kỳ sau bị chặn bằng 422 `PAYOUT_ACCOUNT_MISSING`. Xóa tài khoản chính khi còn tài khoản khác cần `otpCode` trong body (thiếu → 422). Gọi lại trên tài khoản đã xóa → 404.',
   })
+  // Body tùy chọn: không khai `required: false` thì hợp đồng bắt client gửi body, trong khi server nhận không body.
+  @ApiBody({ required: false })
   @ApiNoContentResponse()
   @ApiIdempotencyKey()
   @ApiErrors(
