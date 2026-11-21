@@ -199,9 +199,7 @@ export const invoices = pgTable(
     // Công nợ T11: chỉ quét hóa đơn còn mở của học viên.
     index('invoices_debt_idx')
       .on(t.tenantId, t.studentId)
-      .where(
-        sql`${t.status} in ('issued', 'partially_paid', 'pending_confirmation')`,
-      ),
+      .where(sql`${t.status} in ('issued', 'partially_paid', 'pending_confirmation')`),
     // Trạng thái khớp số đã thu; `pending_confirmation` (US-7.7, chưa làm) chưa thu đủ. paid_amount = Σ payments chưa hủy do constraint trigger.
     check(
       'invoices_paid_status_check',
