@@ -101,8 +101,4 @@ jobs:
           git show "origin/${{ github.base_ref }}:contracts/openapi.json" > base.json 2>/dev/null \
             || echo '{"openapi":"3.1.0","info":{"title":"","version":""},"paths":{}}' > base.json
       - name: oasdiff breaking
-        # Ngoại lệ một lần: nếu có `contracts/oasdiff-ignore.txt` thì bỏ qua đúng các dòng lỗi trong đó (xóa file ở PR kế tiếp, xem contracts/CHANGELOG.md).
-        run: |
-          ignore=()
-          [ -f contracts/oasdiff-ignore.txt ] && ignore=(--err-ignore /w/contracts/oasdiff-ignore.txt)
-          docker run --rm -v "$PWD:/w" tufin/oasdiff:v1.38.0 breaking /w/base.json /w/contracts/openapi.json --fail-on ERR "${ignore[@]}"
+        run: docker run --rm -v "$PWD:/w" tufin/oasdiff:v1.38.0 breaking /w/base.json /w/contracts/openapi.json --fail-on ERR

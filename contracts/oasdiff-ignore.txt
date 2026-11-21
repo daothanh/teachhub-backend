@@ -1,4 +1,0 @@
-GET /v1/invoices/{id} added the new `not_marked` enum value to the `lines/items/notChargedReason/anyOf[#/components/schemas/SessionNotChargedReason]` response property for the response status `200`
-POST /v1/invoices/{id}/adjustments added the new `not_marked` enum value to the `lines/items/notChargedReason/anyOf[#/components/schemas/SessionNotChargedReason]` response property for the response status `201`
-POST /v1/invoices/{id}/void added the new `not_marked` enum value to the `invoice/lines/items/notChargedReason/anyOf[#/components/schemas/SessionNotChargedReason]` response property for the response status `200`
-GET /v1/notifications added `subschema #3, subschema #4, subschema #5, subschema #6, subschema #7, subschema #8, subschema #9` to the `items/items` response property `oneOf` list for the response status `200`
