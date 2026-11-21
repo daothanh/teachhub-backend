@@ -522,12 +522,12 @@ export const voidInvoiceRequestSchema = z
       .meta({ description: 'Bắt buộc (US-7.3 AC4); ghi nhật ký kiểm toán' }),
     createReplacementDraft: z.boolean().default(false).meta({
       description:
-        'true = trong cùng giao dịch tạo một bản nháp mới thay hóa đơn này, tính lại từ điểm danh hiện tại (`replacesInvoiceId` trỏ về hóa đơn hủy). Phát hành thay thế = chốt bản nháp đó như bình thường (Plan §2.6: Sprint 5 chưa có phát hành thay thế một bước)',
+        'Chưa hỗ trợ ở MVP: gửi `true` → 422 `VALIDATION_FAILED` (hóa đơn không bị hủy). Muốn hóa đơn thay thế: hủy hóa đơn rồi tạo lại bản nháp và chốt như bình thường (Plan §2.6)',
     }),
   })
   .meta({
     id: 'VoidInvoiceRequest',
-    example: { reason: 'Sai số buổi học', createReplacementDraft: true },
+    example: { reason: 'Sai số buổi học' },
   });
 export type VoidInvoiceRequest = z.infer<typeof voidInvoiceRequestSchema>;
 
@@ -536,7 +536,7 @@ export const voidInvoiceResultSchema = z
     invoice: invoiceSchema,
     replacementInvoiceId: z.uuid().nullable().meta({
       description:
-        'Id bản nháp thay thế khi `createReplacementDraft = true`, ngược lại null',
+        'Luôn null ở MVP (chưa có hóa đơn thay thế); giữ trường để thêm sau mà không đổi hợp đồng',
     }),
   })
   .meta({ id: 'VoidInvoiceResult' });

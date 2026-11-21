@@ -16,7 +16,7 @@ export interface InvoiceIssuedPayload {
 // Crockford base32 (bỏ I, L, O, U): khớp CHECK `invoices_code_check` của migration 0024, không nhầm 0/O, 1/I khi gõ tay.
 const ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 
-/** Mã hóa đơn `TH-XXXXXX` (6 ký tự, ~1 tỷ khả năng); tính duy nhất trong tenant do tầng ứng dụng kiểm + ràng buộc CSDL. */
+/** Mã hóa đơn `TH-XXXXXX` (6 ký tự, ~1 tỷ khả năng); duy nhất trong tenant: service kiểm trùng dưới khóa advisory theo tenant, ràng buộc `invoices_tenant_code_uq` là lớp cuối. */
 export const generateInvoiceCode = (
   pick: (max: number) => number = randomInt,
 ): string =>

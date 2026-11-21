@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { drizzle } from 'drizzle-orm/node-postgres';
+import { Logger } from '@nestjs/common';
 import pg from 'pg';
 import { buildVietQrPayload } from '../libs/modules/billing/domain/vietqr.js';
 import { startTestApp, type TestApp } from './support/app.js';
@@ -333,6 +334,289 @@ describe('billing: phát hành và hủy hóa đơn', () => {
       await pool.end();
     }
     expect((await invoice(invoiceIds[0]!)).status).toBe('issued');
+  });
+
+  it('S2: hai kỳ cùng tenant phát hành song song → cả hai 200, mã không trùng', async () => {
+    const p1 = await mkPeriod(
+      A,
+      Array.from({ length: 10 }, (_, i) => 1000 + i),
+    );
+    const p2 = await mkPeriod(
+      A,
+      Array.from({ length: 10 }, (_, i) => 2000 + i),
+    );
+    const res = await Promise.all(
+      [p1, p2].map((p) =>
+        call(A, `/billing-periods/${p.periodId}/issue`, { invoiceIds: null }),
+      ),
+    );
+    expect(res.map((r) => r.statusCode)).toEqual([200, 200]);
+    const rows = await q(
+      `select code from invoices where period_id = any($1) and status = 'issued'`,
+      [[p1.periodId, p2.periodId]],
+    );
+    expect(new Set(rows.map((r) => r.code)).size).toBe(20);
+  });
+
+  it('S6: điều chỉnh song song với phát hành → 409 INVOICE_IMMUTABLE hoặc điều chỉnh vào trước; qr_payload luôn khớp total_amount cuối', async () => {
+    for (let i = 0; i < 5; i++) {
+      const { periodId, invoiceIds } = await mkPeriod(A, [500_000]);
+      const [issue, adj] = await Promise.all([
+        call(A, `/billing-periods/${periodId}/issue`, { invoiceIds: null }),
+        t.app.inject({
+          method: 'POST',
+          url: `/v1/invoices/${invoiceIds[0]}/adjustments`,
+          payload: {
+            amount: -100_000,
+            description: 'x',
+            adjustmentReason: 'y',
+          },
+          headers: {
+            authorization: `Bearer ${A.token}`,
+            'idempotency-key': randomUUID(),
+          },
+        }),
+      ]);
+      expect(issue.statusCode, issue.body).toBe(200);
+      expect([201, 409]).toContain(adj.statusCode);
+      if (adj.statusCode === 409)
+        expect(adj.json().code).toBe('INVOICE_IMMUTABLE');
+      const row = await invoice(invoiceIds[0]!);
+      expect(row.status).toBe('issued');
+      expect(Number(row.total_amount)).toBe(
+        adj.statusCode === 201 ? 400_000 : 500_000,
+      );
+      expect(row.qr_payload).toBe(
+        buildVietQrPayload({
+          bankBin: '970436',
+          accountNo: '0011223344',
+          amount: Number(row.total_amount),
+          transferNote: row.transfer_note,
+        }),
+      );
+    }
+  });
+
+  it('N2: kỳ chỉ còn nháp 0 đ → không phát hành gì, kỳ closed', async () => {
+    const { periodId, invoiceIds } = await mkPeriod(A, [0, 0]);
+    const res = await call(A, `/billing-periods/${periodId}/issue`, {
+      invoiceIds: null,
+    });
+    expect(res.json()).toMatchObject({ issuedCount: 0, totalAmount: 0 });
+    expect(res.json().skipped).toHaveLength(2);
+    expect((await invoice(invoiceIds[0]!)).status).toBe('draft');
+    expect(
+      (
+        await q(`select status from billing_periods where id = $1`, [periodId])
+      )[0].status,
+    ).toBe('closed');
+  });
+
+  describe('consumer invoice_issued: đường lỗi', () => {
+    type Job = {
+      eventId: string;
+      tenantId: string;
+      payload: Record<string, unknown>;
+    };
+    const st = { mailFail: false, pushFail: false, pushed: 0, mails: 0 };
+    let notifier: { handle: (j: unknown) => Promise<void> };
+    let pool: pg.Pool;
+
+    beforeAll(async () => {
+      const { InvoiceIssuedNotifier } =
+        await import('../libs/modules/notifications/application/invoice-issued-notifier.service.js');
+      const { AbsenceNotifier } =
+        await import('../libs/modules/notifications/application/absence-notifier.service.js');
+      const schema = await import('../libs/db/src/schema/index.js');
+      const { TxService } = await import('../libs/db/src/tx.service.js');
+      pool = new pg.Pool({ connectionString: t.db.url('teachhub_worker') });
+      const tx = new TxService(drizzle(pool, { schema, casing: 'snake_case' }));
+      notifier = new InvoiceIssuedNotifier(
+        tx,
+        new AbsenceNotifier(tx, {
+          enabled: true,
+          send: (ms: unknown[]) => {
+            if (st.pushFail)
+              return Promise.resolve(
+                ms.map(() => ({
+                  ok: false as const,
+                  error: 'unavailable',
+                  invalidToken: false,
+                })),
+              );
+            st.pushed += ms.length;
+            return Promise.resolve(
+              ms.map(() => ({ ok: true as const, messageId: 'm' })),
+            );
+          },
+        } as never),
+        {
+          send: () => {
+            if (st.mailFail) return Promise.reject(new Error('smtp down'));
+            st.mails++;
+            return Promise.resolve();
+          },
+        } as never,
+      );
+    }, 60_000);
+    afterAll(() => pool?.end());
+    beforeEach(() =>
+      Object.assign(st, {
+        mailFail: false,
+        pushFail: false,
+        pushed: 0,
+        mails: 0,
+      }),
+    );
+
+    /** Một hóa đơn đã phát hành, phụ huynh có (hoặc không có) vai trò parent. */
+    const world = async (opts: { parentRole?: boolean } = {}) => {
+      const { periodId, invoiceIds } = await mkPeriod(A, [300_000]);
+      const parent = randomUUID();
+      await q(`insert into users (id, email) values ($1, $2)`, [
+        parent,
+        `${parent}@example.com`,
+      ]);
+      await q(
+        `insert into devices (id, user_id, platform, token) values ($1, $2, 'android', $3)`,
+        [randomUUID(), parent, `tok-${parent}`],
+      );
+      if (opts.parentRole !== false)
+        await q(
+          `insert into memberships (id, user_id, role) values ($1, $2, 'parent')`,
+          [randomUUID(), parent],
+        );
+      await q(
+        `insert into guardians (id, tenant_id, student_id, full_name, email, user_id) values ($1, $2, $3, 'PH', 'ph@example.com', $4)`,
+        [
+          randomUUID(),
+          A.tenantId,
+          (await invoice(invoiceIds[0]!)).student_id,
+          parent,
+        ],
+      );
+      await call(A, `/billing-periods/${periodId}/issue`, { invoiceIds: null });
+      const ev = (
+        await q(
+          `select id, tenant_id, payload from outbox_events where payload->>'invoiceId' = $1`,
+          [invoiceIds[0]],
+        )
+      )[0];
+      const job: Job = {
+        eventId: ev.id,
+        tenantId: ev.tenant_id,
+        payload: ev.payload,
+      };
+      const delivery = async (channel: string) =>
+        (
+          await q(
+            `select d.status from notification_deliveries d join notifications n on n.id = d.notification_id
+           where n.recipient_user_id = $1 and d.channel = $2`,
+            [parent, channel],
+          )
+        )[0];
+      return { job, parent, delivery };
+    };
+
+    it('M2: mailer ném lỗi → handle ném (retry được); gọi lại gửi đúng 1 email, push không gửi lại', async () => {
+      const w = await world();
+      st.mailFail = true;
+      await expect(notifier.handle(w.job)).rejects.toThrow();
+      expect((await w.delivery('email')).status).toBe('failed');
+      st.mailFail = false;
+      await notifier.handle(w.job);
+      await notifier.handle(w.job);
+      expect(st.mails).toBe(1);
+      expect(st.pushed).toBe(1);
+      expect((await w.delivery('email')).status).toBe('sent');
+    });
+
+    it('M2: push lỗi tạm nhưng email đã sent → gọi lại không gửi email lần hai', async () => {
+      const w = await world();
+      st.pushFail = true;
+      await expect(notifier.handle(w.job)).rejects.toThrow();
+      expect(st.mails).toBe(1);
+      st.pushFail = false;
+      await notifier.handle(w.job);
+      expect(st.mails).toBe(1);
+      expect(st.pushed).toBe(1);
+    });
+
+    it('M1: dòng email queued bỏ dở quá 2 phút được nhận lại và gửi đúng 1 lần; queued còn mới thì không đụng', async () => {
+      const w = await world();
+      st.mailFail = true;
+      await expect(notifier.handle(w.job)).rejects.toThrow();
+      st.mailFail = false;
+      const setQueued = (age: string) =>
+        q(
+          `update notification_deliveries set status = 'queued', created_at = now() - $2::interval
+           where channel = 'email' and notification_id in (select id from notifications where recipient_user_id = $1)`,
+          [w.parent, age],
+        );
+      await setQueued('10 seconds');
+      await notifier.handle(w.job);
+      expect(st.mails).toBe(0);
+      await setQueued('5 minutes');
+      await notifier.handle(w.job);
+      await notifier.handle(w.job);
+      expect(st.mails).toBe(1);
+      expect((await w.delivery('email')).status).toBe('sent');
+    });
+
+    it('M2/S4: phụ huynh có user_id nhưng không có vai trò parent → không thông báo, không email, có log warn không kèm PII', async () => {
+      const w = await world({ parentRole: false });
+      const warn = vi
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined);
+      await notifier.handle(w.job);
+      const msgs = warn.mock.calls.map((c) => String(c[0]));
+      warn.mockRestore();
+      expect(
+        msgs.some((m) => /1 phụ huynh chưa có vai trò parent/.test(m)),
+      ).toBe(true);
+      expect(msgs.join()).not.toMatch(/ph@example\.com|HS /);
+      expect(
+        await q(`select 1 from notifications where recipient_user_id = $1`, [
+          w.parent,
+        ]),
+      ).toHaveLength(0);
+      expect(st.mails + st.pushed).toBe(0);
+    });
+
+    it('M2: hai worker cùng event song song → mỗi kênh đúng 1 lần', async () => {
+      const w = await world();
+      await Promise.allSettled([
+        notifier.handle(w.job),
+        notifier.handle(w.job),
+      ]);
+      await notifier.handle(w.job).catch(() => undefined);
+      expect(st.pushed).toBe(1);
+      expect(st.mails).toBe(1);
+      expect(
+        await q(`select 1 from notifications where recipient_user_id = $1`, [
+          w.parent,
+        ]),
+      ).toHaveLength(1);
+    });
+
+    it('M2: event totalAmount = 0 → job lỗi, không thông báo, không gửi', async () => {
+      const w = await world();
+      await q(`delete from notifications where recipient_user_id = $1`, [
+        w.parent,
+      ]);
+      await expect(
+        notifier.handle({
+          ...w.job,
+          payload: { ...w.job.payload, totalAmount: 0 },
+        }),
+      ).rejects.toThrow();
+      expect(
+        await q(`select 1 from notifications where recipient_user_id = $1`, [
+          w.parent,
+        ]),
+      ).toHaveLength(0);
+      expect(st.mails + st.pushed).toBe(0);
+    });
   });
 
   describe('void', () => {

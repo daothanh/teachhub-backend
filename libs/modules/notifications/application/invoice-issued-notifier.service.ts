@@ -24,6 +24,9 @@ export const invoiceIssuedJobSchema = z.object({
   }),
 });
 
+/** Dòng `queued` bỏ dở lâu hơn mức này coi như worker trước đã chết, được nhận lại (như push ở `AbsenceNotifier`). */
+const STALE_CLAIM_MS = 2 * 60_000;
+
 interface Recipient extends Pending {
   email: string | null;
 }
@@ -90,8 +93,12 @@ export class InvoiceIssuedNotifier {
         dueDate: payload.dueDate,
       };
       const out: Recipient[] = [];
+      let skippedNoRole = 0;
       for (const g of guardians) {
-        if (!g.membership_id) continue;
+        if (!g.membership_id) {
+          skippedNoRole++;
+          continue;
+        }
         const row = (
           await tx.execute<{ id: string }>(sql`
             insert into notifications (id, tenant_id, recipient_user_id, membership_id, type, urgency, payload, dedupe_key, event_at)
@@ -109,6 +116,10 @@ export class InvoiceIssuedNotifier {
             email: g.email,
           });
       }
+      if (skippedNoRole)
+        this.log.warn(
+          `${skippedNoRole} phụ huynh chưa có vai trò parent, bỏ qua (event ${eventId})`,
+        );
       return out;
     });
 
@@ -140,7 +151,9 @@ export class InvoiceIssuedNotifier {
       if (ins.rows.length) return true;
       const re = await tx.execute(sql`
         update notification_deliveries set status = 'queued', error = null, created_at = now()
-        where notification_id = ${notificationId} and channel = 'email' and status = 'failed' returning id`);
+        where notification_id = ${notificationId} and channel = 'email'
+          and (status = 'failed' or (status = 'queued' and created_at < now() - ${STALE_CLAIM_MS} * interval '1 millisecond'))
+        returning id`);
       return re.rows.length > 0;
     });
     if (!claimed) return true;

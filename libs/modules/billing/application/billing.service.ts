@@ -11,8 +11,8 @@ import {
   billingPeriods,
   invoiceLines,
   invoices,
+  outboxEvents,
   payoutAccounts,
-  recordOutboxEvent,
   students,
   tenants,
   type Tx,
@@ -240,8 +240,7 @@ export class BillingService {
    * (cùng thứ tự với trigger `invoice_lines_guard`, comment 0024) nên hai request song song cùng kỳ nối đuôi nhau: request sau
    * đọc lại trạng thái đã commit, không phát hành trùng. Hóa đơn 0 đ giữ nguyên bản nháp, không phát sinh outbox (US-1.3 AC3).
    * shortcut: `payout.bankName` luôn null vì chưa có bảng BIN NAPAS; thêm bảng tra khi có nguồn dữ liệu.
-   * shortcut: mã hóa đơn trùng giữa hai kỳ phát hành song song (cùng tenant, khác kỳ) chỉ bị ràng buộc `invoices_tenant_code_uq`
-   * chặn → 500, xác suất ~1e-9 mỗi cặp; bắt 23505 và thử lại khi có số liệu thực tế.
+   * Khóa advisory theo tenant (lấy đầu giao dịch, trước khóa kỳ) tuần tự hóa cấp mã nên không trùng mã giữa các kỳ song song.
    */
   async issue(
     tx: Tx,
@@ -250,6 +249,8 @@ export class BillingService {
     body: IssueInvoicesRequest,
   ): Promise<IssueInvoicesResult> {
     const { tenantId } = actor;
+    // Tuần tự hóa phát hành trong tenant: cấp mã không trùng giữa các kỳ chạy song song. Luôn lấy trước khóa kỳ.
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${tenantId}))`);
     const [period] = await tx
       .select()
       .from(billingPeriods)
@@ -330,6 +331,8 @@ export class BillingService {
       accountName: account.accountName,
     };
     const issued: IssueInvoicesResult['invoices'] = [];
+    const events: (typeof outboxEvents.$inferInsert)[] = [];
+    const audits: { id: string; before: object; after: object }[] = [];
     for (const [i, inv] of todo.entries()) {
       const code = codes[i]!;
       const transferNote = transferNoteOf(code);
@@ -350,25 +353,22 @@ export class BillingService {
           issuedAt: new Date(),
         })
         .where(and(eq(invoices.tenantId, tenantId), eq(invoices.id, inv.id)));
-      const event: InvoiceIssuedPayload = {
-        invoiceId: inv.id,
-        studentId: inv.studentId,
-        periodMonth: period.periodMonth,
-        totalAmount: inv.totalAmount,
-        dueDate: period.dueDate,
-      };
-      await recordOutboxEvent(tx, {
+      events.push({
+        id: uuidv7(),
         tenantId,
         type: INVOICE_ISSUED,
-        payload: { ...event },
+        payload: {
+          invoiceId: inv.id,
+          studentId: inv.studentId,
+          periodMonth: period.periodMonth,
+          totalAmount: inv.totalAmount,
+          dueDate: period.dueDate,
+        } satisfies InvoiceIssuedPayload,
       });
-      // Không đưa số tài khoản vào audit_logs.
-      await writeAudit(tx, {
-        tenantId,
-        entity: 'invoice',
-        entityId: inv.id,
-        action: 'update',
+      audits.push({
+        id: inv.id,
         before: { status: 'draft', totalAmount: inv.totalAmount },
+        // Không đưa số tài khoản vào audit_logs.
         after: { status: 'issued', code, totalAmount: inv.totalAmount },
       });
       issued.push({
@@ -381,6 +381,20 @@ export class BillingService {
         transferNote,
         qrPayload,
       });
+    }
+
+    if (events.length) {
+      await tx.insert(outboxEvents).values(events);
+      await tx.execute(
+        sql`select app_private.audit_insert(${tenantId}::uuid, 'invoice', v.id::uuid, 'update', v.b::jsonb, v.a::jsonb)
+          from (values ${sql.join(
+            audits.map(
+              (a) =>
+                sql`(${a.id}, ${JSON.stringify(a.before)}, ${JSON.stringify(a.after)})`,
+            ),
+            sql`, `,
+          )}) as v(id, b, a)`,
+      );
     }
 
     // Kỳ đóng khi không còn bản nháp nào có tiền để phát hành (bản nháp 0 đ không chặn).

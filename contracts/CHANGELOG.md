@@ -14,6 +14,8 @@ Thân hàm trả 501 `NOT_IMPLEMENTED` tới khi làm task backend tương ứng
 | `POST /v1/billing-periods/{id}/issue`, `POST /v1/invoices/{id}/void` | S5-BE-07 |
 | `GET /v1/family/invoices`, `GET /v1/family/invoices/{id}` (chi tiết cho phụ huynh, bổ sung ngoài Spec §5.4) | S5-BE-08 |
 
+Làm rõ hợp đồng (S5-BE-07, chỉ đổi mô tả/example, không đổi kiểu): `POST /invoices/{id}/void` chưa hỗ trợ hóa đơn thay thế ở MVP. `createReplacementDraft = true` → 422 `VALIDATION_FAILED` (không hủy), `replacementInvoiceId` luôn null; hóa đơn thay thế = hủy rồi tạo lại bản nháp và chốt.
+
 Thay đổi trên endpoint cũ (chỉ thêm trường, `oasdiff breaking` sạch):
 
 - `PATCH /classes/{id}` nhận thêm `feeType`, `feeAmount`, `feeRules`. `Class` thêm ba trường cùng tên (null với lớp chưa có học phí). `POST /classes` chưa nhận học phí: tạo lớp rồi `PATCH`.
