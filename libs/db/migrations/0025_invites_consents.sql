@@ -97,15 +97,7 @@ create trigger trg_consents_no_truncate before truncate on consents
 --> statement-breakpoint
 
 -- ===== Hàm security definer =====
--- Học viên mà user hiện tại là phụ huynh đã kích hoạt và chưa bị gỡ liên kết (Spec §4.5). Gỡ phụ huynh khỏi
--- `guardians` (deleted_at) làm mất quyền ngay, không chờ cache.
-create or replace function app_private.linked_student_ids() returns setof uuid
-language sql stable security definer set search_path = '' as $$
-  select g.student_id from public.guardians g
-   where g.user_id = nullif(current_setting('app.user_id', true), '')::uuid
-     and g.deleted_at is null;
-$$;
---> statement-breakpoint
+-- app_private.linked_student_ids() đã có từ 0024 (cùng ngữ nghĩa), không định nghĩa lại ở đây.
 
 -- Xem trước lời mời (công khai, không cần user): chỉ tên giáo viên, tên gọi của trẻ (từ cuối của họ tên), hạn.
 -- Token sai/hết hạn/đã dùng/thu hồi/phụ huynh đã bị gỡ đều cho 0 dòng.
@@ -168,7 +160,7 @@ begin
 
   update public.invites i
      set status = 'used', used_at = now(), used_by = uid,
-         accepted_by_name = (select coalesce(u.display_name, split_part(u.email, '@', 1), 'Phụ huynh')
+         accepted_by_name = (select coalesce(u.display_name, 'Phụ huynh')
                                from public.users u where u.id = uid)
    where case when p_by_code then i.short_code_hash = p_hash and i.short_code_expires_at > now()
               else i.token_hash = p_hash end
@@ -254,6 +246,7 @@ language sql stable security definer set search_path = '' as $$
 $$;
 --> statement-breakpoint
 
+-- Chủ ý thu quyền của teachhub_readonly (báo cáo/BI không được gọi hàm xem dữ liệu con em hay nhận lời mời) và worker.
 revoke execute on function
   app_private.preview_invite(text),
   app_private.redeem_invite(boolean, text, uuid),
