@@ -14,11 +14,19 @@ describe('family invoice cursor', () => {
     expect(decodeInvoiceCursor(undefined)).toBeNull();
   });
 
+  it('cursor dài tối đa 200 ký tự (giới hạn của schema) vẫn bị từ chối', () => {
+    expect(() =>
+      decodeInvoiceCursor(raw(`${AT}|${ID}`.padEnd(150, 'x'))),
+    ).toThrow();
+    expect(() => decodeInvoiceCursor('A'.repeat(200))).toThrow();
+  });
+
   it.each([
     ['rác', 'zzz'],
     ['thiếu id', raw(AT)],
     ['thừa phần', raw(`${AT}|${ID}|x`)],
     ['giờ không đủ µs', raw(`2027-01-02T02:00:00Z|${ID}`)],
+    ['thừa `|` cuối', raw(`${AT}|${ID}|`)],
     ['id sai', raw(`${AT}|not-a-uuid`)],
     ['ngày không có thật', raw(`2027-13-45T02:00:00.123456Z|${ID}`)],
   ])('%s → 422', (_n, c) => {

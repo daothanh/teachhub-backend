@@ -15,6 +15,20 @@ import type {
   FamilyInvoicesQuery,
 } from '../http/billing.schemas.js';
 
+const uuidList = (ids: string[]) =>
+  sql.join(
+    ids.map((i) => sql`${i}::uuid`),
+    sql`, `,
+  );
+
+// Allowlist tường minh: trường thêm vào snapshot sau này không tự lộ cho phụ huynh.
+const pickPayout = (p: NonNullable<FamilyInvoice['payout']>) => ({
+  bankBin: p.bankBin,
+  bankName: p.bankName,
+  accountNo: p.accountNo,
+  accountName: p.accountName,
+});
+
 type Child = { name: string; teacher: string };
 type Row = {
   id: string;
@@ -76,7 +90,7 @@ export class FamilyInvoicesService {
         await t.execute<Row>(sql`
           select ${COLS}
             from invoices i join billing_periods p on p.tenant_id = i.tenant_id and p.id = i.period_id
-           where i.status <> 'draft' and i.student_id = any(${`{${ids.join(',')}}`}::uuid[])
+           where i.status <> 'draft' and i.student_id in (${uuidList(ids)})
              ${q.status ? sql`and i.status = ${q.status}` : sql``}
              ${after ? sql`and (i.issued_at, i.id) < (${after[0]}::timestamptz, ${after[1]}::uuid)` : sql``}
            order by i.issued_at desc, i.id desc
@@ -99,11 +113,12 @@ export class FamilyInvoicesService {
     await this.consents.assertAccepted(userId, 'parent');
     return this.tx.run({ userId }, async (t) => {
       const children = await this.children(t);
+      if (!children.size) throw new AppException('NOT_FOUND');
       const [r] = (
         await t.execute<Row>(sql`
           select ${COLS}
             from invoices i join billing_periods p on p.tenant_id = i.tenant_id and p.id = i.period_id
-           where i.id = ${id}::uuid and i.status <> 'draft' and i.student_id = any(${`{${[...children.keys()].join(',')}}`}::uuid[])`)
+           where i.id = ${id}::uuid and i.status <> 'draft' and i.student_id in (${uuidList([...children.keys()])})`)
       ).rows;
       // Của con khác, tenant khác, nháp, con đã gỡ hay không tồn tại → cùng 404.
       if (!r) throw new AppException('NOT_FOUND');
@@ -132,7 +147,7 @@ export class FamilyInvoicesService {
         })),
         transferNote: r.transfer_note,
         qrPayload: void_ ? null : r.qr_payload,
-        payout: void_ ? null : r.payout,
+        payout: void_ || !r.payout ? null : pickPayout(r.payout),
         voidedAt: r.voided_at
           ? formatInZone(new Date(r.voided_at), zone)
           : null,

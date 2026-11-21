@@ -106,7 +106,7 @@ describe('family: hóa đơn của con', () => {
       const code = `TH-${String(100000 + seq)}`;
       await q(
         `update invoices set status = 'issued', code = $2, transfer_note = $3, qr_payload = $4,
-           payout = '{"bankBin":"970436","bankName":"Vietcombank","accountNo":"0011001234567","accountName":"NGUYEN VAN A"}'::jsonb,
+           payout = '{"bankBin":"970436","bankName":"Vietcombank","accountNo":"0011001234567","accountName":"NGUYEN VAN A","internalToken":"SECRET-X"}'::jsonb,
            issued_at = coalesce($5::timestamptz, now()) where id = $1`,
         [
           id,
@@ -261,6 +261,16 @@ describe('family: hóa đơn của con', () => {
     expect(
       (await call(p.token, 'GET', '/family/invoices?cursor=xyz')).statusCode,
     ).toBe(422);
+    const at = '2032-01-01T00:00:00.000000Z';
+    const bad = [
+      'A'.repeat(201),
+      Buffer.from(`${at}|${randomUUID()}|`).toString('base64url'),
+    ];
+    for (const c of bad) {
+      expect(
+        (await call(p.token, 'GET', `/family/invoices?cursor=${c}`)).statusCode,
+      ).toBe(422);
+    }
   });
 
   it('hóa đơn đã hủy: vẫn xem được với status void, không QR, không tài khoản nhận, không lý do hủy', async () => {
@@ -289,6 +299,14 @@ describe('family: hóa đơn của con', () => {
     const det = await call(p.token, 'GET', `/family/invoices/${id}`);
     const list = await call(p.token, 'GET', '/family/invoices');
     const all = det.body + list.body;
+    const extra = await call(p.token, 'GET', `/family/invoices/${id}`);
+    expect(extra.json().payout).toEqual({
+      bankBin: '970436',
+      bankName: 'Vietcombank',
+      accountNo: '0011001234567',
+      accountName: 'NGUYEN VAN A',
+    });
+    expect(extra.body).not.toMatch(/SECRET-X|internalToken/);
     expect(all).not.toMatch(
       /LÝ DO NỘI BỘ|adjustmentReason|clampedAmount|ghi chú riêng|0912345678|replac|tenantId|createdAt/,
     );
