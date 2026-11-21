@@ -1,4 +1,4 @@
-import { Body, Controller, Param, Put } from '@nestjs/common';
+import { Body, Controller, Param, Put, Req, Res } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOkResponse,
@@ -6,9 +6,17 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { ApiErrors, ApiIdempotencyKey, AppException } from '@teachhub/core';
+import {
+  ApiErrors,
+  ApiIdempotencyKey,
+  Ctx,
+  type RequestContext,
+} from '@teachhub/core';
+import { Idempotency } from '@teachhub/infra';
 import { RequiresRole } from '@teachhub/modules/identity';
+import { EnrollmentsService } from '../application/enrollments.service.js';
 import {
   type FeeOverrideResult,
   feeOverrideResultSchema,
@@ -18,13 +26,18 @@ import {
 
 const idParam = z.uuid();
 
-// Hợp đồng Sprint 5 (S4-FL-10); thân hàm ở S5-BE-02.
+// Hợp đồng Sprint 5 (S4-FL-10); S5-BE-02.
 @ApiTags('classes')
 @ApiBearerAuth('bearer')
 @RequiresRole('tenant_owner')
 @ApiErrors('UNAUTHENTICATED', 'TOKEN_EXPIRED', 'FORBIDDEN')
 @Controller('enrollments')
 export class EnrollmentFeesController {
+  constructor(
+    private readonly idem: Idempotency,
+    private readonly enrollments: EnrollmentsService,
+  ) {}
+
   @Put(':id/fee-override')
   @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @ApiOperation({
@@ -40,9 +53,20 @@ export class EnrollmentFeesController {
   @ApiIdempotencyKey()
   @ApiErrors('VALIDATION_FAILED', 'NOT_FOUND', 'CONFLICT_STALE', 'RATE_LIMITED')
   put(
-    @Param('id', { schema: idParam }) _enrollmentId: string,
-    @Body({ schema: putFeeOverrideRequestSchema }) _body: PutFeeOverrideRequest,
-  ): FeeOverrideResult {
-    throw new AppException('NOT_IMPLEMENTED');
+    @Ctx() ctx: RequestContext,
+    @Req() req: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @Param('id', { schema: idParam }) enrollmentId: string,
+    @Body({ schema: putFeeOverrideRequestSchema }) body: PutFeeOverrideRequest,
+  ): Promise<FeeOverrideResult> {
+    return this.idem.run(req, reply, ctx, async (t) => ({
+      status: 200,
+      body: await this.enrollments.putFeeOverride(
+        t,
+        ctx.tenantId!,
+        enrollmentId,
+        body,
+      ),
+    }));
   }
 }
