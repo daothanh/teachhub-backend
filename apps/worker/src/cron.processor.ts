@@ -5,6 +5,7 @@ import {
   JOB_PURGE_IDEMPOTENCY,
   PurgeIdempotencyKeysJob,
 } from '@teachhub/infra';
+import { BillingCloseJob, JOB_BILLING_CLOSE } from '@teachhub/modules/billing';
 import {
   JOB_PURGE_STALE_DEVICES,
   PurgeStaleDevicesJob,
@@ -27,6 +28,7 @@ export class CronProcessor
   constructor(
     @InjectQueue(CRON_QUEUE) private readonly queue: Queue,
     private readonly generate: GenerateSessionsJob,
+    private readonly billingClose: BillingCloseJob,
     private readonly purge: PurgeIdempotencyKeysJob,
     private readonly purgeDevices: PurgeStaleDevicesJob,
   ) {
@@ -47,6 +49,11 @@ export class CronProcessor
       { name: JOB_GENERATE_SESSIONS, opts },
     );
     await this.queue.upsertJobScheduler(
+      JOB_BILLING_CLOSE,
+      { pattern: '0 2 * * *', tz: TZ },
+      { name: JOB_BILLING_CLOSE, opts },
+    );
+    await this.queue.upsertJobScheduler(
       JOB_PURGE_IDEMPOTENCY,
       { pattern: '30 1 * * *', tz: TZ },
       { name: JOB_PURGE_IDEMPOTENCY, opts },
@@ -62,6 +69,8 @@ export class CronProcessor
     switch (job.name) {
       case JOB_GENERATE_SESSIONS:
         return this.generate.run();
+      case JOB_BILLING_CLOSE:
+        return this.billingClose.run();
       case JOB_PURGE_IDEMPOTENCY:
         return this.purge.run();
       case JOB_PURGE_STALE_DEVICES:

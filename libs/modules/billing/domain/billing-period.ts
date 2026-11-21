@@ -1,0 +1,285 @@
+// Hàm thuần dựng kỳ thu và đầu vào cho InvoiceCalculator (S5-BE-05, US-7.1, US-7.2). Không phụ thuộc Nest/Drizzle.
+// Ngày là chuỗi 'YYYY-MM-DD' (so sánh theo chữ); tiền là số nguyên đồng.
+import {
+  type AttendanceStatus,
+  calculateInvoice,
+  DEFAULT_FEE_RULES,
+  type Discount,
+  type FeeOverride,
+  type FeeRules,
+  type FeeType,
+  type InvoiceResult,
+  type SessionInput,
+} from './invoice-calculator.js';
+
+/** Hạn thanh toán mặc định: 10 ngày sau ngày chốt (khớp ví dụ hợp đồng 2026-12-31 → 2027-01-10). */
+export const DEFAULT_DUE_DAYS = 10;
+const MAX_CLOSE_DAY = 28;
+const MAX_DUE_DAYS = 90;
+
+const DAY = 86_400_000;
+const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+
+export function addDays(date: string, days: number): string {
+  return isoDay(Date.parse(`${date}T00:00:00Z`) + days * DAY);
+}
+
+/** Ngày 1 của tháng chứa `date`. */
+export const monthStart = (date: string) => `${date.slice(0, 7)}-01`;
+
+/** Ngày cuối của tháng chứa `date`. */
+export function monthEnd(date: string): string {
+  const [y, m] = date.split('-').map(Number) as [number, number];
+  return isoDay(Date.UTC(y, m, 0));
+}
+
+/** Số tháng từ tháng của `from` đến tháng của `to` (0 = cùng tháng). */
+export function monthsBetween(from: string, to: string): number {
+  const f = from.split('-').map(Number) as [number, number];
+  const t = to.split('-').map(Number) as [number, number];
+  return (t[0] - f[0]) * 12 + (t[1] - f[1]);
+}
+
+export interface BillingSettings {
+  /** 1..28; null = ngày cuối tháng. */
+  closeDay: number | null;
+  dueDays: number;
+}
+
+/**
+ * Cấu hình ngày chốt và hạn thanh toán trong `tenants.settings` (`billingCloseDay`, `billingDueDays`).
+ * Giá trị thiếu hoặc sai kiểu/ngoài khoảng thì dùng mặc định (ngày cuối tháng, 10 ngày).
+ */
+export function parseBillingSettings(settings: unknown): BillingSettings {
+  const s = (
+    settings && typeof settings === 'object' ? settings : {}
+  ) as Record<string, unknown>;
+  const day = s.billingCloseDay;
+  const due = s.billingDueDays;
+  return {
+    closeDay:
+      Number.isInteger(day) &&
+      (day as number) >= 1 &&
+      (day as number) <= MAX_CLOSE_DAY
+        ? (day as number)
+        : null,
+    dueDays:
+      Number.isInteger(due) &&
+      (due as number) >= 0 &&
+      (due as number) <= MAX_DUE_DAYS
+        ? (due as number)
+        : DEFAULT_DUE_DAYS,
+  };
+}
+
+export interface PeriodDates {
+  /** Ngày 1 của tháng thu. */
+  periodMonth: string;
+  periodEnd: string;
+  closeDate: string;
+  dueDate: string;
+}
+
+/** Kỳ thu là tháng dương lịch chứa `today`; chỉ trả về khi `today` đúng là ngày chốt của tháng đó. */
+export function periodClosingOn(
+  today: string,
+  settings: BillingSettings,
+): PeriodDates | null {
+  const periodMonth = monthStart(today);
+  const periodEnd = monthEnd(today);
+  const closeDate = settings.closeDay
+    ? `${today.slice(0, 7)}-${String(settings.closeDay).padStart(2, '0')}`
+    : periodEnd;
+  if (today !== closeDate) return null;
+  return {
+    periodMonth,
+    periodEnd,
+    closeDate,
+    dueDate: addDays(closeDate, settings.dueDays),
+  };
+}
+
+// ---- Cấu hình học phí đọc từ jsonb ----
+
+const bool = (v: unknown) => (typeof v === 'boolean' ? v : undefined);
+const posInt = (v: unknown) =>
+  Number.isInteger(v) && (v as number) >= 1 ? (v as number) : undefined;
+
+/** `classes.fee_rules`: chỉ nhận đúng kiểu từng trường, trường khác bị bỏ. */
+export function parseFeeRules(raw: unknown): Partial<FeeRules> {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<
+    string,
+    unknown
+  >;
+  return stripUndefined({
+    chargeExcused: bool(r.chargeExcused),
+    chargeUnexcused: bool(r.chargeUnexcused),
+    deductCancelled: bool(r.deductCancelled),
+    installments: posInt(r.installments),
+  });
+}
+
+/** `enrollments.fee_override` (dạng FeeOverride của classes.schemas) → FeeOverride + miễn giảm của calculator. */
+export function parseFeeOverride(raw: unknown): {
+  override: FeeOverride;
+  discounts: Discount[];
+} {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<
+    string,
+    unknown
+  >;
+  const discounts: Discount[] = [];
+  if (Array.isArray(r.discounts)) {
+    for (const d of r.discounts as Record<string, unknown>[]) {
+      const description =
+        typeof d?.description === 'string' ? d.description : '';
+      if (d?.kind === 'percent' && posInt(d.percent))
+        discounts.push({
+          kind: 'percent',
+          value: d.percent as number,
+          description,
+        });
+      else if (d?.kind === 'amount' && posInt(d.amount))
+        discounts.push({
+          kind: 'amount',
+          value: d.amount as number,
+          description,
+        });
+    }
+  }
+  return {
+    override: stripUndefined({
+      feeAmount: posInt(r.feeAmount),
+      ...parseFeeRules(r),
+    }),
+    discounts,
+  };
+}
+
+function stripUndefined<T extends object>(o: T): T {
+  return Object.fromEntries(
+    Object.entries(o).filter(([, v]) => v !== undefined),
+  ) as T;
+}
+
+/** Điểm danh của hệ thống có `late` (đi muộn vẫn có mặt) mà calculator không có. */
+export function toCalcAttendance(
+  status: string | undefined,
+): AttendanceStatus | null {
+  if (status === 'present' || status === 'late') return 'present';
+  if (status === 'excused' || status === 'unexcused') return status;
+  return null;
+}
+
+// ---- Tính hóa đơn của một ghi danh ----
+
+export interface ClassFee {
+  className: string;
+  feeType: FeeType;
+  feeAmount: number;
+  feeRules: unknown;
+}
+
+export interface EnrollmentFee {
+  studentId: string;
+  joinedOn: string;
+  leftOn: string | null;
+  feeOverride: unknown;
+}
+
+/** Buổi của lớp (mọi ngày, mọi trạng thái); hàm tự lọc theo kỳ. */
+export interface ClassSession {
+  id: string;
+  date: string;
+  status: 'planned' | 'taught' | 'cancelled';
+  isMakeup: boolean;
+  makeupOf: string | null;
+}
+
+export interface EnrollmentInvoice {
+  result: InvoiceResult;
+  /** Chỉ có với lớp trọn khóa. */
+  installmentNo?: number;
+  installmentCount?: number;
+}
+
+/**
+ * Tính phần hóa đơn của một ghi danh trong kỳ bằng `calculateInvoice`; null = ghi danh này không sinh dòng tiền
+ * (trọn khóa đã hết đợt, hoặc lớp trọn khóa chưa có buổi nào để chia).
+ * shortcut: trọn khóa lấy tổng buổi = số buổi chưa hủy hiện có của lớp (chưa có cột tổng buổi khóa); đợt n = kỳ thứ n
+ * kể từ tháng học viên vào lớp. Nâng cấp khi có cấu hình tổng buổi của khóa.
+ */
+export function computeEnrollmentInvoice(
+  cls: ClassFee,
+  enr: EnrollmentFee,
+  period: Pick<PeriodDates, 'periodMonth' | 'periodEnd'>,
+  sessions: ClassSession[],
+  attendance: ReadonlyMap<string, string>,
+): EnrollmentInvoice | null {
+  const { override, discounts } = parseFeeOverride(enr.feeOverride);
+  const classRules = parseFeeRules(cls.feeRules);
+  const rules = {
+    ...DEFAULT_FEE_RULES,
+    ...classRules,
+    ...stripUndefined(override),
+  };
+  const inPeriod = sessions.filter(
+    (s) => s.date >= period.periodMonth && s.date <= period.periodEnd,
+  );
+  const madeUp = new Set(
+    sessions.flatMap((s) =>
+      s.isMakeup && s.status !== 'cancelled' && s.makeupOf ? [s.makeupOf] : [],
+    ),
+  );
+  const calcSessions: SessionInput[] = inPeriod
+    .filter((s) => s.status !== 'planned')
+    .sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id))
+    .map((s) => ({
+      id: s.id,
+      date: s.date,
+      status: s.status as 'taught' | 'cancelled',
+      isMakeup: s.isMakeup,
+      madeUp: madeUp.has(s.id),
+      attendance: toCalcAttendance(attendance.get(s.id)),
+    }));
+
+  const input = {
+    feeType: cls.feeType,
+    feeAmount: cls.feeAmount,
+    classRules,
+    override,
+    periodStart: period.periodMonth,
+    periodEnd: period.periodEnd,
+    joinedOn: enr.joinedOn,
+    leftOn: enr.leftOn,
+    sessions: calcSessions,
+    discounts,
+  };
+
+  if (cls.feeType === 'monthly') {
+    const planned = inPeriod.filter((s) => !s.isMakeup).length;
+    return {
+      result: calculateInvoice({
+        ...input,
+        plannedSessions: Math.max(1, planned),
+      }),
+    };
+  }
+  if (cls.feeType === 'course') {
+    const live = sessions.filter((s) => s.status !== 'cancelled');
+    if (live.length < 1) return null;
+    const installmentNo = monthsBetween(enr.joinedOn, period.periodMonth) + 1;
+    if (installmentNo < 1 || installmentNo > rules.installments) return null;
+    return {
+      result: calculateInvoice({
+        ...input,
+        totalSessions: live.length,
+        remainingSessions: live.filter((s) => s.date >= enr.joinedOn).length,
+        installmentNo,
+      }),
+      installmentNo,
+      installmentCount: rules.installments,
+    };
+  }
+  return { result: calculateInvoice(input) };
+}
