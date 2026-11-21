@@ -112,6 +112,8 @@ export const invoices = pgTable(
     clampedAmount: bigint({ mode: 'number' }).notNull().default(0),
     /** Σ thanh toán chưa hủy (S6-BE-02), cập nhật cùng giao dịch ghi/hủy thanh toán dưới `FOR UPDATE`; có thể > total_amount khi trả thừa. */
     paidAmount: bigint({ mode: 'number' }).notNull().default(0),
+    /** Phần còn nợ đã chuyển sang hóa đơn kỳ sau (S6-BE-03) = Σ(debit − credit) `unpaid_carried` của hóa đơn trong sổ (constraint trigger); không còn tính vào công nợ ở đây. */
+    carriedAmount: bigint({ mode: 'number' }).notNull().default(0),
     installmentNo: integer(),
     installmentCount: integer(),
     transferNote: text(),
@@ -185,6 +187,10 @@ export const invoices = pgTable(
     check(
       'invoices_paid_amount_check',
       sql`${t.paidAmount} >= 0 and ${t.paidAmount} <= ${sql.raw(MAX_VND)}`,
+    ),
+    check(
+      'invoices_carried_amount_check',
+      sql`${t.carriedAmount} >= 0 and ${t.carriedAmount} <= ${t.totalAmount}`,
     ),
     // Trạng thái khớp số đã thu; `pending_confirmation` (US-7.7, chưa làm) chưa thu đủ. paid_amount = Σ payments chưa hủy do constraint trigger.
     check(
