@@ -65,6 +65,7 @@ describe('payments: ghi và hủy thanh toán', () => {
     total = 1_200_000,
     status: 'draft' | 'issued' | 'void' = 'issued',
     studentId?: string,
+    issuedAt = '2026-01-01T00:00:00Z',
   ) => {
     seq++;
     const stu = studentId ?? randomUUID();
@@ -92,8 +93,8 @@ describe('payments: ghi và hủy thanh toán', () => {
       const code = generateInvoiceCode();
       await q(
         `update invoices set status = 'issued', code = $2, transfer_note = $3, qr_payload = '000201',
-           payout = '{"bankBin":"970436","accountNo":"0011001234567","accountName":"NGUYEN VAN A"}'::jsonb, issued_at = now() where id = $1`,
-        [id, code, code.replace('-', ' ')],
+           payout = '{"bankBin":"970436","accountNo":"0011001234567","accountName":"NGUYEN VAN A"}'::jsonb, issued_at = $4::timestamptz where id = $1`,
+        [id, code, code.replace('-', ' '), issuedAt],
       );
     }
     if (status === 'void')
@@ -527,21 +528,35 @@ describe('payments: ghi và hủy thanh toán', () => {
       ).toBe(404);
     });
 
-    it('người ghi đã xóa tài khoản → recordedBy null', async () => {
-      const { id } = await mkInvoice(A, 100_000);
-      const staff = await seedMember(t.worker, A.tenantId, 'teacher');
+    it('S5: recordedBy/voidedBy là ảnh chụp tên lúc ghi/hủy, không đổi khi user đổi tên hoặc bị xóa', async () => {
+      const O = await (async (): Promise<Who> => {
+        const st = await seedTenant(t.worker);
+        await q(`update users set display_name = 'Cô Mai' where id = $1`, [
+          st.userId,
+        ]);
+        return { ...st, token: await t.tokenFor(st.userId) };
+      })();
+      const { id } = await mkInvoice(O, 100_000);
+      const p = (
+        await pay(O, id, { amount: 50_000, method: 'cash' })
+      ).json() as Res;
+      await voidPay(O, p.payment.id, 'nhầm');
       await q(
-        `insert into payments (id, tenant_id, invoice_id, amount, method, paid_on, recorded_by) values ($1, $2, $3, 100, 'cash', '2026-10-05', $4)`,
-        [randomUUID(), A.tenantId, id, staff],
+        `update users set display_name = 'Tên mới', deleted_at = now() where id = $1`,
+        [O.userId],
       );
-      await q(
-        `update users set display_name = null, deleted_at = now() where id = $1`,
-        [staff],
+      await q(`update memberships set status = 'removed' where user_id = $1`, [
+        O.userId,
+      ]).catch(() => undefined);
+      const rows = await q(
+        `select recorded_by_name, voided_by_name from payments where id = $1`,
+        [p.payment.id],
       );
-      const items = (
-        await call(A.token, 'GET', `/invoices/${id}/payments`)
-      ).json().items;
-      expect(items[0].recordedBy).toBeNull();
+      expect(rows[0]).toEqual({
+        recorded_by_name: 'Cô Mai',
+        voided_by_name: 'Cô Mai',
+      });
+      expect(p.payment.recordedBy).toEqual({ id: O.userId, name: 'Cô Mai' });
     });
 
     it('Invoice: paidAmount/remainingAmount thật ở GET /invoices/{id}; void/draft → remainingAmount 0', async () => {
@@ -782,6 +797,43 @@ describe('payments: ghi và hủy thanh toán', () => {
       await notifier.handle(jobs[0]);
       expect(mails).toHaveLength(2);
 
+      // S6: phụ huynh đã gỡ liên kết (guardian đã xóa) hoặc con đã nghỉ không nhận thông báo/email.
+      const unlinked = await mkInvoice(A, 200_000);
+      const gid = randomUUID();
+      await q(
+        `insert into guardians (id, tenant_id, student_id, full_name, email, user_id, deleted_at) values ($1, $2, $3, 'PH cũ', 'cu@example.com', $4, now())`,
+        [gid, A.tenantId, unlinked.studentId, parent],
+      );
+      const left = await mkInvoice(A, 200_000);
+      await q(
+        `insert into guardians (id, tenant_id, student_id, full_name, email, user_id) values ($1, $2, $3, 'PH', 'ph@example.com', $4)`,
+        [randomUUID(), A.tenantId, left.studentId, parent],
+      );
+      await pay(A, unlinked.id, { amount: 10_000, method: 'cash' });
+      await pay(A, left.id, { amount: 10_000, method: 'cash' });
+      await q(`update students set status = 'left' where id = $1`, [
+        left.studentId,
+      ]);
+      const extra = (
+        await q(
+          `select id, tenant_id, payload from outbox_events where type = 'payment_recorded' and payload->>'invoiceId' = any($1)`,
+          [[unlinked.id, left.id]],
+        )
+      ).map((r) => ({
+        eventId: r.id,
+        tenantId: r.tenant_id,
+        payload: r.payload,
+      }));
+      expect(extra).toHaveLength(2);
+      const mailsBefore = mails.length;
+      for (const j of extra) await notifier.handle(j);
+      expect(mails).toHaveLength(mailsBefore);
+      expect(
+        await q(`select 1 from notifications where recipient_user_id = $1`, [
+          parent,
+        ]),
+      ).toHaveLength(1);
+
       // Thanh toán đã hủy trước khi worker xử lý: không báo.
       await notifier.handle(jobs[1]);
       expect(
@@ -789,6 +841,165 @@ describe('payments: ghi và hủy thanh toán', () => {
           parent,
         ]),
       ).toHaveLength(1);
+      await pool.end();
+    });
+  });
+
+  describe('S1/S2/S7: ngày thu, hóa đơn chờ xác nhận, song song với hủy hóa đơn', () => {
+    it('S1: paidOn phải từ ngày phát hành (múi giờ tenant) đến hôm nay; sai → 422 ở paidOn, không 500', async () => {
+      const today = localDate(new Date(), 'Asia/Ho_Chi_Minh');
+      // Phát hành 2026-03-10T18:00Z = 01:00 ngày 11 theo giờ VN.
+      const { id } = await mkInvoice(
+        A,
+        1_000_000,
+        'issued',
+        undefined,
+        '2026-03-10T18:00:00Z',
+      );
+      for (const paidOn of [
+        '2026-03-10',
+        '0000-01-01',
+        '1900-01-01',
+        '2999-12-31',
+      ]) {
+        const r = await pay(A, id, { amount: 1000, method: 'cash', paidOn });
+        expect(r.statusCode, paidOn).toBe(422);
+        expect(r.json().code).toBe('VALIDATION_FAILED');
+        expect(r.json().errors).toHaveProperty('paidOn');
+      }
+      for (const paidOn of ['2026-03-11', today]) {
+        const r = await pay(A, id, { amount: 1000, method: 'cash', paidOn });
+        expect(r.statusCode, paidOn).toBe(201);
+      }
+      expect(
+        await q(`select 1 from payments where invoice_id = $1`, [id]),
+      ).toHaveLength(2);
+    });
+
+    it('S2: hủy thanh toán trên hóa đơn pending_confirmation giữ pending_confirmation; ghi thu chuyển partially_paid/paid', async () => {
+      const { id } = await mkInvoice(A, 1_000_000);
+      const p = (
+        await pay(A, id, { amount: 300_000, method: 'cash' })
+      ).json() as Res;
+      await q(
+        `update invoices set status = 'pending_confirmation' where id = $1`,
+        [id],
+      );
+      const v = await voidPay(A, p.payment.id, 'nhầm');
+      expect(v.statusCode, v.body).toBe(200);
+      expect(v.json()).toMatchObject({
+        status: 'pending_confirmation',
+        paidAmount: 0,
+        remainingAmount: 1_000_000,
+      });
+      expect(await inv(id)).toMatchObject({
+        status: 'pending_confirmation',
+        paid_amount: '0',
+      });
+      const r = await pay(A, id, { amount: 400_000, method: 'cash' });
+      expect(r.statusCode, r.body).toBe(201);
+      expect(r.json().status).toBe('partially_paid');
+      await q(
+        `update invoices set status = 'pending_confirmation' where id = $1`,
+        [id],
+      );
+      const r2 = await pay(A, id, { amount: 600_000, method: 'cash' });
+      expect(r2.json()).toMatchObject({
+        status: 'paid',
+        paidAmount: 1_000_000,
+      });
+    });
+
+    it('S7: thu và hủy hóa đơn song song trên hóa đơn issued: một bên thắng, bên kia 409, dữ liệu nhất quán', async () => {
+      for (let i = 0; i < 3; i++) {
+        const { id } = await mkInvoice(A, 500_000);
+        const [a, b] = await Promise.all([
+          pay(A, id, { amount: 500_000, method: 'cash' }),
+          call(A.token, 'POST', `/invoices/${id}/void`, { reason: 'nhầm' }),
+        ]);
+        const codes = [a.statusCode, b.statusCode];
+        expect(codes.filter((c) => c === 409)).toHaveLength(1);
+        const row = await inv(id);
+        if (a.statusCode === 201) {
+          expect(b.statusCode).toBe(409);
+          expect(row).toMatchObject({ status: 'paid', paid_amount: '500000' });
+        } else {
+          expect(a.json().code).toBe('INVOICE_NOT_PAYABLE');
+          expect(row).toMatchObject({ status: 'void', paid_amount: '0' });
+          expect(
+            await q(`select 1 from payments where invoice_id = $1`, [id]),
+          ).toHaveLength(0);
+        }
+      }
+    });
+  });
+
+  describe('S6: invoice_issued cũng không báo phụ huynh đã gỡ liên kết hoặc con đã nghỉ', () => {
+    it('guardian đã xóa / học viên left → không thông báo, không email', async () => {
+      const { InvoiceIssuedNotifier } =
+        await import('../libs/modules/notifications/application/invoice-issued-notifier.service.js');
+      const { AbsenceNotifier } =
+        await import('../libs/modules/notifications/application/absence-notifier.service.js');
+      const schema = await import('../libs/db/src/schema/index.js');
+      const { TxService } = await import('../libs/db/src/tx.service.js');
+      const pool = new pg.Pool({
+        connectionString: t.db.url('teachhub_worker'),
+      });
+      const tx = new TxService(drizzle(pool, { schema, casing: 'snake_case' }));
+      const mails: unknown[] = [];
+      const notifier = new InvoiceIssuedNotifier(
+        tx,
+        new AbsenceNotifier(tx, {
+          enabled: false,
+          send: () => Promise.resolve([]),
+        } as never),
+        { send: (m: unknown) => (mails.push(m), Promise.resolve()) } as never,
+      );
+      const parent = randomUUID();
+      await q(`insert into users (id, email) values ($1, $2)`, [
+        parent,
+        `${parent}@example.com`,
+      ]);
+      await q(
+        `insert into memberships (id, user_id, role) values ($1, $2, 'parent')`,
+        [randomUUID(), parent],
+      );
+      const run = async (setup: (studentId: string) => Promise<void>) => {
+        const { id, studentId } = await mkInvoice(A, 200_000);
+        await setup(studentId);
+        await notifier
+          .handle({
+            eventId: randomUUID(),
+            tenantId: A.tenantId,
+            payload: {
+              invoiceId: id,
+              studentId,
+              periodMonth: '2026-12-01',
+              totalAmount: 200_000,
+              dueDate: '2027-01-10',
+            },
+          })
+          .catch(() => undefined);
+      };
+      await run((st) =>
+        q(
+          `insert into guardians (id, tenant_id, student_id, full_name, email, user_id, deleted_at) values ($1, $2, $3, 'PH', 'a@example.com', $4, now())`,
+          [randomUUID(), A.tenantId, st, parent],
+        ).then(() => undefined),
+      );
+      await run(async (st) => {
+        await q(
+          `insert into guardians (id, tenant_id, student_id, full_name, email, user_id) values ($1, $2, $3, 'PH', 'b@example.com', $4)`,
+          [randomUUID(), A.tenantId, st, parent],
+        );
+        await q(`update students set status = 'left' where id = $1`, [st]);
+      });
+      expect(mails).toHaveLength(0);
+      expect(
+        await q(`select 1 from notifications where recipient_user_id = $1`, [
+          parent,
+        ]),
+      ).toHaveLength(0);
       await pool.end();
     });
   });

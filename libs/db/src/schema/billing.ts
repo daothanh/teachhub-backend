@@ -186,13 +186,13 @@ export const invoices = pgTable(
       'invoices_paid_amount_check',
       sql`${t.paidAmount} >= 0 and ${t.paidAmount} <= ${sql.raw(MAX_VND)}`,
     ),
-    // Trạng thái khớp số đã thu; `pending_confirmation` (US-7.7, chưa làm) chưa ràng buộc.
+    // Trạng thái khớp số đã thu; `pending_confirmation` (US-7.7, chưa làm) chưa thu đủ. paid_amount = Σ payments chưa hủy do constraint trigger.
     check(
       'invoices_paid_status_check',
       sql`case ${t.status}
         when 'partially_paid' then ${t.paidAmount} > 0 and ${t.paidAmount} < ${t.totalAmount}
         when 'paid' then ${t.paidAmount} >= ${t.totalAmount}
-        when 'pending_confirmation' then true
+        when 'pending_confirmation' then ${t.paidAmount} < ${t.totalAmount}
         else ${t.paidAmount} = 0 end`,
     ),
     check('invoices_code_check', sql`${t.code} ~ '^TH-[0-9A-HJKMNP-TV-Z]{6}$'`),
@@ -303,10 +303,13 @@ export const payments = pgTable(
     recordedBy: uuid()
       .notNull()
       .references(() => users.id),
+    /** Ảnh chụp tên hiển thị lúc ghi/hủy: không phụ thuộc membership hay tài khoản còn hay không. */
+    recordedByName: text().notNull(),
     recordedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     voidedAt: timestamp({ withTimezone: true }),
     voidReason: text(),
     voidedBy: uuid().references(() => users.id),
+    voidedByName: text(),
   },
   (t) => [
     foreignKey({
@@ -335,6 +338,7 @@ export const payments = pgTable(
     check(
       'payments_void_fields_check',
       sql`(${t.voidedAt} is null) = (${t.voidReason} is null) and (${t.voidedAt} is null) = (${t.voidedBy} is null)
+        and (${t.voidedAt} is null) = (${t.voidedByName} is null)
         and (${t.voidReason} is null or char_length(${t.voidReason}) between 1 and 300)`,
     ),
   ],

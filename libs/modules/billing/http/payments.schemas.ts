@@ -76,7 +76,7 @@ export const recordPaymentRequestSchema = z
     method: paymentMethodSchema,
     paidOn: z.iso.date().optional().meta({
       description:
-        'Ngày thu; bỏ trống = hôm nay theo múi giờ tenant. Sau hôm nay → 422 `VALIDATION_FAILED`',
+        'Ngày thu; bỏ trống = hôm nay theo múi giờ tenant. Phải từ ngày phát hành hóa đơn (theo múi giờ tenant) đến hôm nay, ngoài khoảng đó → 422 `VALIDATION_FAILED` ở `paidOn`',
       example: '2027-01-05',
     }),
     note: z.string().trim().max(300).optional(),

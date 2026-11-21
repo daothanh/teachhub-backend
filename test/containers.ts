@@ -62,8 +62,11 @@ export async function migrateTestDb(
   folder = 'libs/db/migrations',
 ): Promise<void> {
   const owner = new pg.Pool({ connectionString: db.url('teachhub_owner') });
-  await migrate(drizzle(owner), { migrationsFolder: folder });
-  await owner.end();
+  try {
+    await migrate(drizzle(owner), { migrationsFolder: folder });
+  } finally {
+    await owner.end();
+  }
 }
 
 // Cùng image đã ghim trong docker-compose.yml (minio/minio không còn trên Docker Hub).

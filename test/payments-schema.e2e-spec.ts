@@ -14,7 +14,29 @@ import pg from 'pg';
 import { TxService } from '@teachhub/db';
 import { migrateTestDb, startTestDb, type TestDb } from './containers.js';
 import { expectInsertRejected } from './support/isolation.js';
-import { seedTenant, type SeededTenant } from './support/seed.js';
+import { seedMember, seedTenant, type SeededTenant } from './support/seed.js';
+
+/** Bản sao thư mục migration chỉ gồm các migration trước 0026. */
+function migrationsBefore0026(): string {
+  const dir = mkdtempSync(join(tmpdir(), 'mig-'));
+  cpSync('libs/db/migrations', dir, { recursive: true });
+  const old = JSON.parse(
+    readFileSync('libs/db/migrations/meta/_journal.json', 'utf8'),
+  ) as { entries: { tag: string }[] };
+  mkdirSync(join(dir, 'before'));
+  const before = join(dir, 'before');
+  cpSync(join(dir, 'meta'), join(before, 'meta'), { recursive: true });
+  for (const e of old.entries.filter((x) => !x.tag.startsWith('0026')))
+    cpSync(join(dir, `${e.tag}.sql`), join(before, `${e.tag}.sql`));
+  writeFileSync(
+    join(before, 'meta/_journal.json'),
+    JSON.stringify({
+      ...old,
+      entries: old.entries.filter((x) => !x.tag.startsWith('0026')),
+    }),
+  );
+  return before;
+}
 
 // S6-BE-01: payments, student_ledger, revenue_ledger: RLS chéo tenant và phụ huynh, ràng buộc, chỉ ghi thêm, bất biến.
 describe('payments schema: RLS, ràng buộc, chỉ ghi thêm', () => {
@@ -74,6 +96,28 @@ describe('payments schema: RLS, ràng buộc, chỉ ghi thêm', () => {
          payout = '{"bankBin":"970436","accountNo":"0123456789","accountName":"A"}'::jsonb, issued_at = now() where id = $1`,
       [id, code, code.replace('-', ' ')],
     );
+  const inTx = async (fn: (c: pg.PoolClient) => Promise<void>) => {
+    const c = await worker.connect();
+    try {
+      await c.query('begin');
+      await fn(c);
+      await c.query('commit');
+    } catch (e) {
+      await c.query('rollback');
+      throw e;
+    } finally {
+      c.release();
+    }
+  };
+  /** paid_amount/status theo Σ thanh toán chưa hủy (đúng việc service làm), trong cùng giao dịch với lệnh ghi/hủy. */
+  const sync = (c: pg.PoolClient, inv: string) =>
+    c.query(
+      `update invoices i set paid_amount = s.p,
+         status = case when s.p <= 0 then 'issued' when s.p >= i.total_amount then 'paid' else 'partially_paid' end
+       from (select coalesce(sum(amount) filter (where voided_at is null), 0) p from payments where invoice_id = $1) s
+       where i.id = $1`,
+      [inv],
+    );
   const payment = (
     id: string,
     inv: string,
@@ -81,11 +125,22 @@ describe('payments schema: RLS, ràng buộc, chỉ ghi thêm', () => {
     by: string,
     amount = 500_000,
   ) =>
-    q(
-      `insert into payments (id, tenant_id, invoice_id, amount, method, paid_on, recorded_by)
-       values ($1, $2, $3, $4, 'cash', '2027-01-05', $5)`,
-      [id, tenantId, inv, amount, by],
-    );
+    inTx(async (c) => {
+      await c.query(
+        `insert into payments (id, tenant_id, invoice_id, amount, method, paid_on, recorded_by, recorded_by_name)
+         values ($1, $2, $3, $4, 'cash', '2027-01-05', $5, 'Cô Lan')`,
+        [id, tenantId, inv, amount, by],
+      );
+      await sync(c, inv);
+    });
+  const voidPayment = (id: string, inv: string, reason: string, by: string) =>
+    inTx(async (c) => {
+      await c.query(
+        `update payments set voided_at = now(), void_reason = $2, voided_by = $3, voided_by_name = 'Cô Lan' where id = $1`,
+        [id, reason, by],
+      );
+      await sync(c, inv);
+    });
 
   beforeAll(async () => {
     db = await startTestDb();
@@ -165,8 +220,8 @@ describe('payments schema: RLS, ràng buộc, chỉ ghi thêm', () => {
       await expectInsertRejected(
         tx,
         B.userId,
-        sql`insert into payments (id, tenant_id, invoice_id, amount, method, paid_on, recorded_by)
-          values (${randomUUID()}, ${A.tenantId}, ${ids.inv}, 1000, 'cash', '2027-01-05', ${B.userId})`,
+        sql`insert into payments (id, tenant_id, invoice_id, amount, method, paid_on, recorded_by, recorded_by_name)
+          values (${randomUUID()}, ${A.tenantId}, ${ids.inv}, 1000, 'cash', '2027-01-05', ${B.userId}, 'x')`,
       );
     });
 
@@ -183,8 +238,8 @@ describe('payments schema: RLS, ràng buộc, chỉ ghi thêm', () => {
       await expectInsertRejected(
         tx,
         parentX,
-        sql`insert into payments (id, tenant_id, invoice_id, amount, method, paid_on, recorded_by)
-          values (${randomUUID()}, ${A.tenantId}, ${ids.inv}, 1000, 'cash', '2027-01-05', ${parentX})`,
+        sql`insert into payments (id, tenant_id, invoice_id, amount, method, paid_on, recorded_by, recorded_by_name)
+          values (${randomUUID()}, ${A.tenantId}, ${ids.inv}, 1000, 'cash', '2027-01-05', ${parentX}, 'x')`,
       );
       expect(
         await asUser(
@@ -226,12 +281,14 @@ describe('payments schema: RLS, ràng buộc, chỉ ghi thêm', () => {
         B.userId,
         sql`insert into student_ledger (id, tenant_id, student_id, kind, credit, description)
           values (${randomUUID()}, ${A.tenantId}, ${ids.stuX}, 'overpayment', 1, 'x')`,
+        /row-level security|LEDGER_INVALID/,
       );
       await expectInsertRejected(
         tx,
         parentX,
         sql`insert into revenue_ledger (id, tenant_id, payment_id, kind, amount, entry_date, fiscal_year)
           values (${randomUUID()}, ${A.tenantId}, ${ids.pay}, 'reversal', -1, '2027-01-05', 2027)`,
+        /row-level security|LEDGER_INVALID/,
       );
     });
   });
@@ -250,7 +307,7 @@ describe('payments schema: RLS, ràng buộc, chỉ ghi thêm', () => {
       );
       await q(
         `insert into revenue_ledger (id, tenant_id, payment_id, kind, amount, entry_date, fiscal_year)
-         values ($1, $2, $3, 'payment', 500000, '2027-01-05', 2027)`,
+         values ($1, $2, $3, 'payment', 700, '2027-01-05', 2027)`,
         [revenueId, A.tenantId, revPay],
       );
     });
@@ -316,10 +373,7 @@ describe('payments schema: RLS, ràng buộc, chỉ ghi thêm', () => {
           ]),
         ),
       ).toMatch(/payments_void_fields_check/);
-      await worker.query(
-        `update payments set voided_at = now(), void_reason = 'Ghi nhầm', voided_by = $2 where id = $1`,
-        [id, A.userId],
-      );
+      await voidPayment(id, ids.inv, 'Ghi nhầm', A.userId);
       expect(
         await fail(
           worker.query(
@@ -340,8 +394,8 @@ describe('payments schema: RLS, ràng buộc, chỉ ghi thêm', () => {
         await fail(
           payment(randomUUID(), ids.inv, A.tenantId, A.userId, 5).then(() =>
             worker.query(
-              `insert into payments (id, tenant_id, invoice_id, amount, method, paid_on, recorded_by, voided_at, void_reason, voided_by)
-               values ($1, $2, $3, 5, 'cash', '2027-01-05', $4, now(), 'x', $4)`,
+              `insert into payments (id, tenant_id, invoice_id, amount, method, paid_on, recorded_by, recorded_by_name, voided_at, void_reason, voided_by, voided_by_name)
+               values ($1, $2, $3, 5, 'cash', '2027-01-05', $4, 'x', now(), 'x', $4, 'x')`,
               [randomUUID(), A.tenantId, ids.inv, A.userId],
             ),
           ),
@@ -355,22 +409,22 @@ describe('payments schema: RLS, ràng buộc, chỉ ghi thêm', () => {
         () => payment(randomUUID(), ids.inv, A.tenantId, A.userId, -5),
         () =>
           worker.query(
-            `insert into payments (id, tenant_id, invoice_id, amount, method, paid_on, recorded_by) values ($1, $2, $3, 5, 'card', '2027-01-05', $4)`,
+            `insert into payments (id, tenant_id, invoice_id, amount, method, paid_on, recorded_by, recorded_by_name) values ($1, $2, $3, 5, 'card', '2027-01-05', $4, 'x')`,
             [randomUUID(), A.tenantId, ids.inv, A.userId],
           ),
         () =>
           worker.query(
-            `insert into payments (id, tenant_id, invoice_id, amount, method, paid_on, note, recorded_by) values ($1, $2, $3, 5, 'cash', '2027-01-05', $5, $4)`,
+            `insert into payments (id, tenant_id, invoice_id, amount, method, paid_on, note, recorded_by, recorded_by_name) values ($1, $2, $3, 5, 'cash', '2027-01-05', $5, $4, 'x')`,
             [randomUUID(), A.tenantId, ids.inv, A.userId, 'x'.repeat(301)],
           ),
         () =>
           worker.query(
-            `insert into student_ledger (id, tenant_id, student_id, kind, debit, credit, description) values ($1, $2, $3, 'overpayment', 5, 5, 'x')`,
+            `insert into student_ledger (id, tenant_id, student_id, kind, debit, credit, description) values ($1, $2, $3, 'prev_adjustment', 5, 5, 'x')`,
             [randomUUID(), A.tenantId, ids.stuX],
           ),
         () =>
           worker.query(
-            `insert into student_ledger (id, tenant_id, student_id, kind, description) values ($1, $2, $3, 'overpayment', 'x')`,
+            `insert into student_ledger (id, tenant_id, student_id, kind, description) values ($1, $2, $3, 'prev_adjustment', 'x')`,
             [randomUUID(), A.tenantId, ids.stuX],
           ),
         () =>
@@ -385,12 +439,12 @@ describe('payments schema: RLS, ràng buộc, chỉ ghi thêm', () => {
           ),
       ];
       for (const run of bad)
-        expect(await fail(run())).toMatch(/violates|check/);
+        expect(await fail(run())).toMatch(/violates|check|LEDGER_INVALID/);
       // Mỗi thanh toán chỉ một dòng thu.
       expect(
         await fail(
           worker.query(
-            `insert into revenue_ledger (id, tenant_id, payment_id, kind, amount, entry_date, fiscal_year) values ($1, $2, $3, 'payment', 5, '2027-01-05', 2027)`,
+            `insert into revenue_ledger (id, tenant_id, payment_id, kind, amount, entry_date, fiscal_year) values ($1, $2, $3, 'payment', 700, '2027-01-05', 2027)`,
             [randomUUID(), A.tenantId, revPay],
           ),
         ),
@@ -423,12 +477,21 @@ describe('payments schema: RLS, ràng buộc, chỉ ghi thêm', () => {
 
     it('cho đổi trạng thái và paid_amount theo thu/hủy; vẫn chặn đổi tổng tiền và snapshot', async () => {
       const id = await mk();
-      await set(id, 'partially_paid', 400_000);
-      await set(id, 'paid', 1_500_000);
-      await set(id, 'partially_paid', 900_000);
-      await set(id, 'issued', 0);
-      await set(id, 'paid', 1_000_000);
-      await set(id, 'issued', 0);
+      const [p1, p2, p3] = [randomUUID(), randomUUID(), randomUUID()];
+      const status = async () =>
+        (await q(`select status from invoices where id = $1`, [id]))[0].status;
+      await payment(p1, id, A.tenantId, A.userId, 400_000);
+      expect(await status()).toBe('partially_paid');
+      await payment(p2, id, A.tenantId, A.userId, 1_100_000);
+      expect(await status()).toBe('paid');
+      await voidPayment(p2, id, 'a', A.userId);
+      expect(await status()).toBe('partially_paid');
+      await voidPayment(p1, id, 'b', A.userId);
+      expect(await status()).toBe('issued');
+      await payment(p3, id, A.tenantId, A.userId, 1_000_000);
+      expect(await status()).toBe('paid');
+      await voidPayment(p3, id, 'c', A.userId);
+      expect(await status()).toBe('issued');
       for (const stmt of [
         `update invoices set total_amount = 1 where id = $1`,
         `update invoices set clamped_amount = 1 where id = $1`,
@@ -447,12 +510,13 @@ describe('payments schema: RLS, ràng buộc, chỉ ghi thêm', () => {
         ['partially_paid', 0],
         ['partially_paid', 1_000_000],
         ['paid', 999_999],
+        ['pending_confirmation', 1_000_000],
         ['issued', 1],
       ] as const)
         expect(await fail(set(id, status, paid))).toMatch(
           /invoices_paid_status_check/,
         );
-      await set(id, 'paid', 1_000_000);
+      await payment(randomUUID(), id, A.tenantId, A.userId, 1_000_000);
       expect(
         await fail(
           worker.query(
@@ -462,27 +526,178 @@ describe('payments schema: RLS, ràng buộc, chỉ ghi thêm', () => {
         ),
       ).toMatch(/INVOICE_IMMUTABLE/);
     });
+
+    it('M1: paid_amount luôn = Σ thanh toán chưa hủy, kiểm cuối giao dịch (kể cả role app)', async () => {
+      const id = await mk();
+      await payment(randomUUID(), id, A.tenantId, A.userId, 400_000);
+      // Sửa tay paid_amount lệch (vẫn qua CHECK trạng thái) → lỗi khi commit.
+      expect(
+        await fail(
+          asUser(
+            A.userId,
+            sql`update invoices set paid_amount = 500000 where id = ${id}`,
+          ),
+        ),
+      ).toMatch(/INVOICE_PAID_MISMATCH/);
+      // Đổi trạng thái mà bỏ qua số tiền cũng không được.
+      expect(
+        await fail(
+          asUser(
+            A.userId,
+            sql`update invoices set status = 'pending_confirmation', paid_amount = 300000 where id = ${id}`,
+          ),
+        ),
+      ).toMatch(/INVOICE_PAID_MISMATCH/);
+      // Thêm payment mà không cập nhật hóa đơn.
+      expect(
+        await fail(
+          asUser(
+            A.userId,
+            sql`insert into payments (id, tenant_id, invoice_id, amount, method, paid_on, recorded_by, recorded_by_name)
+              values (${randomUUID()}, ${A.tenantId}, ${id}, 1000, 'cash', '2027-01-05', ${A.userId}, 'x')`,
+          ),
+        ),
+      ).toMatch(/INVOICE_PAID_MISMATCH/);
+      // Hủy payment mà không cập nhật hóa đơn.
+      const p = randomUUID();
+      await payment(p, id, A.tenantId, A.userId, 100_000);
+      expect(
+        await fail(
+          asUser(
+            A.userId,
+            sql`update payments set voided_at = now(), void_reason = 'x', voided_by = ${A.userId}, voided_by_name = 'x' where id = ${p}`,
+          ),
+        ),
+      ).toMatch(/INVOICE_PAID_MISMATCH/);
+      expect(
+        (
+          await q(`select paid_amount::text from invoices where id = $1`, [id])
+        )[0].paid_amount,
+      ).toBe('500000');
+    });
+  });
+
+  describe('M2/S4/S5: sổ không bịa được, chỉ chủ tenant ghi, ảnh chụp tên', () => {
+    let teacher: string;
+    let inv: string;
+    const pay1 = randomUUID();
+    beforeAll(async () => {
+      teacher = await seedMember(worker, A.tenantId, 'teacher');
+      inv = randomUUID();
+      await q(
+        `insert into invoices (id, tenant_id, period_id, student_id, total_amount) values ($1, $2, $3, $4, 1000000)`,
+        [inv, A.tenantId, ids.period, ids.stuY],
+      );
+      await issue(inv, 'TH-M2M2M2');
+      await payment(pay1, inv, A.tenantId, A.userId, 400_000);
+    });
+    const rev = (
+      payment: string,
+      kind: string,
+      amount: number,
+      date = '2027-01-05',
+      tenant = A.tenantId,
+    ) =>
+      sql`insert into revenue_ledger (id, tenant_id, payment_id, kind, amount, entry_date, fiscal_year)
+        values (${randomUUID()}, ${tenant}, ${payment}, ${kind}, ${amount}, ${date}, ${Number(date.slice(0, 4))})`;
+    const stu = (
+      kind: string,
+      debit: number,
+      credit: number,
+      payment: string | null = pay1,
+      invoice: string | null = inv,
+    ) =>
+      sql`insert into student_ledger (id, tenant_id, student_id, invoice_id, payment_id, kind, debit, credit, description)
+        values (${randomUUID()}, ${A.tenantId}, ${ids.stuY}, ${invoice}, ${payment}, ${kind}, ${debit}, ${credit}, 'x')`;
+
+    it('revenue_ledger: dòng bịa bằng role app → lỗi', async () => {
+      for (const q2 of [
+        rev(pay1, 'payment', 1), // sai số tiền (đã có dòng thu hoặc lệch tiền)
+        rev(pay1, 'payment', 400_000, '2027-01-06'), // sai ngày
+        rev(pay1, 'reversal', -400_000), // đảo khi chưa hủy
+        rev(ids.payB, 'payment', 500_000), // thanh toán tenant khác
+      ])
+        expect(await fail(asUser(A.userId, q2))).toMatch(
+          /LEDGER_INVALID|violates/,
+        );
+    });
+
+    it('student_ledger: kind của thanh toán phải có payment/invoice khớp, đúng vế, ≤ số tiền', async () => {
+      for (const q2 of [
+        stu('overpayment', 0, 100, null, inv), // thiếu payment_id
+        stu('overpayment', 0, 100, pay1, null), // thiếu invoice_id
+        stu('overpayment', 0, 400_001), // vượt số tiền thanh toán
+        stu('overpayment', 100, 0), // sai vế
+        stu('payment_void', 100, 0), // thanh toán chưa hủy
+        stu('overpayment', 0, 100, pay1, ids.inv), // hóa đơn khác của payment
+        stu('overpayment', 0, 100, ids.payB, inv), // payment tenant khác
+      ])
+        expect(await fail(asUser(A.userId, q2))).toMatch(
+          /LEDGER_INVALID|violates/,
+        );
+      // Dòng hợp lệ vẫn vào được.
+      await asUser(A.userId, stu('overpayment', 0, 100));
+    });
+
+    it('S4: giáo viên thường đọc được payments nhưng không ghi payments hay hai sổ; chỉ chủ tenant ghi', async () => {
+      expect(
+        await asUser(teacher, sql`select 1 from payments where id = ${pay1}`),
+      ).toHaveLength(1);
+      await expectInsertRejected(
+        tx,
+        teacher,
+        sql`insert into payments (id, tenant_id, invoice_id, amount, method, paid_on, recorded_by, recorded_by_name)
+          values (${randomUUID()}, ${A.tenantId}, ${inv}, 1000, 'cash', '2027-01-05', ${teacher}, 'x')`,
+      );
+      expect(
+        await asUser(
+          teacher,
+          sql`update payments set voided_at = null where id = ${pay1} returning id`,
+        ),
+      ).toHaveLength(0);
+      await expectInsertRejected(tx, teacher, stu('overpayment', 0, 100));
+      await expectInsertRejected(
+        tx,
+        teacher,
+        rev(pay1, 'payment', 400_000),
+        /row-level security/,
+      );
+    });
+
+    it('S5: tên người ghi/hủy là ảnh chụp bất biến, không đổi theo tài khoản', async () => {
+      await q(`update users set display_name = 'Tên mới' where id = $1`, [
+        A.userId,
+      ]);
+      expect(
+        (
+          await q(`select recorded_by_name from payments where id = $1`, [pay1])
+        )[0].recorded_by_name,
+      ).toBe('Cô Lan');
+      expect(
+        await fail(
+          worker.query(
+            `update payments set recorded_by_name = 'Khác' where id = $1`,
+            [pay1],
+          ),
+        ),
+      ).toMatch(/PAYMENT_IMMUTABLE/);
+      const p = randomUUID();
+      await payment(p, inv, A.tenantId, A.userId, 10_000);
+      await voidPayment(p, inv, 'x', A.userId);
+      expect(
+        await fail(
+          worker.query(
+            `update payments set voided_by_name = 'Khác' where id = $1`,
+            [p],
+          ),
+        ),
+      ).toMatch(/PAYMENT_IMMUTABLE/);
+    });
   });
 
   describe('nâng cấp từ 0025 trên dữ liệu có sẵn', () => {
     it('migration 0026 chạy được khi đã có hóa đơn nháp, đã phát hành và đã hủy; paid_amount = 0, ghi thanh toán được', async () => {
-      const dir = mkdtempSync(join(tmpdir(), 'mig-'));
-      cpSync('libs/db/migrations', dir, { recursive: true });
-      const old = JSON.parse(
-        readFileSync('libs/db/migrations/meta/_journal.json', 'utf8'),
-      ) as { entries: { tag: string }[] };
-      mkdirSync(join(dir, 'before'));
-      const before = join(dir, 'before');
-      cpSync(join(dir, 'meta'), join(before, 'meta'), { recursive: true });
-      for (const e of old.entries.filter((x) => !x.tag.startsWith('0026')))
-        cpSync(join(dir, `${e.tag}.sql`), join(before, `${e.tag}.sql`));
-      writeFileSync(
-        join(before, 'meta/_journal.json'),
-        JSON.stringify({
-          ...old,
-          entries: old.entries.filter((x) => !x.tag.startsWith('0026')),
-        }),
-      );
+      const before = migrationsBefore0026();
       const old25 = await startTestDb(before);
       try {
         const w = new pg.Pool({
@@ -548,10 +763,63 @@ describe('payments schema: RLS, ràng buộc, chỉ ghi thêm', () => {
           { status: 'issued', paid_amount: '0' },
           { status: 'void', paid_amount: '0' },
         ]);
+        await w.query('begin');
         await w.query(
-          `insert into payments (id, tenant_id, invoice_id, amount, method, paid_on, recorded_by) values ($1, $2, $3, 100, 'cash', '2027-02-05', $4)`,
+          `insert into payments (id, tenant_id, invoice_id, amount, method, paid_on, recorded_by, recorded_by_name) values ($1, $2, $3, 100, 'cash', '2027-02-05', $4, 'x')`,
           [randomUUID(), s.tenantId, invs.issued, s.userId],
         );
+        await w.query(
+          `update invoices set status = 'partially_paid', paid_amount = 100 where id = $1`,
+          [invs.issued],
+        );
+        await w.query('commit');
+        await w.end();
+      } finally {
+        await old25.container.stop();
+      }
+    }, 240_000);
+
+    it('M3: có hóa đơn paid từ trước 0026 (không có payment) → migration dừng với lỗi rõ, không đoán số tiền', async () => {
+      const old25 = await startTestDb(migrationsBefore0026());
+      try {
+        const w = new pg.Pool({
+          connectionString: old25.url('teachhub_worker'),
+        });
+        const s = await seedTenant(w);
+        const stu = randomUUID();
+        const per = randomUUID();
+        const inv = randomUUID();
+        await w.query(
+          `insert into students (id, tenant_id, full_name) values ($1, $2, 'HV')`,
+          [stu, s.tenantId],
+        );
+        await w.query(
+          `insert into billing_periods (id, tenant_id, period_month, close_date, due_date) values ($1, $2, '2026-12-01', '2026-12-31', '2027-01-10')`,
+          [per, s.tenantId],
+        );
+        await w.query(
+          `insert into invoices (id, tenant_id, period_id, student_id, total_amount) values ($1, $2, $3, $4, 700000)`,
+          [inv, s.tenantId, per, stu],
+        );
+        await w.query(
+          `update invoices set status = 'issued', code = 'TH-AAAAAA', transfer_note = 'TH AAAAAA', qr_payload = 'q', payout = '{"a":1}'::jsonb, issued_at = now() where id = $1`,
+          [inv],
+        );
+        await w.query(`update invoices set status = 'paid' where id = $1`, [
+          inv,
+        ]);
+        // Drizzle bọc lỗi pg thành "Failed query"; thông điệp thật nằm ở `cause`.
+        const err = (await migrateTestDb(old25).catch(
+          (x: unknown) => x,
+        )) as Error & { cause?: Error };
+        expect(err.cause?.message ?? err.message).toMatch(
+          /Migration 0026: có 1 hóa đơn/,
+        );
+        // Giao dịch migration rollback: chưa có bảng payments.
+        expect(
+          (await w.query(`select to_regclass('public.payments') as t`)).rows[0]
+            .t,
+        ).toBeNull();
         await w.end();
       } finally {
         await old25.container.stop();

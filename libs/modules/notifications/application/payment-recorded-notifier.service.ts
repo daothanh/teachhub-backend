@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { uuidv7 } from '@teachhub/core';
 import { TxService } from '@teachhub/db';
 import { Mailer } from '@teachhub/infra';
+import { deliverEmail } from './email-delivery.js';
 import {
   AbsenceNotifier,
   type Pending,
@@ -26,9 +27,6 @@ export const paymentRecordedJobSchema = z.object({
   }),
 });
 
-/** Dòng `queued` bỏ dở lâu hơn mức này coi như worker trước đã chết, được nhận lại (như push ở `AbsenceNotifier`). */
-const STALE_CLAIM_MS = 2 * 60_000;
-
 interface Recipient extends Pending {
   email: string | null;
 }
@@ -42,18 +40,17 @@ const MAIL_TEXT =
  * Xử lý sự kiện outbox `payment_recorded` (S6-BE-02, US-7.4 AC3): tạo thông báo `payment_recorded` cho phụ huynh đã có tài
  * khoản của học viên, gửi FCM data-only rồi email biên nhận. Idempotent theo `eventId` (khóa `(recipient, dedupe_key)`; lần
  * gửi theo `(notification, channel)`), nhận lại dòng `queued` bỏ dở sau 2 phút. Theo mẫu `InvoiceIssuedNotifier`.
- * shortcut: nhân đôi `deliverEmail` của `InvoiceIssuedNotifier`; gom về một lớp gửi email chung khi có notifier thứ ba.
  * shortcut: phụ huynh chưa kích hoạt tài khoản không nhận email (không có thông báo để làm khóa chống gửi trùng); chưa tôn
  * trọng giờ yên lặng (US-6.5).
  */
 @Injectable()
 export class PaymentRecordedNotifier {
-  private readonly log = new Logger(PaymentRecordedNotifier.name);
+  readonly log = new Logger(PaymentRecordedNotifier.name);
 
   constructor(
-    private readonly tx: TxService,
+    readonly tx: TxService,
     private readonly delivery: AbsenceNotifier,
-    private readonly mailer: Mailer,
+    readonly mailer: Mailer,
   ) {}
 
   async handle(job: unknown): Promise<void> {
@@ -61,7 +58,7 @@ export class PaymentRecordedNotifier {
     const pending = await this.tx.run({ userId: null }, async (tx) => {
       const student = (
         await tx.execute<{ full_name: string }>(
-          sql`select full_name from students where tenant_id = ${tenantId} and id = ${payload.studentId}`,
+          sql`select full_name from students where tenant_id = ${tenantId} and id = ${payload.studentId} and status <> 'left'`,
         )
       ).rows[0];
       // Thanh toán đã bị hủy trước khi worker xử lý: không báo biên nhận.
@@ -137,43 +134,18 @@ export class PaymentRecordedNotifier {
           `gửi thông báo ${p.notificationId} lỗi: ${e instanceof Error ? e.name : 'lỗi'}`,
         );
       }
-      if (p.email && !(await this.deliverEmail(p.notificationId, p.email)))
+      if (
+        p.email &&
+        !(await deliverEmail(
+          this,
+          p.notificationId,
+          p.email,
+          MAIL_SUBJECT,
+          MAIL_TEXT,
+        ))
+      )
         failed++;
     }
     if (failed) throw new PushDeliveryError(`${failed} lần gửi lỗi tạm`);
-  }
-
-  /** `true` = xong (đã gửi, hoặc người khác đang gửi); `false` = lỗi gửi, cần thử lại. */
-  private async deliverEmail(
-    notificationId: string,
-    to: string,
-  ): Promise<boolean> {
-    const claimed = await this.tx.run({ userId: null }, async (tx) => {
-      const ins = await tx.execute(sql`
-        insert into notification_deliveries (id, notification_id, channel)
-        values (${uuidv7()}, ${notificationId}, 'email') on conflict do nothing returning id`);
-      if (ins.rows.length) return true;
-      const re = await tx.execute(sql`
-        update notification_deliveries set status = 'queued', error = null, created_at = now()
-        where notification_id = ${notificationId} and channel = 'email'
-          and (status = 'failed' or (status = 'queued' and created_at < now() - ${STALE_CLAIM_MS} * interval '1 millisecond'))
-        returning id`);
-      return re.rows.length > 0;
-    });
-    if (!claimed) return true;
-    let error: string | null = null;
-    try {
-      await this.mailer.send({ to, subject: MAIL_SUBJECT, text: MAIL_TEXT });
-    } catch (e) {
-      error = e instanceof Error ? e.name : 'send_threw';
-      this.log.error(`gửi email ${notificationId} lỗi: ${error}`);
-    }
-    await this.tx.run({ userId: null }, (tx) =>
-      tx.execute(sql`
-        update notification_deliveries set status = ${error ? 'failed' : 'sent'}, error = ${error},
-          sent_at = ${error ? null : sql`now()`}
-        where notification_id = ${notificationId} and channel = 'email' and status = 'queued'`),
-    );
-    return !error;
   }
 }

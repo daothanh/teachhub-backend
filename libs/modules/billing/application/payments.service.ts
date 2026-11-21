@@ -9,6 +9,7 @@ import {
   studentLedger,
   tenants,
   type Tx,
+  users,
   writeAudit,
 } from '@teachhub/db';
 import { formatInZone, localDate } from '@teachhub/modules/schedule';
@@ -56,9 +57,11 @@ export class PaymentsService {
     const tz = await this.timezone(tx, tenantId);
     const today = localDate(new Date(), tz);
     const paidOn = body.paidOn ?? today;
-    if (paidOn > today)
+    // Ngày thu trong [ngày phát hành theo múi giờ tenant, hôm nay]; so chuỗi ISO nên năm 0000 cũng bị chặn trước khi tới CSDL.
+    const issuedOn = localDate(inv.issuedAt!, tz);
+    if (paidOn > today || paidOn < issuedOn)
       throw new AppException('VALIDATION_FAILED', undefined, {
-        paidOn: ['Ngày thu không được sau hôm nay.'],
+        paidOn: ['Ngày thu phải từ ngày phát hành hóa đơn đến hôm nay.'],
       });
     const paidAmount = inv.paidAmount + body.amount;
     if (paidAmount > MAX_VND)
@@ -77,6 +80,7 @@ export class PaymentsService {
         paidOn,
         note: body.note || null,
         recordedBy: actor.userId,
+        recordedByName: await this.displayName(tx, actor.userId),
       })
       .returning();
     const p = row!;
@@ -141,7 +145,7 @@ export class PaymentsService {
       before: { status: inv.status, paidAmount: inv.paidAmount },
       after: { status, paidAmount },
     });
-    return this.result(tx, tenantId, p, tz, {
+    return this.result(p, tz, {
       status,
       paidAmount,
       total: inv.totalAmount,
@@ -167,8 +171,7 @@ export class PaymentsService {
       )
       .orderBy(desc(payments.recordedAt), desc(payments.id));
     const tz = await this.timezone(tx, tenantId);
-    const names = await this.names(tx, tenantId, rows);
-    return { items: rows.map((r) => toPayment(r, tz, names)) };
+    return { items: rows.map((r) => toPayment(r, tz)) };
   }
 
   /**
@@ -195,7 +198,7 @@ export class PaymentsService {
       .from(payments)
       .where(and(eq(payments.tenantId, tenantId), eq(payments.id, paymentId)));
     if (p!.voidedAt)
-      return this.result(tx, tenantId, p!, tz, {
+      return this.result(p!, tz, {
         status: inv.status,
         paidAmount: inv.paidAmount,
         total: inv.totalAmount,
@@ -204,9 +207,10 @@ export class PaymentsService {
     const [voided] = await tx
       .update(payments)
       .set({
-        voidedAt: new Date(),
+        voidedAt: sql`now()`,
         voidReason: body.reason,
         voidedBy: actor.userId,
+        voidedByName: await this.displayName(tx, actor.userId),
       })
       .where(and(eq(payments.tenantId, tenantId), eq(payments.id, paymentId)))
       .returning();
@@ -233,7 +237,11 @@ export class PaymentsService {
         debit: -delta,
         description: `Hủy thanh toán, đảo phần trả thừa hóa đơn ${inv.code}`,
       });
-    const status = statusAfter(inv.totalAmount, paidAmount);
+    // Hủy không đổi trạng thái chờ xác nhận (US-7.7); trạng thái khác suy từ Σ còn hiệu lực.
+    const status =
+      inv.status === 'pending_confirmation'
+        ? inv.status
+        : statusAfter(inv.totalAmount, paidAmount);
     await this.setPaid(tx, tenantId, inv.id, status, paidAmount);
     await writeAudit(tx, {
       tenantId,
@@ -251,7 +259,7 @@ export class PaymentsService {
       before: { status: inv.status, paidAmount: inv.paidAmount },
       after: { status, paidAmount },
     });
-    return this.result(tx, tenantId, voided!, tz, {
+    return this.result(voided!, tz, {
       status,
       paidAmount,
       total: inv.totalAmount,
@@ -293,16 +301,13 @@ export class PaymentsService {
     return t?.tz ?? DEFAULT_TZ;
   }
 
-  private async result(
-    tx: Tx,
-    tenantId: string,
+  private result(
     p: PaymentRow,
     tz: string,
     s: { status: string; paidAmount: number; total: number },
-  ): Promise<PaymentResult> {
-    const names = await this.names(tx, tenantId, [p]);
+  ): PaymentResult {
     return {
-      payment: toPayment(p, tz, names),
+      payment: toPayment(p, tz),
       status: s.status as PaymentResult['status'],
       paidAmount: s.paidAmount,
       remainingAmount: remainingOf(s.total, s.paidAmount),
@@ -311,44 +316,19 @@ export class PaymentsService {
     };
   }
 
-  /** Tên người ghi/hủy qua hàm security definer (users chỉ cho đọc dòng của chính mình). Đã xóa tài khoản → không có. */
-  private async names(
-    tx: Tx,
-    tenantId: string,
-    rows: PaymentRow[],
-  ): Promise<Map<string, string>> {
-    const ids = [
-      ...new Set(
-        rows.flatMap((r) => [r.recordedBy, r.voidedBy].filter((x) => !!x)),
-      ),
-    ] as string[];
-    const out = new Map<string, string>();
-    if (!ids.length) return out;
-    const res = await tx.execute<{
-      user_id: string;
-      display_name: string | null;
-      deleted: boolean;
-    }>(
-      sql`select user_id, display_name, deleted from app_private.tenant_user_names(${tenantId}::uuid, array[${sql.join(
-        ids.map((i) => sql`${i}::uuid`),
-        sql`, `,
-      )}])`,
-    );
-    for (const r of res.rows)
-      if (!r.deleted) out.set(r.user_id, r.display_name ?? '');
-    return out;
+  /** Tên hiển thị của người thao tác (dòng `users` của chính họ): chụp vào payments lúc ghi/hủy. */
+  private async displayName(tx: Tx, userId: string): Promise<string> {
+    const [u] = await tx
+      .select({ name: users.displayName })
+      .from(users)
+      .where(eq(users.id, userId));
+    return u?.name ?? '';
   }
 }
 
 const yearOf = (date: string) => Number(date.slice(0, 4));
 
-const toPayment = (
-  r: PaymentRow,
-  tz: string,
-  names: Map<string, string>,
-): Payment => {
-  const actor = (id: string | null) =>
-    id && names.has(id) ? { id, name: names.get(id)! } : null;
+const toPayment = (r: PaymentRow, tz: string): Payment => {
   return {
     id: r.id,
     invoiceId: r.invoiceId,
@@ -357,9 +337,12 @@ const toPayment = (
     paidOn: r.paidOn,
     note: r.note,
     recordedAt: formatInZone(r.recordedAt, tz),
-    recordedBy: actor(r.recordedBy),
+    recordedBy: { id: r.recordedBy, name: r.recordedByName },
     voidedAt: r.voidedAt ? formatInZone(r.voidedAt, tz) : null,
-    voidedBy: actor(r.voidedBy),
+    voidedBy:
+      r.voidedBy && r.voidedByName !== null
+        ? { id: r.voidedBy, name: r.voidedByName }
+        : null,
     voidReason: r.voidReason,
   };
 };
