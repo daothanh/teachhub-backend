@@ -1,0 +1,32 @@
+#!/bin/bash
+# Sinh bởi Ansible. Chạy bằng root qua sudo, là thứ DUY NHẤT user `deploy` làm được (forced command + sudoers).
+# Giao thức: tag image trong SSH_ORIGINAL_COMMAND, GHCR token ở dòng đầu stdin. Không nhận tham số khác, không eval.
+set -euo pipefail
+[[ $# -eq 0 ]] || { echo "không nhận tham số" >&2; exit 2; }
+tag=${SSH_ORIGINAL_COMMAND:-}
+[[ $tag =~ ^(main|sha-[0-9a-f]{40})$ ]] || { echo "tag không hợp lệ" >&2; exit 2; }
+IFS= read -r token
+[[ $token =~ ^[A-Za-z0-9_]+$ ]] || { echo "token không hợp lệ" >&2; exit 2; }
+
+cd {{ app_dir }}
+# Cấu hình docker tạm: token ngắn hạn của workflow không đè login PAT của Ansible, và bị xóa khi xong.
+DOCKER_CONFIG=$(mktemp -d)
+export DOCKER_CONFIG
+trap 'rm -rf "$DOCKER_CONFIG"' EXIT
+printf '%s' "$token" | docker login ghcr.io -u github-actions --password-stdin >/dev/null
+
+old=$(sed -n 's/^IMAGE_TAG=//p' .env)
+export IMAGE_TAG=$tag # ghi đè .env cho pull/migrate; .env chỉ đổi sau khi migrate xong
+docker compose pull api worker migrate
+docker compose run -T --rm migrate # vai trò teachhub_owner; lỗi thì dừng, api/worker giữ bản cũ
+echo "IMAGE_TAG=$tag" > .env
+docker compose up -d --remove-orphans api worker
+for _ in $(seq 1 24); do
+  if docker compose exec -T api node -e "fetch('http://127.0.0.1:3000/health/ready').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"; then
+    echo "OK: $tag"; exit 0
+  fi
+  sleep 5
+done
+echo "api không ready sau 120s (tag cũ: ${old:-?})" >&2
+docker compose logs --tail=50 api >&2
+exit 1

@@ -41,7 +41,13 @@ Xem email OTP trong Mailpit: `ssh -L 8025:127.0.0.1:8025 root@<IP>`, rồi mở 
 
 Merge vào `main` → `image` build + đẩy GHCR (`sha-<40 hex>`, `main`) → `deploy-dev` (workflow_run, chỉ khi build thành công; hoặc chạy tay với input `tag`) → runner vào tailnet → SSH `deploy@VM` → `docker compose pull` → chạy `migrate` (vai trò `teachhub_owner`, thoát ≠ 0 thì dừng, api/worker giữ bản cũ) → ghi `IMAGE_TAG` vào `/opt/teachhub/.env` → `up -d api worker` → chờ `/health/ready` tối đa 120 giây (quá hạn thì job đỏ). Mỗi lần một deploy (`concurrency: deploy-dev`).
 
-Kết nối: cổng 22 công khai chỉ mở cho IP admin (Firewall Hetzner, giữ nguyên) nên runner đi qua Tailscale (`tailscale/github-action`, tag `tag:ci`). Tailscale chỉ cần kết nối ra ngoài, không mở thêm cổng. User `deploy` thuộc nhóm `docker`, không có sudo. Nhóm `docker` tương đương root trên VM nên khóa `DEV_SSH_PRIVATE_KEY` phải được bảo vệ như khóa root.
+Kết nối: cổng 22 công khai chỉ mở cho IP admin (Firewall Hetzner, giữ nguyên) nên runner đi qua Tailscale (`tailscale/github-action`, tag `tag:ci`). Tailscale chỉ cần kết nối ra ngoài, không mở thêm cổng.
+
+Quyền của `deploy` được khóa chặt, không dùng nhóm `docker` (nhóm này tương đương root):
+- Khóa SSH là forced command `sudo /usr/local/bin/teachhub-deploy` kèm `restrict` và `from="100.64.0.0/10"`; sshd drop-in `60-teachhub-deploy.conf` cũng chỉ cho `deploy` vào từ dải Tailscale, không tty, không forwarding.
+- sudoers (`/etc/sudoers.d/teachhub-deploy`) chỉ cho `deploy` chạy đúng script đó.
+- Script root-owned chạy chuỗi lệnh cố định: kiểm tag, login GHCR (cấu hình docker tạm), pull, migrate, ghi `IMAGE_TAG`, `up -d api worker`, chờ health. Tag lấy từ `SSH_ORIGINAL_COMMAND`, chỉ nhận `main` hoặc `sha-<40 hex>`; token ở dòng đầu stdin; không `eval`, không tham số khác.
+- Giao thức từ workflow: `printf '%s\n' "$GHCR_TOKEN" | ssh deploy@host "<tag>"`.
 
 Việc Owner phải làm một lần:
 

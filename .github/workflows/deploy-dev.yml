@@ -55,28 +55,7 @@ jobs:
         env:
           SSH_TARGET: ${{ secrets.DEV_SSH_USER }}@${{ secrets.DEV_SSH_HOST }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # Khóa chỉ chạy được `teachhub-deploy` trên VM (forced command): lệnh gửi đi là tag, token ở stdin.
         run: |
-          # Token GHCR đi qua stdin của ssh, không nằm trên dòng lệnh; script truyền làm đối số `bash -c`.
-          SCRIPT=$(cat <<'REMOTE'
-          set -euo pipefail
-          tag=$1; actor=$2
-          cd /opt/teachhub
-          read -r token
-          printf '%s' "$token" | docker login ghcr.io -u "$actor" --password-stdin >/dev/null
-          old=$(sed -n 's/^IMAGE_TAG=//p' .env)
-          export IMAGE_TAG=$tag   # ghi đè .env cho pull/migrate; .env chỉ đổi sau khi migrate xong
-          docker compose pull api worker migrate
-          docker compose run -T --rm migrate   # one-shot; mã thoát ≠ 0 dừng deploy, api/worker vẫn chạy bản cũ
-          echo "IMAGE_TAG=$tag" > .env
-          docker compose up -d --remove-orphans api worker
-          for i in $(seq 1 24); do
-            if docker compose exec -T api node -e "fetch('http://127.0.0.1:3000/health/ready').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"; then
-              echo "OK: $tag"; exit 0
-            fi
-            sleep 5
-          done
-          echo "api không ready sau 120s (tag cũ: ${old:-?})"; docker compose logs --tail=50 api; exit 1
-          REMOTE
-          )
           printf '%s\n' "$GHCR_TOKEN" | ssh -i ~/.ssh/id_deploy -o StrictHostKeyChecking=yes -o BatchMode=yes \
-            "$SSH_TARGET" "$(printf '%q ' bash -c "$SCRIPT" _ "$TAG" "$GITHUB_ACTOR")"
+            "$SSH_TARGET" "$TAG"
