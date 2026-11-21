@@ -392,73 +392,105 @@ describe('computeEnrollmentInvoice: bản nháp từ buổi và điểm danh', (
   });
 });
 
-describe('studentPeriodState: trạng thái học viên theo kỳ (D4, issue #179)', () => {
+describe('studentPeriodState: trạng thái học viên theo kỳ từ lịch sử (D4, issue #179)', () => {
+  const ch = (from: string, to: string, on: string) => ({ from, to, on });
   const st = (
-    status: string,
-    before: string | null,
-    changedOn: string | null,
-  ) =>
-    studentPeriodState(
-      { status, statusBefore: before, changedOn },
-      DEC.periodEnd,
-    );
+    current: string,
+    history: ReturnType<typeof ch>[],
+    end = DEC.periodEnd,
+  ) => studentPeriodState(current, history, end);
+  const JAN_END = '2027-01-31';
+  const FEB_END = '2027-02-28';
 
   it('đổi sang left/paused SAU cuối kỳ (giữa ngày 1 và ngày chốt) → kỳ vẫn xét như trước khi đổi', () => {
-    expect(st('left', 'active', '2027-01-03')).toEqual({
+    expect(st('left', [ch('active', 'left', '2027-01-03')])).toEqual({
       paused: false,
       leftOn: null,
     });
-    expect(st('paused', 'active', '2027-01-03')).toEqual({
+    expect(st('paused', [ch('active', 'paused', '2027-01-03')])).toEqual({
       paused: false,
       leftOn: null,
     });
-    expect(st('left', 'paused', '2027-01-03')).toEqual({
+    expect(st('left', [ch('paused', 'left', '2027-01-03')])).toEqual({
       paused: true,
       leftOn: null,
     });
   });
 
   it('left trong kỳ → leftOn = ngày rời; paused từ trong kỳ → chỉ buổi theo buổi', () => {
-    expect(st('left', 'active', '2026-12-20')).toEqual({
+    expect(st('left', [ch('active', 'left', '2026-12-20')])).toEqual({
       paused: false,
       leftOn: '2026-12-20',
     });
-    expect(st('paused', 'active', '2026-12-05')).toEqual({
+    expect(st('paused', [ch('active', 'paused', '2026-12-05')])).toEqual({
       paused: true,
       leftOn: null,
     });
   });
 
-  it('chưa có mốc (học viên đổi trước migration 0034): left không tính, paused theo D4', () => {
-    expect(st('left', null, null)).toBeNull();
-    expect(st('paused', null, null)).toEqual({ paused: true, leftOn: null });
-    expect(st('active', null, null)).toEqual({ paused: false, leftOn: null });
+  it('chưa có lịch sử (học viên đổi trước migration 0034): left không tính, paused theo D4, active đủ', () => {
+    expect(st('left', [])).toBeNull();
+    expect(st('paused', [])).toEqual({ paused: true, leftOn: null });
+    expect(st('active', [])).toEqual({ paused: false, leftOn: null });
   });
 
-  it('vector tiền: học viên left ngày 03/01 (sau kỳ) vẫn bị tính 8 buổi × 150.000 − vắng → 1.200.000', () => {
-    const state = st('left', 'active', '2027-01-03')!;
-    const r = computeEnrollmentInvoice(
-      perSession(),
-      enr({ leftOn: state.leftOn }),
-      DEC,
-      eightTaught,
-      att,
-      { paused: state.paused },
-    );
-    expect(r!.result.lines.reduce((n, l) => n + l.amount, 0)).toBe(1_200_000);
+  it('kịch bản 1 (catch-up): active → paused 10/02 → active 05/03: kỳ 01/2027 là active (đủ), kỳ 02/2027 là paused', () => {
+    const h = [
+      ch('active', 'paused', '2027-02-10'),
+      ch('paused', 'active', '2027-03-05'),
+    ];
+    expect(st('active', h, JAN_END)).toEqual({ paused: false, leftOn: null });
+    expect(st('active', h, FEB_END)).toEqual({ paused: true, leftOn: null });
   });
 
-  it('vector tiền: left ngày 05/12 (trong kỳ) chỉ tính buổi trước 05/12 (4 buổi → 600.000)', () => {
-    const state = st('left', 'active', '2026-12-05')!;
-    const r = computeEnrollmentInvoice(
-      perSession(),
-      enr({ leftOn: state.leftOn }),
-      DEC,
-      eightTaught,
-      new Map(),
-      { paused: state.paused },
+  it('kịch bản 2 (catch-up): left 20/12 → active 05/03: kỳ 12/2026 leftOn = 20/12 (không phải 05/03); kỳ 01/2027 không có dòng; từ 03/2027 active', () => {
+    const h = [
+      ch('active', 'left', '2026-12-20'),
+      ch('left', 'active', '2027-03-05'),
+    ];
+    expect(st('active', h, DEC.periodEnd)).toEqual({
+      paused: false,
+      leftOn: '2026-12-20',
+    });
+    expect(st('active', h, JAN_END)).toEqual({
+      paused: false,
+      leftOn: '2026-12-20',
+    });
+    expect(st('active', h, '2027-03-31')).toEqual({
+      paused: false,
+      leftOn: null,
+    });
+  });
+
+  it('vector tiền: left ngày 03/01 (sau kỳ) vẫn bị tính 8 buổi → 1.200.000; left 05/12 (trong kỳ) → 4 buổi 600.000; kịch bản 2 kỳ 12/2026 → 9 buổi?: chỉ buổi trước 20/12', () => {
+    const money = (
+      state: NonNullable<ReturnType<typeof st>>,
+      att2: ReadonlyMap<string, string>,
+    ) =>
+      computeEnrollmentInvoice(
+        perSession(),
+        enr({ leftOn: state.leftOn }),
+        DEC,
+        eightTaught,
+        att2,
+        { paused: state.paused },
+      )!.result.lines.reduce((n, l) => n + l.amount, 0);
+    expect(money(st('left', [ch('active', 'left', '2027-01-03')])!, att)).toBe(
+      1_200_000,
     );
-    expect(r!.result.lines.reduce((n, l) => n + l.amount, 0)).toBe(600_000);
+    expect(
+      money(st('left', [ch('active', 'left', '2026-12-05')])!, new Map()),
+    ).toBe(600_000);
+    // kịch bản 2: rời 20/12, hồi lại 05/03 → kỳ 12/2026 tính cả 8 buổi (đều trước 20/12), không bị chặn như đang active sau này.
+    expect(
+      money(
+        st('active', [
+          ch('active', 'left', '2026-12-20'),
+          ch('left', 'active', '2027-03-05'),
+        ])!,
+        new Map(),
+      ),
+    ).toBe(1_200_000);
   });
 });
 

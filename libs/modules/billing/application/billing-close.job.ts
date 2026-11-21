@@ -22,6 +22,7 @@ import {
   invoices,
   recordOutboxEvent,
   scheduleRules,
+  studentStatusHistory,
   sessions,
   students,
   tenants,
@@ -41,10 +42,10 @@ import {
   type PeriodDates,
   parseBillingSettings,
   closablePeriods,
+  type StatusChange,
   studentPeriodState,
 } from '../domain/billing-period.js';
-import { minutesUntilSendWindow } from '../domain/dunning.js';
-import { minuteOfDay } from './dunning.job.js';
+import { minuteOfDay, minutesUntilSendWindow } from '../domain/dunning.js';
 import {
   planCarryOver,
   prevAdjustmentDescription,
@@ -65,6 +66,19 @@ export interface BillingDraftsReadyPayload extends Record<string, unknown> {
   draftCount: number;
   draftTotalAmount: number;
 }
+
+interface ReadyPeriod {
+  periodId: string;
+  periodMonth: string;
+  count: number;
+  total: number;
+}
+interface ClosedPeriod {
+  draftCount: number;
+  /** Nháp chốt được của kỳ (để gộp thông báo), null = không có. */
+  ready: ReadyPeriod | null;
+}
+const NONE: ClosedPeriod = { draftCount: 0, ready: null };
 
 const LINE_CHUNK = 1000;
 /** Mã lỗi Postgres (vd. 23505) của lỗi gốc, hoặc tên lỗi: không log message (có thể chứa dữ liệu học viên). */
@@ -87,6 +101,8 @@ const errorCode = (e: unknown): string => {
 @Injectable()
 export class BillingCloseJob {
   private readonly log = new Logger(BillingCloseJob.name);
+  /** Đồng hồ thật (khác `now` của cron); test ghi đè. */
+  clock: () => Date = () => new Date();
 
   constructor(
     private readonly tx: TxService,
@@ -119,12 +135,17 @@ export class BillingCloseJob {
               .where(eq(billingPeriods.tenantId, tenant.id));
             // Catch-up: mọi kỳ đã tới ngày chốt mà chưa có, cũ → mới, cùng một giao dịch (idempotent: chạy lại không có kỳ thiếu).
             let n = 0;
+            const ready: ReadyPeriod[] = [];
             for (const period of closablePeriods(
               localDate(now, tenant.tz),
               parseBillingSettings(tenant.settings),
               last?.m ?? null,
-            ))
-              n += await this.closeTenant(t, tenant.id, tenant.tz, period, now);
+            )) {
+              const r = await this.closeTenant(t, tenant.id, tenant.tz, period);
+              n += r.draftCount;
+              if (r.ready) ready.push(r.ready);
+            }
+            await this.notifyReady(t, tenant.id, tenant.tz, ready);
             return n;
           });
         } catch (e) {
@@ -134,6 +155,38 @@ export class BillingCloseJob {
       }
       if (failed) throw new Error(`${failed} tenant không tạo được bản nháp`);
       return created;
+    });
+  }
+
+  /**
+   * MỘT sự kiện `billing_drafts_ready` cho cả lần chạy của tenant (catch-up nhiều kỳ không bắn mỗi kỳ một push): `periodId`/`periodMonth` là kỳ
+   * mới nhất có nháp chốt được, `draftCount`/`draftTotalAmount` cộng các kỳ. Giờ yên lặng (Spec §6.7): job chạy 02:00 nên hẹn tới 07:00 giờ
+   * tenant (ngoài khung 07:00–21:30 thì tới 07:00 kế tiếp) qua `next_attempt_at` của outbox, tính từ giờ chạy THẬT (`clock`), không từ
+   * `job.timestamp` (lần BullMQ thử lại muộn không bị hẹn vào quá khứ/sai khung). Một sự kiện, một thông báo (khóa theo eventId): không gửi trùng.
+   */
+  private async notifyReady(
+    t: Tx,
+    tenantId: string,
+    tz: string,
+    ready: ReadyPeriod[],
+  ): Promise<void> {
+    const latest = ready.at(-1);
+    if (!latest) return;
+    const payload: BillingDraftsReadyPayload = {
+      periodId: latest.periodId,
+      periodMonth: latest.periodMonth,
+      draftCount: ready.reduce((n, r) => n + r.count, 0),
+      draftTotalAmount: ready.reduce((n, r) => n + r.total, 0),
+    };
+    const wall = this.clock();
+    const waitMin = minutesUntilSendWindow(minuteOfDay(wall, tz));
+    await recordOutboxEvent(t, {
+      tenantId,
+      type: BILLING_DRAFTS_READY,
+      payload,
+      ...(waitMin && {
+        deliverAt: new Date(wall.getTime() + waitMin * 60_000),
+      }),
     });
   }
 
@@ -197,7 +250,7 @@ export class BillingCloseJob {
   }
 
   /**
-   * Một tenant trong một giao dịch; trả số bản nháp mới. Kỳ đã có thì chỉ chạy lại đúng ngày chốt (bù học viên mới);
+   * Một kỳ của tenant trong giao dịch của `run`; trả số bản nháp mới và nháp chốt được. Kỳ đã có thì chỉ chạy lại đúng ngày chốt (bù học viên mới);
    * lỡ ngày chốt thì kỳ chưa có vẫn được tạo ở lần chạy sau (catch-up, `run` gọi từng kỳ cũ → mới). Kỳ chỉ được tạo khi có bản nháp.
    */
   private async closeTenant(
@@ -205,20 +258,19 @@ export class BillingCloseJob {
     tenantId: string,
     tz: string,
     period: PeriodDates,
-    now: Date,
-  ): Promise<number> {
+  ): Promise<ClosedPeriod> {
     const periodWhere = and(
       eq(billingPeriods.tenantId, tenantId),
       eq(billingPeriods.periodMonth, period.periodMonth),
     );
     const [known] = await t.select().from(billingPeriods).where(periodWhere);
-    if (known && !period.isCloseDay) return 0;
+    if (known && !period.isCloseDay) return NONE;
 
     const classRows = await t
       .select()
       .from(classes)
       .where(and(eq(classes.tenantId, tenantId), isNotNull(classes.feeType)));
-    if (!classRows.length) return 0;
+    if (!classRows.length) return NONE;
     const classIds = classRows.map((c) => c.id);
     const courseIds = classRows
       .filter((c) => c.feeType === 'course')
@@ -232,9 +284,6 @@ export class BillingCloseJob {
         leftOn: enrollments.leftOn,
         feeOverride: enrollments.feeOverride,
         status: students.status,
-        statusBefore: students.statusBefore,
-        statusEffectiveOn: students.statusEffectiveOn,
-        statusChangedAt: students.statusChangedAt,
       })
       .from(enrollments)
       .innerJoin(
@@ -255,7 +304,36 @@ export class BillingCloseJob {
           ),
         ),
       );
-    if (!enrollmentRows.length) return 0;
+    if (!enrollmentRows.length) return NONE;
+
+    // Lịch sử đổi trạng thái để xét học viên theo kỳ (D4): ngày đổi theo giờ tenant, cũ → mới.
+    const history = new Map<string, StatusChange[]>();
+    const studentIds = [...new Set(enrollmentRows.map((r) => r.studentId))];
+    for (let i = 0; i < studentIds.length; i += 5000) {
+      const rows = await t
+        .select({
+          studentId: studentStatusHistory.studentId,
+          from: studentStatusHistory.fromStatus,
+          to: studentStatusHistory.toStatus,
+          at: studentStatusHistory.changedAt,
+        })
+        .from(studentStatusHistory)
+        .where(
+          and(
+            eq(studentStatusHistory.tenantId, tenantId),
+            inArray(
+              studentStatusHistory.studentId,
+              studentIds.slice(i, i + 5000),
+            ),
+          ),
+        )
+        .orderBy(studentStatusHistory.changedAt, studentStatusHistory.id);
+      for (const r of rows) {
+        const list = history.get(r.studentId) ?? [];
+        list.push({ from: r.from, to: r.to, on: localDate(r.at, tz) });
+        history.set(r.studentId, list);
+      }
+    }
 
     const invoicedStudents = async (periodId: string) =>
       new Set(
@@ -370,13 +448,8 @@ export class BillingCloseJob {
       if (!c) continue;
       // D4: trạng thái học viên theo kỳ (mốc đổi tính theo ngày địa phương của tenant).
       const state = studentPeriodState(
-        {
-          status: row.status,
-          statusBefore: row.statusBefore,
-          changedOn:
-            row.statusEffectiveOn ??
-            (row.statusChangedAt ? localDate(row.statusChangedAt, tz) : null),
-        },
+        row.status,
+        history.get(row.studentId) ?? [],
         period.periodEnd,
       );
       if (!state || (state.leftOn && state.leftOn <= period.periodMonth))
@@ -434,7 +507,7 @@ export class BillingCloseJob {
         d.courses.push({ no: r.installmentNo, count: r.installmentCount });
       drafts.set(enr.studentId, d);
     }
-    if (!drafts.size) return 0;
+    if (!drafts.size) return NONE;
 
     // Từ đây ghi: tạo kỳ nếu chưa có rồi khóa dòng kỳ để hai lần chạy chồng nhau nối tiếp nhau, và kiểm lại học viên đã có
     // hóa đơn dưới khóa.
@@ -546,7 +619,7 @@ export class BillingCloseJob {
     }
     for (let i = 0; i < lineRows.length; i += LINE_CHUNK)
       await t.insert(invoiceLines).values(lineRows.slice(i, i + LINE_CHUNK));
-    if (!draftCount) return 0;
+    if (!draftCount) return NONE;
 
     // Kỳ đã `closed` mà có bản nháp chốt được mới (học viên vào muộn) thì quay lại `drafting`.
     if (bp.status === 'closed' && readyCount > 0)
@@ -560,23 +633,17 @@ export class BillingCloseJob {
           ),
         );
 
-    if (!readyCount) return draftCount; // chỉ có nháp không phát sinh: không báo giáo viên
-
-    const payload: BillingDraftsReadyPayload = {
-      periodId: bp.id,
-      periodMonth: bp.periodMonth,
-      draftCount: readyCount,
-      draftTotalAmount: readyTotalAmount,
+    // Gộp thông báo ở `run`: một lần chạy catch-up chỉ một sự kiện cho cả tenant.
+    return {
+      draftCount,
+      ready: readyCount
+        ? {
+            periodId: bp.id,
+            periodMonth: bp.periodMonth,
+            count: readyCount,
+            total: readyTotalAmount,
+          }
+        : null,
     };
-    // Giờ yên lặng (Spec §6.7): job chạy 02:00 nên push "học phí đã sẵn sàng" hẹn tới 07:00 giờ tenant (ngoài khung 07:00–21:30 thì tới
-    // 07:00 kế tiếp). Hẹn qua `next_attempt_at` của outbox: một sự kiện, một thông báo (khóa theo eventId) nên không gửi trùng.
-    const waitMin = minutesUntilSendWindow(minuteOfDay(now, tz));
-    await recordOutboxEvent(t, {
-      tenantId,
-      type: BILLING_DRAFTS_READY,
-      payload,
-      ...(waitMin && { deliverAt: new Date(now.getTime() + waitMin * 60_000) }),
-    });
-    return draftCount;
   }
 }

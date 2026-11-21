@@ -10,6 +10,13 @@
 // D3 Buổi theo buổi còn `planned` lúc chốt (chưa điểm danh) không tính tiền nhưng vẫn có dòng 0 đ (`charged = false`, lý do `not_marked`) để giáo viên thấy.
 // D4 Học viên `paused`: vẫn tính buổi theo buổi đã dạy, không thu học phí tháng/đợt trọn khóa; `left` hoặc ghi danh rời
 //    lớp trước kỳ: không tính.
+//    Trạng thái học viên xét THEO KỲ, không theo lúc chạy job (issue #179), từ lịch sử `student_status_history` (trigger ghi mỗi lần
+//    `status` đổi): trạng thái cuối kỳ = `to_status` của dòng cuối có ngày đổi (giờ tenant) ≤ ngày cuối kỳ; không dòng nào ≤ cuối kỳ thì
+//    `from_status` của dòng đầu (đổi sau cuối kỳ nên giữa ngày 1 và ngày chốt vẫn thu kỳ M); không có lịch sử (học viên đổi trước
+//    migration 0034) thì trạng thái hiện tại. `left`: ngày rời L = ngày của lần chuyển sang `left` gần nhất ≤ cuối kỳ, ghi danh coi
+//    như rời lớp ngày L (buổi từ L không tính; L ≤ ngày 1 của kỳ → không dòng); `left` không có lịch sử → không tính (cách cũ).
+//    Đổi hai lần trở lên (active → paused → active) xét đúng theo từng kỳ. shortcut: trạng thái xét tại CUỐI kỳ, đổi rồi đổi lại ngay trong
+//    kỳ (vd. left 20/12 → active 25/12) coi như đã active cả kỳ.
 // D5 Học viên không có dòng nào: không có hóa đơn.
 // D6 Số dư chuyển kỳ (S6-BE-03, US-7.6): KẾT CHUYỂN TẠI THỜI ĐIỂM PHÁT HÀNH qua sổ học viên (Coordinator chốt; giữ cách ghi thanh
 //    toán theo hóa đơn, ít rủi ro sai tiền nhất). `billing.close` chỉ tạo bản nháp có dòng `carry_over` XEM TRƯỚC = Σ còn nợ các
@@ -146,29 +153,31 @@ export function latestClosablePeriod(
 
 export type StudentStatus = 'active' | 'paused' | 'left';
 
-export interface StudentStatusRow {
-  status: string;
-  statusBefore: string | null;
-  /** Mốc hiệu lực: `status_effective_on` hoặc ngày địa phương của `status_changed_at`; null = chưa có mốc. */
-  changedOn: string | null;
+/** Một lần đổi trạng thái; `on` = ngày địa phương của tenant, danh sách phải sắp theo thời điểm đổi tăng dần. */
+export interface StatusChange {
+  from: string;
+  to: string;
+  on: string;
 }
 
 /**
  * Trạng thái học viên áp cho kỳ kết thúc `periodEnd` (D4): `paused` = chỉ tính buổi theo buổi; `leftOn` = ngày rời (buổi từ
- * ngày này không tính, ngày ≤ đầu kỳ thì ghi danh tự bị loại); null = học viên không có dòng nào trong kỳ (rời lớp, mốc không rõ).
+ * ngày này không tính, ngày ≤ đầu kỳ thì ghi danh tự bị loại); null = học viên không có dòng nào trong kỳ (`left`, không rõ ngày rời).
  */
 export function studentPeriodState(
-  s: StudentStatusRow,
+  current: string,
+  history: readonly StatusChange[],
   periodEnd: string,
 ): { paused: boolean; leftOn: string | null } | null {
-  const asOf = (
-    s.changedOn && s.changedOn > periodEnd
-      ? (s.statusBefore ?? 'active')
-      : s.status
-  ) as StudentStatus;
-  if (asOf === 'left')
-    return s.changedOn ? { paused: false, leftOn: s.changedOn } : null;
-  return { paused: asOf === 'paused', leftOn: null };
+  const upTo = history.filter((c) => c.on <= periodEnd);
+  const status = history.length
+    ? (upTo.at(-1)?.to ?? history[0]!.from)
+    : current;
+  if (status === 'left') {
+    const leftOn = upTo.findLast((c) => c.to === 'left')?.on;
+    return leftOn ? { paused: false, leftOn } : null;
+  }
+  return { paused: status === 'paused', leftOn: null };
 }
 
 /** Số kỳ bù tối đa một lần chạy (một năm): worker dừng lâu hơn thì kỳ cũ hơn cần xử lý tay. */

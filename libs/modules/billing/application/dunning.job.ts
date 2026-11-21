@@ -8,10 +8,10 @@ import {
   type Tx,
 } from '@teachhub/db';
 import { JobRuns } from '@teachhub/infra';
-import { formatInZone } from '@teachhub/modules/schedule';
 import {
   type DueStep,
   inSendWindow,
+  minuteOfDay,
   isDunnable,
   parseDunningSettings,
   PAYMENT_REMINDER,
@@ -27,12 +27,6 @@ const errorCode = (e: unknown): string => {
   const base = e instanceof Error ? (e.cause ?? e) : e;
   const code = (base as { code?: unknown }).code;
   return typeof code === 'string' ? code : ((base as Error)?.name ?? 'unknown');
-};
-
-/** Phút trong ngày của `at` theo giờ tenant. */
-export const minuteOfDay = (at: Date, tz: string): number => {
-  const t = formatInZone(at, tz);
-  return Number(t.slice(11, 13)) * 60 + Number(t.slice(14, 16));
 };
 
 interface DueRow extends Record<string, unknown> {

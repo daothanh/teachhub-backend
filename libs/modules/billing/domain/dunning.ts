@@ -45,6 +45,18 @@ export function parseDunningSettings(settings: unknown): DunningSettings {
   };
 }
 
+/** Phút trong ngày của `at` theo giờ tenant (`tz` IANA). */
+export const minuteOfDay = (at: Date, tz: string): number => {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: tz,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(at);
+  const n = (type: string) => Number(parts.find((p) => p.type === type)?.value);
+  return n('hour') * 60 + n('minute');
+};
+
 /** `now` (phút trong ngày theo giờ tenant) có trong khung 07:00–21:30 không. */
 export const inSendWindow = (minuteOfDay: number): boolean =>
   minuteOfDay >= WINDOW_START_MIN && minuteOfDay <= WINDOW_END_MIN;

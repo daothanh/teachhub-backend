@@ -1,5 +1,5 @@
 {
-  "id": "2e347f8f-85bd-430b-ae36-cff9718a71f4",
+  "id": "2c89312a-c439-4cf8-93c9-0d0e212573fd",
   "prevId": "8487853c-4f43-43d8-a039-52090b942bdb",
   "version": "7",
   "dialect": "postgresql",
@@ -3669,6 +3669,118 @@
       },
       "isRLSEnabled": false
     },
+    "public.student_status_history": {
+      "name": "student_status_history",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "student_id": {
+          "name": "student_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "from_status": {
+          "name": "from_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "to_status": {
+          "name": "to_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "changed_at": {
+          "name": "changed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "student_status_history_student_idx": {
+          "name": "student_status_history_student_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "student_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "changed_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "student_status_history_tenant_id_tenants_id_fk": {
+          "name": "student_status_history_tenant_id_tenants_id_fk",
+          "tableFrom": "student_status_history",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "student_status_history_tenant_student_fk": {
+          "name": "student_status_history_tenant_student_fk",
+          "tableFrom": "student_status_history",
+          "tableTo": "students",
+          "columnsFrom": [
+            "tenant_id",
+            "student_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "student_status_history_status_check": {
+          "name": "student_status_history_status_check",
+          "value": "\"student_status_history\".\"from_status\" in ('active', 'paused', 'left') and \"student_status_history\".\"to_status\" in ('active', 'paused', 'left') and \"student_status_history\".\"from_status\" <> \"student_status_history\".\"to_status\""
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.students": {
       "name": "students",
       "schema": "",
@@ -3735,18 +3847,6 @@
         "status_effective_on": {
           "name": "status_effective_on",
           "type": "date",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "status_changed_at": {
-          "name": "status_changed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "status_before": {
-          "name": "status_before",
-          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
