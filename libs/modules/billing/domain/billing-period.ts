@@ -3,11 +3,20 @@
 //
 // Quyết định nghiệp vụ (Owner chốt, vòng sửa sau review):
 // D1 Kỳ M = tháng dương lịch M, chốt vào ngày `billingCloseDay` (1–28, mặc định 1) của tháng M+1: hóa đơn gồm mọi buổi
-//    có ngày thuộc tháng M, kỳ liền kề không hở không chồng. Lỡ ngày chốt thì kỳ vẫn được tạo ở lần chạy sau (catch-up).
+//    có ngày thuộc tháng M, kỳ liền kề không hở không chồng. Lỡ ngày chốt thì kỳ vẫn được tạo ở lần chạy sau (catch-up): job tạo MỌI kỳ đã tới ngày chốt mà
+//    chưa có (tháng sau kỳ mới nhất đã có của tenant), thứ tự cũ → mới, tối đa 12 kỳ; tenant chưa có kỳ nào chỉ tạo kỳ mới nhất. Kỳ cũ tạo muộn
+//    có `closeDate`/`dueDate` đúng như nếu đã chốt đúng hạn (hạn có thể đã qua; nhắc nợ xử lý khi phát hành).
 // D2 Hạn thanh toán = ngày chốt + `billingDueDays` (mặc định 10).
 // D3 Buổi theo buổi còn `planned` lúc chốt (chưa điểm danh) không tính tiền nhưng vẫn có dòng 0 đ (`charged = false`, lý do `not_marked`) để giáo viên thấy.
 // D4 Học viên `paused`: vẫn tính buổi theo buổi đã dạy, không thu học phí tháng/đợt trọn khóa; `left` hoặc ghi danh rời
 //    lớp trước kỳ: không tính.
+//    Trạng thái học viên xét THEO KỲ, không theo lúc chạy job (issue #179), từ lịch sử `student_status_history` (trigger ghi mỗi lần
+//    `status` đổi): trạng thái cuối kỳ = `to_status` của dòng cuối có ngày đổi (giờ tenant) ≤ ngày cuối kỳ; không dòng nào ≤ cuối kỳ thì
+//    `from_status` của dòng đầu (đổi sau cuối kỳ nên giữa ngày 1 và ngày chốt vẫn thu kỳ M); không có lịch sử (học viên đổi trước
+//    migration 0034) thì trạng thái hiện tại. `left`: ngày rời L = ngày của lần chuyển sang `left` gần nhất ≤ cuối kỳ, ghi danh coi
+//    như rời lớp ngày L (buổi từ L không tính; L ≤ ngày 1 của kỳ → không dòng); `left` không có lịch sử → không tính (cách cũ).
+//    Đổi hai lần trở lên (active → paused → active) xét đúng theo từng kỳ. shortcut: trạng thái xét tại CUỐI kỳ, đổi rồi đổi lại ngay trong
+//    kỳ (vd. left 20/12 → active 25/12) coi như đã active cả kỳ.
 // D5 Học viên không có dòng nào: không có hóa đơn.
 // D6 Số dư chuyển kỳ (S6-BE-03, US-7.6): KẾT CHUYỂN TẠI THỜI ĐIỂM PHÁT HÀNH qua sổ học viên (Coordinator chốt; giữ cách ghi thanh
 //    toán theo hóa đơn, ít rủi ro sai tiền nhất). `billing.close` chỉ tạo bản nháp có dòng `carry_over` XEM TRƯỚC = Σ còn nợ các
@@ -142,6 +151,70 @@ export function latestClosablePeriod(
   };
 }
 
+export type StudentStatus = 'active' | 'paused' | 'left';
+
+/** Một lần đổi trạng thái; `on` = ngày địa phương của tenant, danh sách phải sắp theo thời điểm đổi tăng dần. */
+export interface StatusChange {
+  from: string;
+  to: string;
+  on: string;
+}
+
+/**
+ * Trạng thái học viên áp cho kỳ kết thúc `periodEnd` (D4): `paused` = chỉ tính buổi theo buổi; `leftOn` = ngày rời (buổi từ
+ * ngày này không tính, ngày ≤ đầu kỳ thì ghi danh tự bị loại); null = học viên không có dòng nào trong kỳ (`left`, không rõ ngày rời).
+ */
+export function studentPeriodState(
+  current: string,
+  history: readonly StatusChange[],
+  periodEnd: string,
+): { paused: boolean; leftOn: string | null } | null {
+  const upTo = history.filter((c) => c.on <= periodEnd);
+  const status = history.length
+    ? (upTo.at(-1)?.to ?? history[0]!.from)
+    : current;
+  if (status === 'left') {
+    const leftOn = upTo.findLast((c) => c.to === 'left')?.on;
+    return leftOn ? { paused: false, leftOn } : null;
+  }
+  return { paused: status === 'paused', leftOn: null };
+}
+
+/** Số kỳ bù tối đa một lần chạy (một năm): worker dừng lâu hơn thì kỳ cũ hơn cần xử lý tay. */
+export const MAX_CATCH_UP_PERIODS = 12;
+
+/**
+ * Các kỳ cần tạo, cũ → mới (D1, issue #179): mọi kỳ đã tới ngày chốt có tháng SAU `lastKnownMonth` (tháng của kỳ mới nhất đã có;
+ * null = tenant chưa có kỳ nào → chỉ kỳ mới nhất, không lần ngược về trước lúc dùng hệ thống). Luôn có kỳ mới nhất (để chạy lại đúng ngày
+ * chốt bù học viên mới). Tối đa `MAX_CATCH_UP_PERIODS` kỳ gần nhất.
+ */
+export function closablePeriods(
+  today: string,
+  settings: BillingSettings,
+  lastKnownMonth: string | null,
+): PeriodDates[] {
+  const latest = latestClosablePeriod(today, settings);
+  const out = [latest];
+  if (lastKnownMonth === null) return out;
+  // Lùi từng tháng: ngày chốt của kỳ cũ hơn = `closeDay` của tháng liền sau kỳ đó (đã qua).
+  let prev = latest;
+  while (out.length < MAX_CATCH_UP_PERIODS) {
+    const periodEnd = addDays(prev.periodMonth, -1);
+    const periodMonth = monthStart(periodEnd);
+    if (periodMonth <= lastKnownMonth) break;
+    const closeDate = `${prev.periodMonth.slice(0, 7)}-${String(settings.closeDay).padStart(2, '0')}`;
+    prev = {
+      periodMonth,
+      periodEnd,
+      closeDate,
+      dueDate: addDays(closeDate, settings.dueDays),
+      isCloseDay: false,
+    };
+    out.unshift(prev);
+  }
+  return out;
+}
+
 // ---- Cấu hình học phí đọc từ jsonb ----
 
 const bool = (v: unknown) => (typeof v === 'boolean' ? v : undefined);
@@ -217,6 +290,11 @@ export function toCalcAttendance(
 // ---- Tính hóa đơn của một ghi danh ----
 
 export interface ClassFee {
+  /**
+   * Ngày của mọi buổi trong khóa theo cấu hình lớp (quy tắc lặp hằng tuần trong [ngày bắt đầu, ngày kết thúc]); chỉ dùng cho lớp
+   * trọn khóa. null/rỗng = cấu hình chưa đủ để tính (lớp không kỳ hạn, chưa có quy tắc lặp, khóa dài quá mốc sinh) → dùng shortcut.
+   */
+  courseDates?: string[] | null;
   className: string;
   feeType: FeeType;
   feeAmount: number;
@@ -249,8 +327,10 @@ export interface EnrollmentInvoice {
 /**
  * Tính phần hóa đơn của một ghi danh trong kỳ bằng `calculateInvoice`; null = ghi danh này không sinh dòng tiền
  * (trọn khóa đã hết đợt, hoặc lớp trọn khóa chưa có buổi nào để chia).
- * shortcut: trọn khóa lấy tổng buổi = số buổi chưa hủy hiện có của lớp (chưa có cột tổng buổi khóa); đợt n = kỳ thứ n
- * kể từ tháng học viên vào lớp. Nâng cấp khi có cấu hình tổng buổi của khóa.
+ * Trọn khóa (US-7.1 AC5): tổng buổi = số buổi của khóa theo cấu hình lớp (`courseDates`), còn lại = các buổi từ ngày học viên vào;
+ * học viên vào sau ngày cuối khóa không có dòng. Đợt n = kỳ thứ n kể từ tháng học viên vào lớp.
+ * shortcut: khi lớp không đủ cấu hình để biết tổng buổi (không ngày kết thúc, chưa có quy tắc lặp) lấy tổng = số buổi chưa hủy hiện có
+ * của lớp; lệch khi buổi được sinh cuốn chiếu (job ghi cảnh báo). Nâng cấp khi lớp trọn khóa bắt buộc có ngày kết thúc hoặc số buổi khai báo.
  */
 export function computeEnrollmentInvoice(
   cls: ClassFee,
@@ -312,15 +392,20 @@ export function computeEnrollmentInvoice(
     };
   }
   if (cls.feeType === 'course') {
+    const nominal = cls.courseDates?.length ? cls.courseDates : null;
     const live = sessions.filter((s) => s.status !== 'cancelled');
-    if (live.length < 1) return null;
+    const total = nominal ? nominal.length : live.length;
+    const remaining = nominal
+      ? nominal.filter((d) => d >= enr.joinedOn).length
+      : live.filter((s) => s.date >= enr.joinedOn).length;
+    if (total < 1 || (nominal && remaining < 1)) return null;
     const installmentNo = monthsBetween(enr.joinedOn, period.periodMonth) + 1;
     if (installmentNo < 1 || installmentNo > rules.installments) return null;
     return {
       result: calculateInvoice({
         ...input,
-        totalSessions: live.length,
-        remainingSessions: live.filter((s) => s.date >= enr.joinedOn).length,
+        totalSessions: total,
+        remainingSessions: remaining,
         installmentNo,
       }),
       installmentNo,

@@ -17,6 +17,7 @@ describe('billing: job billing.close + API kỳ thu, hóa đơn, điều chỉnh
   let t: TestApp;
   let pool: pg.Pool;
   let job: BillingCloseJob;
+  let wall = CLOSE_A;
   let notifier: BillingReadyNotifier;
   let pushed: {
     token: string;
@@ -136,6 +137,7 @@ describe('billing: job billing.close + API kỳ thu, hóa đơn, điều chỉnh
     pool = new pg.Pool({ connectionString: t.db.url('teachhub_worker') });
     const tx = new TxService(drizzle(pool, { schema, casing: 'snake_case' }));
     job = new BillingCloseJob(tx, new JobRuns(tx));
+    job.clock = () => wall; // giờ chạy thật của job; mặc định = giờ cron chạy kỳ 12/2026
     pushed = [];
     const fakePush = {
       enabled: true,
@@ -384,8 +386,12 @@ describe('billing: job billing.close + API kỳ thu, hóa đơn, điều chỉnh
 
   it('AC-3: ghi đúng một sự kiện outbox billing_drafts_ready cùng giao dịch; consumer tạo thông báo + push data-only cho chủ tenant, xử lý lại không gửi trùng', async () => {
     const [ev] = await q(
-      `select id, payload from outbox_events where tenant_id = $1 and type = 'billing_drafts_ready'`,
+      `select id, payload, next_attempt_at from outbox_events where tenant_id = $1 and type = 'billing_drafts_ready'`,
       [A.tenantId],
+    );
+    // Giờ yên lặng: job chạy 02:00 VN (19:00Z) → sự kiện hẹn 07:00 VN ngày 01/01/2027 (00:00Z).
+    expect(new Date(ev.next_attempt_at).toISOString()).toBe(
+      '2027-01-01T00:00:00.000Z',
     );
     const [period] = await periodsOf(A);
     expect(ev.payload).toEqual({
@@ -882,6 +888,79 @@ describe('billing: job billing.close + API kỳ thu, hóa đơn, điều chỉnh
     expect(await periodsOf(C)).toHaveLength(1);
   });
 
+  it('S3 (issue #179): học viên chuyển left/paused sau cuối kỳ (giữa ngày 1 và ngày chốt) vẫn bị tính kỳ M; left giữa kỳ chỉ tính buổi trước ngày rời; trigger ghi lịch sử', async () => {
+    const H = await seedTenant(t.worker);
+    await q(
+      `update tenants set settings = '{"billingCloseDay": 5}' where id = $1`,
+      [H.tenantId],
+    );
+    const [per, mon] = [randomUUID(), randomUUID()];
+    await addClass(H, per, 'H-Toán', ['per_session', 100_000, null]);
+    await addClass(H, mon, 'H-Văn', ['monthly', 400_000, null]);
+    const [lateLeft, latePaused, midLeft, insertedLeft] = [
+      randomUUID(),
+      randomUUID(),
+      randomUUID(),
+      randomUUID(),
+    ];
+    for (const [id, name] of [
+      [lateLeft, 'Lan'],
+      [latePaused, 'Mai'],
+      [midLeft, 'Nga'],
+      [insertedLeft, 'Oanh'],
+    ] as const)
+      await addStudent(H, id, name, name === 'Oanh' ? 'left' : 'active');
+    for (const id of [lateLeft, midLeft, insertedLeft])
+      await enroll(H, per, id);
+    await enroll(H, mon, latePaused);
+    for (const d of ['2026-12-10', '2026-12-25'])
+      await q(
+        `insert into sessions (id, tenant_id, class_id, session_date, starts_at, ends_at, status)
+         values ($1, $2, $3, $4, $5, $6, 'taught')`,
+        [randomUUID(), H.tenantId, per, d, `${d}T11:00:00Z`, `${d}T12:00:00Z`],
+      );
+    await q(`update students set status = 'left' where id = any($1)`, [
+      [lateLeft, midLeft],
+    ]);
+    await q(`update students set status = 'paused' where id = $1`, [
+      latePaused,
+    ]);
+    // Trigger ghi đúng một dòng lịch sử mỗi lần đổi thật; INSERT với status khác 'active' (Oanh) không có lịch sử (cách cũ: left không tính).
+    expect(
+      await q(
+        `select s.full_name, h.from_status, h.to_status from student_status_history h join students s on s.id = h.student_id
+          where h.tenant_id = $1 order by s.full_name`,
+        [H.tenantId],
+      ),
+    ).toEqual([
+      { full_name: 'Lan', from_status: 'active', to_status: 'left' },
+      { full_name: 'Mai', from_status: 'active', to_status: 'paused' },
+      { full_name: 'Nga', from_status: 'active', to_status: 'left' },
+    ]);
+    await q(`update students set status = status where tenant_id = $1`, [
+      H.tenantId,
+    ]); // không đổi → không thêm dòng
+    expect(
+      await q(`select 1 from student_status_history where tenant_id = $1`, [
+        H.tenantId,
+      ]),
+    ).toHaveLength(3);
+    // Lan, Mai đổi trạng thái 03/01/2027 (sau kỳ 12/2026, trước ngày chốt 05/01); Nga rời 20/12/2026.
+    await q(
+      `update student_status_history set changed_at = '2027-01-03T03:00:00Z' where student_id = any($1)`,
+      [[lateLeft, latePaused]],
+    );
+    await q(
+      `update student_status_history set changed_at = '2026-12-20T03:00:00Z' where student_id = $1`,
+      [midLeft],
+    );
+    await job.run(new Date('2027-01-04T19:00:00Z')); // 02:00 ngày 05/01/2027 giờ VN
+    const totals = Object.fromEntries(
+      (await invoicesOf(H)).map((i) => [i.full_name, Number(i.total_amount)]),
+    );
+    expect(totals).toEqual({ Lan: 200_000, Mai: 400_000, Nga: 100_000 });
+  });
+
   it('S2: hai job chạy song song cùng lúc không sinh bản nháp trùng', async () => {
     const F = await seedTenant(t.worker);
     const [cls, stu] = [randomUUID(), randomUUID()];
@@ -903,5 +982,130 @@ describe('billing: job billing.close + API kỳ thu, hóa đơn, điều chỉnh
         `select 1 from invoices where status = 'draft' group by tenant_id, period_id, student_id having count(*) > 1`,
       ),
     ).toHaveLength(0);
+  });
+
+  it('S4 (issue #179): worker dừng hơn một tháng → job tạo đủ các kỳ thiếu cũ → mới; chạy lại không tạo thêm; kỳ cũ không bị bỏ', async () => {
+    const J = await seedTenant(t.worker);
+    const [cls, stu] = [randomUUID(), randomUUID()];
+    await addClass(J, cls, 'J-Văn', ['monthly', 600_000, null]);
+    await addStudent(J, stu, 'Quân');
+    await enroll(J, cls, stu);
+    // Kỳ đầu tiên 12/2026 chốt đúng hạn 01/01/2027, rồi worker dừng tới 10/03/2027 (kỳ 01 và 02/2027 đều đã quá ngày chốt).
+    await job.run(new Date('2026-12-31T19:00:00Z'));
+    expect((await periodsOf(J)).map((p) => p.period_month)).toEqual([
+      '2026-12-01',
+    ]);
+    await job.run(new Date('2027-03-10T05:00:00Z'));
+    const periods = await q(
+      `select period_month::text m, close_date::text c, due_date::text d from billing_periods where tenant_id = $1 order by period_month`,
+      [J.tenantId],
+    );
+    expect(periods).toEqual([
+      { m: '2026-12-01', c: '2027-01-01', d: '2027-01-11' },
+      { m: '2027-01-01', c: '2027-02-01', d: '2027-02-11' },
+      { m: '2027-02-01', c: '2027-03-01', d: '2027-03-11' },
+    ]);
+    expect(await invoicesOf(J)).toHaveLength(3);
+    await job.run(new Date('2027-03-11T05:00:00Z'));
+    expect(await invoicesOf(J)).toHaveLength(3);
+    expect(await periodsOf(J)).toHaveLength(3);
+  });
+
+  it('S6 (issue #179): đổi trạng thái ≥ 2 lần sau cuối kỳ khi catch-up xét đúng theo từng kỳ; cả lần chạy chỉ MỘT sự kiện billing_drafts_ready, hẹn 07:00', async () => {
+    const M = await seedTenant(t.worker);
+    const [mon, per, sA, sB] = [
+      randomUUID(),
+      randomUUID(),
+      randomUUID(),
+      randomUUID(),
+    ];
+    await addClass(M, mon, 'M-Văn', ['monthly', 400_000, null]);
+    await addClass(M, per, 'M-Toán', ['per_session', 100_000, null]);
+    await addStudent(M, sA, 'An');
+    await addStudent(M, sB, 'Bình');
+    await enroll(M, mon, sA);
+    await enroll(M, per, sB);
+    for (const d of ['2026-12-10', '2026-12-25'])
+      await q(
+        `insert into sessions (id, tenant_id, class_id, session_date, starts_at, ends_at, status)
+         values ($1, $2, $3, $4, $5, $6, 'taught')`,
+        [randomUUID(), M.tenantId, per, d, `${d}T11:00:00Z`, `${d}T12:00:00Z`],
+      );
+    await q(
+      `insert into billing_periods (id, tenant_id, period_month, close_date, due_date, status) values ($1, $2, '2026-11-01', '2026-12-01', '2026-12-11', 'closed')`,
+      [randomUUID(), M.tenantId],
+    );
+    // An: active → paused 10/02 → active 05/03 (kỳ 01/2027 active, kỳ 02/2027 paused → không thu tháng).
+    await q(`update students set status = 'paused' where id = $1`, [sA]);
+    await q(`update students set status = 'active' where id = $1`, [sA]);
+    // Bình: left 20/12/2026 → active 05/03/2027 (kỳ 12/2026 chỉ buổi 10/12; kỳ 01, 02/2027 không có dòng).
+    await q(`update students set status = 'left' where id = $1`, [sB]);
+    await q(`update students set status = 'active' where id = $1`, [sB]);
+    for (const [sid, at1, at2] of [
+      [sA, '2027-02-10T03:00:00Z', '2027-03-05T03:00:00Z'],
+      [sB, '2026-12-20T03:00:00Z', '2027-03-05T03:00:00Z'],
+    ] as const) {
+      await q(
+        `update student_status_history set changed_at = case when to_status = 'active' then $3::timestamptz else $2::timestamptz end where student_id = $1`,
+        [sid, at1, at2],
+      );
+    }
+    wall = new Date('2027-03-09T19:00:00Z'); // 02:00 ngày 10/03/2027 giờ VN
+    await job.run(wall);
+    const rows = await q(
+      `select s.full_name n, p.period_month::text m, i.total_amount::int total from invoices i
+         join students s on s.id = i.student_id join billing_periods p on p.id = i.period_id
+        where i.tenant_id = $1 order by p.period_month, s.full_name`,
+      [M.tenantId],
+    );
+    expect(rows).toEqual([
+      { n: 'An', m: '2026-12-01', total: 400_000 },
+      { n: 'Bình', m: '2026-12-01', total: 100_000 },
+      { n: 'An', m: '2027-01-01', total: 400_000 },
+    ]);
+    const events = await q(
+      `select payload, next_attempt_at from outbox_events where tenant_id = $1 and type = 'billing_drafts_ready'`,
+      [M.tenantId],
+    );
+    expect(events).toHaveLength(1);
+    expect(events[0].payload).toMatchObject({
+      periodMonth: '2027-01-01',
+      draftCount: 3,
+      draftTotalAmount: 900_000,
+    });
+    expect(new Date(events[0].next_attempt_at).toISOString()).toBe(
+      '2027-03-10T00:00:00.000Z',
+    );
+    wall = CLOSE_A;
+  });
+
+  it('S5 (US-7.1 AC5, issue #179): khóa 24 buổi 3.600.000 đ, vào khi còn 16 buổi → 2.400.000 dù mới sinh 4 buổi cuốn chiếu', async () => {
+    const K = await seedTenant(t.worker);
+    const [cls, stu] = [randomUUID(), randomUUID()];
+    // 24 buổi thứ Hai từ 04/01 đến 14/06/2027; vào lớp 01/03 là buổi thứ 9 → còn 16 buổi (từ 01/03).
+    await q(
+      `insert into classes (id, tenant_id, branch_id, name, subject, grade, mode, start_date, end_date, fee_type, fee_amount)
+       values ($1, $2, $3, 'K-Khóa', 'Toán', 9, 'online', '2027-01-04', '2027-06-14', 'course', 3600000)`,
+      [cls, K.tenantId, K.branchId],
+    );
+    await q(
+      `insert into schedule_rules (id, tenant_id, class_id, weekday, start_time, duration_min) values ($1, $2, $3, 1, '18:00', 90)`,
+      [randomUUID(), K.tenantId, cls],
+    );
+    await addStudent(K, stu, 'Kiên');
+    await q(
+      `insert into enrollments (id, tenant_id, class_id, student_id, joined_on) values ($1, $2, $3, $4, '2027-03-01')`,
+      [randomUUID(), K.tenantId, cls, stu],
+    );
+    for (const d of ['2027-03-01', '2027-03-08', '2027-03-15', '2027-03-22'])
+      await q(
+        `insert into sessions (id, tenant_id, class_id, session_date, starts_at, ends_at, status)
+         values ($1, $2, $3, $4, $5, $6, 'taught')`,
+        [randomUUID(), K.tenantId, cls, d, `${d}T11:00:00Z`, `${d}T12:30:00Z`],
+      );
+    await job.run(new Date('2027-03-31T19:00:00Z')); // 02:00 ngày 01/04/2027 giờ VN: kỳ 03/2027
+    expect((await invoicesOf(K)).map((i) => Number(i.total_amount))).toEqual([
+      2_400_000,
+    ]);
   });
 });

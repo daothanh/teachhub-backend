@@ -20,3 +20,7 @@ export {
   SCHEDULE_CHANGED,
   type ScheduleChangedPayload,
 } from './domain/schedule-events.js';
+export {
+  generateSessions,
+  MAX_HORIZON_DAYS,
+} from './domain/session-generator.js';

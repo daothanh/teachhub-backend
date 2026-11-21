@@ -2,13 +2,23 @@
 
 `contracts/openapi.json` sinh từ schema zod bằng `pnpm openapi:gen`; file này ghi endpoint thêm mới theo sprint. Chỉ thêm, không đổi endpoint cũ (CI chặn bằng `oasdiff`).
 
+## Billing: việc theo dõi sau S5 (issue #179, chỉ đổi hành vi server, không đổi schema hay endpoint; `oasdiff` sạch)
+
+- Trạng thái học viên khi chốt kỳ xét THEO KỲ từ lịch sử đổi trạng thái: bảng mới `student_status_history` (migration `0034_student_status_history`; trigger ghi một dòng mỗi lần `students.status` đổi thật, RLS như `students`). Trạng thái cuối kỳ = `to_status` của dòng cuối có ngày đổi (giờ tenant) ≤ cuối kỳ; không có dòng nào ≤ cuối kỳ thì `from_status` của dòng đầu; không có lịch sử (học viên đổi trước migration) thì trạng thái hiện tại. Học viên chuyển `left`/`paused` sau cuối kỳ M (giữa ngày 1 tháng M+1 và ngày chốt) vẫn bị tính kỳ M; `left` từ ngày L: chỉ tính buổi trước L (L = lần chuyển sang `left` gần nhất ≤ cuối kỳ); `paused`: chỉ buổi theo buổi đã dạy. Đổi nhiều lần (vd. active → paused 10/02 → active 05/03) xét đúng theo từng kỳ. Giới hạn: xét tại cuối kỳ, đổi rồi đổi lại ngay trong kỳ coi như không đổi.
+
+- Catch-up: lỡ ngày chốt quá một tháng (worker dừng) thì job tạo MỌI kỳ còn thiếu, cũ → mới, trong một giao dịch của tenant (kỳ có tháng sau kỳ mới nhất đã có; tenant chưa có kỳ nào chỉ tạo kỳ mới nhất; tối đa 12 kỳ). Kỳ cũ tạo muộn vẫn có `closeDate`/`dueDate` như đã chốt đúng hạn; một lần chạy chỉ ghi MỘT sự kiện `billing_drafts_ready` cho cả tenant (payload: kỳ mới nhất có nháp chốt được, `draftCount` và `draftTotalAmount` cộng các kỳ). Kỳ không có nháp thì không tạo, nên tháng trống nằm TRƯỚC kỳ mới nhất đã có không được bù về sau. Idempotent: chạy lại không tạo gì mới.
+
+- Trọn khóa (US-7.1 AC5): tổng buổi của khóa lấy theo cấu hình lớp (quy tắc lặp hằng tuần trong [`startDate`, `endDate`]), buổi còn lại = các buổi từ ngày học viên vào, thay vì đếm buổi đã sinh cuốn chiếu. Vd. khóa 24 buổi 3.600.000 đ, vào khi còn 16 buổi → 2.400.000 đ. `PATCH /classes/{id}` đã bắt `course` phải có `endDate` và quy tắc lịch nên đủ cấu hình; lớp cũ thiếu cấu hình (hoặc khóa dài hơn 731 ngày) giữ cách đếm buổi hiện có và job ghi cảnh báo. Giới hạn: tổng buổi tính theo quy tắc lặp HIỆN HÀNH (đổi quy tắc giữa khóa làm đổi tổng; buổi dời, nghỉ lễ, buổi bù không được tính riêng).
+
+- Push và thông báo `billing_ready` ("Học phí tháng X đã sẵn sàng") tôn trọng giờ yên lặng như nhắc nợ: khung gửi 07:00–21:30 giờ tenant; job chốt kỳ chạy 02:00 nên sự kiện được hẹn tới 07:00 (ngoài khung thì tới 07:00 kế tiếp). Thông báo chỉ tạo (và hiện trong `GET /notifications`) lúc gửi; mỗi kỳ một thông báo, không gửi trùng. Không đổi schema thông báo.
+
 ## Ngoại lệ một lần: hợp nhất thông báo và not_marked
 
 Hai thay đổi `oasdiff breaking` báo ERR, được Owner/TL chấp nhận MỘT LẦN vì chưa có bản app nào phát hành ra ngoài (xem "Đã chốt khi duyệt" ở Sprint 7). Sau PR này mọi thay đổi lại phải sạch `oasdiff` mà không cần ngoại lệ.
 
 - `Notification` (`GET /notifications`): `oneOf` thêm 7 loại, payload theo schema zod sẵn có: `schedule_changed`, `billing_ready`, `invoice_issued`, `payment_recorded`, `payment_reminder`, `subscription_expiring` (payload `{ offsetDays: 7|1, currentPeriodEnd }`), `subscription_activated` (payload `{ source: bank_transfer, currentPeriodEnd }`). `notificationTypeSchema` thêm hai loại subscription. Client vẫn bỏ qua `type` lạ.
 - `SessionNotChargedReason` thêm `not_marked` (issue #179). Server cài đặt thật: buổi theo buổi còn `planned` lúc chốt (chưa điểm danh) nay là dòng 0 đ `charged = false`, `notChargedReason = not_marked` (trước: `charged = true`, 0 đ). Migration `0033_billing_not_marked` nới CHECK `invoice_lines_not_charged_reason_check`; hóa đơn đã lập trước đó giữ nguyên (chưa có dữ liệu thật). Tổng tiền không đổi.
-- Cơ chế bỏ qua: `contracts/oasdiff-ignore.txt` dùng với `oasdiff breaking --err-ignore` (v1.38.0), mỗi dòng `METHOD PATH <đúng văn bản lỗi>`, chỉ gồm 4 lỗi của thay đổi này (3 `response-property-enum-value-added` ở `GET /v1/invoices/{id}`, `POST /v1/invoices/{id}/adjustments`, `POST /v1/invoices/{id}/void` và 1 `response-property-one-of-added` ở `GET /v1/notifications`). Job `openapi-breaking` trong `.github/workflows/ci.yml` tự thêm `--err-ignore` khi file tồn tại. CI so với `contracts/openapi.json` của nhánh đích, nên chỉ PR này cần file. **Phải XÓA `contracts/oasdiff-ignore.txt` (và có thể bỏ nhánh `--err-ignore` trong ci.yml) ở PR kế tiếp**: sau khi merge, nhánh đích đã chứa thay đổi nên không còn lỗi; file không bị xóa thì lọc lỏng các lỗi sau này chỉ khi trùng nguyên văn, nhưng vẫn là rác.
+- Cơ chế bỏ qua đã gỡ: `contracts/oasdiff-ignore.txt` và nhánh `--err-ignore` trong `.github/workflows/ci.yml` đã xóa sau khi thay đổi vào `main` (nhánh đích đã chứa thay đổi nên `oasdiff` sạch). Từ đây mọi thay đổi hợp đồng phải sạch `oasdiff breaking`.
 
 ## Push FCM có chữ khay (chỉ đổi mô tả, không đổi schema)
 

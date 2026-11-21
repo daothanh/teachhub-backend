@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   type ClassFee,
   type ClassSession,
+  closablePeriods,
   computeEnrollmentInvoice,
   parseBillingSettings,
   parseFeeOverride,
   latestClosablePeriod,
+  studentPeriodState,
   toCalcAttendance,
 } from './billing-period.js';
 
@@ -387,5 +389,214 @@ describe('computeEnrollmentInvoice: bản nháp từ buổi và điểm danh', (
       override: { chargeExcused: false },
       discounts: [{ kind: 'amount', value: 50000, description: 'a' }],
     });
+  });
+});
+
+describe('studentPeriodState: trạng thái học viên theo kỳ từ lịch sử (D4, issue #179)', () => {
+  const ch = (from: string, to: string, on: string) => ({ from, to, on });
+  const st = (
+    current: string,
+    history: ReturnType<typeof ch>[],
+    end = DEC.periodEnd,
+  ) => studentPeriodState(current, history, end);
+  const JAN_END = '2027-01-31';
+  const FEB_END = '2027-02-28';
+
+  it('đổi sang left/paused SAU cuối kỳ (giữa ngày 1 và ngày chốt) → kỳ vẫn xét như trước khi đổi', () => {
+    expect(st('left', [ch('active', 'left', '2027-01-03')])).toEqual({
+      paused: false,
+      leftOn: null,
+    });
+    expect(st('paused', [ch('active', 'paused', '2027-01-03')])).toEqual({
+      paused: false,
+      leftOn: null,
+    });
+    expect(st('left', [ch('paused', 'left', '2027-01-03')])).toEqual({
+      paused: true,
+      leftOn: null,
+    });
+  });
+
+  it('left trong kỳ → leftOn = ngày rời; paused từ trong kỳ → chỉ buổi theo buổi', () => {
+    expect(st('left', [ch('active', 'left', '2026-12-20')])).toEqual({
+      paused: false,
+      leftOn: '2026-12-20',
+    });
+    expect(st('paused', [ch('active', 'paused', '2026-12-05')])).toEqual({
+      paused: true,
+      leftOn: null,
+    });
+  });
+
+  it('chưa có lịch sử (học viên đổi trước migration 0034): left không tính, paused theo D4, active đủ', () => {
+    expect(st('left', [])).toBeNull();
+    expect(st('paused', [])).toEqual({ paused: true, leftOn: null });
+    expect(st('active', [])).toEqual({ paused: false, leftOn: null });
+  });
+
+  it('kịch bản 1 (catch-up): active → paused 10/02 → active 05/03: kỳ 01/2027 là active (đủ), kỳ 02/2027 là paused', () => {
+    const h = [
+      ch('active', 'paused', '2027-02-10'),
+      ch('paused', 'active', '2027-03-05'),
+    ];
+    expect(st('active', h, JAN_END)).toEqual({ paused: false, leftOn: null });
+    expect(st('active', h, FEB_END)).toEqual({ paused: true, leftOn: null });
+  });
+
+  it('kịch bản 2 (catch-up): left 20/12 → active 05/03: kỳ 12/2026 leftOn = 20/12 (không phải 05/03); kỳ 01/2027 không có dòng; từ 03/2027 active', () => {
+    const h = [
+      ch('active', 'left', '2026-12-20'),
+      ch('left', 'active', '2027-03-05'),
+    ];
+    expect(st('active', h, DEC.periodEnd)).toEqual({
+      paused: false,
+      leftOn: '2026-12-20',
+    });
+    expect(st('active', h, JAN_END)).toEqual({
+      paused: false,
+      leftOn: '2026-12-20',
+    });
+    expect(st('active', h, '2027-03-31')).toEqual({
+      paused: false,
+      leftOn: null,
+    });
+  });
+
+  it('vector tiền: left ngày 03/01 (sau kỳ) vẫn bị tính 8 buổi → 1.200.000; left 05/12 (trong kỳ) → 4 buổi 600.000; kịch bản 2 kỳ 12/2026 → 9 buổi?: chỉ buổi trước 20/12', () => {
+    const money = (
+      state: NonNullable<ReturnType<typeof st>>,
+      att2: ReadonlyMap<string, string>,
+    ) =>
+      computeEnrollmentInvoice(
+        perSession(),
+        enr({ leftOn: state.leftOn }),
+        DEC,
+        eightTaught,
+        att2,
+        { paused: state.paused },
+      )!.result.lines.reduce((n, l) => n + l.amount, 0);
+    expect(money(st('left', [ch('active', 'left', '2027-01-03')])!, att)).toBe(
+      1_200_000,
+    );
+    expect(
+      money(st('left', [ch('active', 'left', '2026-12-05')])!, new Map()),
+    ).toBe(600_000);
+    // kịch bản 2: rời 20/12, hồi lại 05/03 → kỳ 12/2026 tính cả 8 buổi (đều trước 20/12), không bị chặn như đang active sau này.
+    expect(
+      money(
+        st('active', [
+          ch('active', 'left', '2026-12-20'),
+          ch('left', 'active', '2027-03-05'),
+        ])!,
+        new Map(),
+      ),
+    ).toBe(1_200_000);
+  });
+});
+
+describe('closablePeriods: catch-up mọi kỳ còn thiếu, cũ → mới (D1, issue #179)', () => {
+  const s1 = parseBillingSettings({});
+  const s5 = parseBillingSettings({ billingCloseDay: 5, billingDueDays: 10 });
+  const months = (ps: { periodMonth: string }[]) =>
+    ps.map((p) => p.periodMonth);
+
+  it('tenant chưa có kỳ nào: chỉ kỳ mới nhất', () => {
+    expect(months(closablePeriods('2027-03-10', s1, null))).toEqual([
+      '2027-02-01',
+    ]);
+  });
+
+  it('worker dừng từ tháng 1: kỳ cuối đã có là 12/2026, hôm nay 10/03 → 01 và 02/2027, đúng thứ tự', () => {
+    const ps = closablePeriods('2027-03-10', s1, '2026-12-01');
+    expect(months(ps)).toEqual(['2027-01-01', '2027-02-01']);
+    expect(ps[0]).toMatchObject({
+      periodEnd: '2027-01-31',
+      closeDate: '2027-02-01',
+      dueDate: '2027-02-11',
+      isCloseDay: false,
+    });
+    expect(ps[1]).toMatchObject({
+      periodEnd: '2027-02-28',
+      closeDate: '2027-03-01',
+      dueDate: '2027-03-11',
+    });
+  });
+
+  it('ngày chốt 5, hôm nay 03/03 (chưa tới ngày chốt tháng 3): kỳ mới nhất là 01/2027; qua năm', () => {
+    expect(months(closablePeriods('2027-03-03', s5, '2026-11-01'))).toEqual([
+      '2026-12-01',
+      '2027-01-01',
+    ]);
+    expect(closablePeriods('2027-03-03', s5, '2026-11-01')[0]).toMatchObject({
+      closeDate: '2027-01-05',
+      dueDate: '2027-01-15',
+    });
+  });
+
+  it('kỳ mới nhất đã có: vẫn trả đúng kỳ đó (để chạy lại đúng ngày chốt); chặn ở 12 kỳ', () => {
+    expect(months(closablePeriods('2027-03-10', s1, '2027-02-01'))).toEqual([
+      '2027-02-01',
+    ]);
+    expect(closablePeriods('2030-03-10', s1, '2026-01-01')).toHaveLength(12);
+  });
+});
+
+describe('trọn khóa: tổng buổi theo cấu hình lớp (US-7.1 AC5, issue #179)', () => {
+  const course = (courseDates: string[] | null): ClassFee => ({
+    className: 'Luyện thi',
+    feeType: 'course',
+    feeAmount: 3_600_000,
+    feeRules: null,
+    courseDates,
+  });
+  const dates24 = Array.from({ length: 24 }, (_, i) => day(i + 1));
+  const total = (r: ReturnType<typeof computeEnrollmentInvoice>) =>
+    r!.result.lines.reduce((n, l) => n + l.amount, 0);
+
+  it('khóa 24 buổi 3.600.000 đ, vào khi còn 16 buổi → 2.400.000 (không phụ thuộc số buổi đã sinh)', () => {
+    // Chỉ mới sinh 8 buổi cuốn chiếu: shortcut cũ sẽ tính 3.600.000 × 8/8.
+    const r = computeEnrollmentInvoice(
+      course(dates24),
+      enr({ joinedOn: day(9) }),
+      DEC,
+      eightTaught,
+      new Map(),
+    );
+    expect(total(r)).toBe(2_400_000);
+    expect(r).toMatchObject({ installmentNo: 1, installmentCount: 1 });
+  });
+
+  it('vào từ đầu khóa → đủ 3.600.000; vào sau ngày cuối khóa → không có dòng', () => {
+    expect(
+      total(
+        computeEnrollmentInvoice(
+          course(dates24),
+          enr({ joinedOn: day(1) }),
+          DEC,
+          [],
+          new Map(),
+        ),
+      ),
+    ).toBe(3_600_000);
+    expect(
+      computeEnrollmentInvoice(
+        course(dates24),
+        enr({ joinedOn: day(25) }),
+        DEC,
+        [],
+        new Map(),
+      ),
+    ).toBeNull();
+  });
+
+  it('thiếu cấu hình (courseDates null) → shortcut cũ: đếm buổi chưa hủy hiện có', () => {
+    const r = computeEnrollmentInvoice(
+      course(null),
+      enr({ joinedOn: day(5) }),
+      DEC,
+      eightTaught,
+      new Map(),
+    );
+    expect(total(r)).toBe(1_800_000); // 3.600.000 × 4/8
   });
 });

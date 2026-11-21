@@ -45,9 +45,32 @@ export function parseDunningSettings(settings: unknown): DunningSettings {
   };
 }
 
+/** Phút trong ngày của `at` theo giờ tenant (`tz` IANA). */
+export const minuteOfDay = (at: Date, tz: string): number => {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: tz,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(at);
+  const n = (type: string) => Number(parts.find((p) => p.type === type)?.value);
+  return n('hour') * 60 + n('minute');
+};
+
 /** `now` (phút trong ngày theo giờ tenant) có trong khung 07:00–21:30 không. */
 export const inSendWindow = (minuteOfDay: number): boolean =>
   minuteOfDay >= WINDOW_START_MIN && minuteOfDay <= WINDOW_END_MIN;
+
+/**
+ * Số phút phải chờ từ `minuteOfDay` (giờ tenant) tới khi vào khung gửi: 0 trong khung 07:00–21:30, trước 07:00 chờ tới 07:00 cùng
+ * ngày, sau 21:30 chờ tới 07:00 hôm sau. shortcut: bỏ qua ngày đổi giờ (múi giờ VN không có).
+ */
+export const minutesUntilSendWindow = (minuteOfDay: number): number =>
+  inSendWindow(minuteOfDay)
+    ? 0
+    : minuteOfDay < WINDOW_START_MIN
+      ? WINDOW_START_MIN - minuteOfDay
+      : 24 * 60 - minuteOfDay + WINDOW_START_MIN;
 
 /** Hóa đơn còn đáng nhắc: đã phát hành, chưa thu đủ và còn nợ thật (`total − paid − carried > 0`). */
 export const isDunnable = (inv: {

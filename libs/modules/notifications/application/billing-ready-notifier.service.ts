@@ -27,7 +27,8 @@ export type BillingReadyJobData = z.infer<typeof billingReadyJobSchema>;
  * Xử lý sự kiện outbox `billing_drafts_ready` (S5-BE-05, US-7.2 AC1): tạo thông báo `billing_ready` cho chủ tenant rồi gửi
  * FCM (chữ khay chung, không số tiền, không tên con). Idempotent theo `eventId` (khóa `(recipient, dedupe_key)`); phần gửi dùng
  * lại cơ chế của `AbsenceNotifier.deliver`.
- * shortcut: chưa tôn trọng giờ yên lặng (`send_after` = lúc tạo); thêm khi US-6.5 có cấu hình giờ yên lặng.
+ * Giờ yên lặng 07:00–21:30 giờ tenant do nguồn hẹn (`billing.close` đặt `next_attempt_at` của sự kiện), nên handler chạy trong khung và `send_after` = lúc tạo.
+ * shortcut: lần thử lại sau lỗi FCM (backoff tối đa ~43 phút) có thể trượt qua 21:30; chưa kiểm lại khung ở handler.
  */
 @Injectable()
 export class BillingReadyNotifier {

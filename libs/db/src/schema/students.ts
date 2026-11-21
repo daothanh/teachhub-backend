@@ -64,6 +64,40 @@ export const students = pgTable(
 );
 
 /**
+ * Lịch sử đổi trạng thái học viên: trigger `students_status_history` ghi một dòng mỗi lần `students.status` đổi thật. Billing dựng
+ * trạng thái tại cuối kỳ từ đây (issue #179). Học viên đổi trạng thái trước khi có bảng này không có dòng nào.
+ */
+export const studentStatusHistory = pgTable(
+  'student_status_history',
+  {
+    id: uuid().primaryKey(),
+    tenantId: uuid()
+      .notNull()
+      .references(() => tenants.id),
+    studentId: uuid().notNull(),
+    fromStatus: text().notNull(),
+    toStatus: text().notNull(),
+    changedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({
+      name: 'student_status_history_tenant_student_fk',
+      columns: [t.tenantId, t.studentId],
+      foreignColumns: [students.tenantId, students.id],
+    }).onDelete('cascade'),
+    index('student_status_history_student_idx').on(
+      t.tenantId,
+      t.studentId,
+      t.changedAt,
+    ),
+    check(
+      'student_status_history_status_check',
+      sql`${t.fromStatus} in ('active', 'paused', 'left') and ${t.toStatus} in ('active', 'paused', 'left') and ${t.fromStatus} <> ${t.toStatus}`,
+    ),
+  ],
+);
+
+/**
  * Phụ huynh của học viên, tối đa 2 dòng chưa gỡ (trigger). `deletedAt` = đã gỡ liên kết. Không bật trigger audit
  * cho bảng này: `before_data`/`after_data` sẽ chép họ tên, SĐT, email vào `audit_logs` (PII).
  */

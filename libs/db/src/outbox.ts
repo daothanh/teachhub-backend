@@ -8,6 +8,8 @@ export interface OutboxEventInput {
   type: string;
   /** Chỉ chứa dữ liệu tối thiểu để consumer xử lý (không nhét dữ liệu nhạy cảm). */
   payload: Record<string, unknown>;
+  /** Hẹn giờ đẩy (relay chỉ lấy sự kiện có `next_attempt_at` ≤ bây giờ); bỏ trống = đẩy ngay. Dùng cho tin chờ hết giờ yên lặng. */
+  deliverAt?: Date;
 }
 
 /**
@@ -21,6 +23,9 @@ export async function recordOutboxEvent(
   event: OutboxEventInput,
 ): Promise<string> {
   const id = uuidv7();
-  await tx.insert(outboxEvents).values({ id, ...event });
+  const { deliverAt, ...rest } = event;
+  await tx
+    .insert(outboxEvents)
+    .values({ id, ...rest, ...(deliverAt && { nextAttemptAt: deliverAt }) });
   return id;
 }
