@@ -997,4 +997,34 @@ describe('billing: job billing.close + API kỳ thu, hóa đơn, điều chỉnh
     expect(await invoicesOf(J)).toHaveLength(3);
     expect(await periodsOf(J)).toHaveLength(3);
   });
+
+  it('S5 (US-7.1 AC5, issue #179): khóa 24 buổi 3.600.000 đ, vào khi còn 16 buổi → 2.400.000 dù mới sinh 4 buổi cuốn chiếu', async () => {
+    const K = await seedTenant(t.worker);
+    const [cls, stu] = [randomUUID(), randomUUID()];
+    // 24 buổi thứ Hai từ 04/01 đến 14/06/2027; vào lớp 01/03 là buổi thứ 9 → còn 16 buổi (từ 01/03).
+    await q(
+      `insert into classes (id, tenant_id, branch_id, name, subject, grade, mode, start_date, end_date, fee_type, fee_amount)
+       values ($1, $2, $3, 'K-Khóa', 'Toán', 9, 'online', '2027-01-04', '2027-06-14', 'course', 3600000)`,
+      [cls, K.tenantId, K.branchId],
+    );
+    await q(
+      `insert into schedule_rules (id, tenant_id, class_id, weekday, start_time, duration_min) values ($1, $2, $3, 1, '18:00', 90)`,
+      [randomUUID(), K.tenantId, cls],
+    );
+    await addStudent(K, stu, 'Kiên');
+    await q(
+      `insert into enrollments (id, tenant_id, class_id, student_id, joined_on) values ($1, $2, $3, $4, '2027-03-01')`,
+      [randomUUID(), K.tenantId, cls, stu],
+    );
+    for (const d of ['2027-03-01', '2027-03-08', '2027-03-15', '2027-03-22'])
+      await q(
+        `insert into sessions (id, tenant_id, class_id, session_date, starts_at, ends_at, status)
+         values ($1, $2, $3, $4, $5, $6, 'taught')`,
+        [randomUUID(), K.tenantId, cls, d, `${d}T11:00:00Z`, `${d}T12:30:00Z`],
+      );
+    await job.run(new Date('2027-03-31T19:00:00Z')); // 02:00 ngày 01/04/2027 giờ VN: kỳ 03/2027
+    expect((await invoicesOf(K)).map((i) => Number(i.total_amount))).toEqual([
+      2_400_000,
+    ]);
+  });
 });

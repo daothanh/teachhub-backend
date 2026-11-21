@@ -508,3 +508,63 @@ describe('closablePeriods: catch-up mọi kỳ còn thiếu, cũ → mới (D1, 
     expect(closablePeriods('2030-03-10', s1, '2026-01-01')).toHaveLength(12);
   });
 });
+
+describe('trọn khóa: tổng buổi theo cấu hình lớp (US-7.1 AC5, issue #179)', () => {
+  const course = (courseDates: string[] | null): ClassFee => ({
+    className: 'Luyện thi',
+    feeType: 'course',
+    feeAmount: 3_600_000,
+    feeRules: null,
+    courseDates,
+  });
+  const dates24 = Array.from({ length: 24 }, (_, i) => day(i + 1));
+  const total = (r: ReturnType<typeof computeEnrollmentInvoice>) =>
+    r!.result.lines.reduce((n, l) => n + l.amount, 0);
+
+  it('khóa 24 buổi 3.600.000 đ, vào khi còn 16 buổi → 2.400.000 (không phụ thuộc số buổi đã sinh)', () => {
+    // Chỉ mới sinh 8 buổi cuốn chiếu: shortcut cũ sẽ tính 3.600.000 × 8/8.
+    const r = computeEnrollmentInvoice(
+      course(dates24),
+      enr({ joinedOn: day(9) }),
+      DEC,
+      eightTaught,
+      new Map(),
+    );
+    expect(total(r)).toBe(2_400_000);
+    expect(r).toMatchObject({ installmentNo: 1, installmentCount: 1 });
+  });
+
+  it('vào từ đầu khóa → đủ 3.600.000; vào sau ngày cuối khóa → không có dòng', () => {
+    expect(
+      total(
+        computeEnrollmentInvoice(
+          course(dates24),
+          enr({ joinedOn: day(1) }),
+          DEC,
+          [],
+          new Map(),
+        ),
+      ),
+    ).toBe(3_600_000);
+    expect(
+      computeEnrollmentInvoice(
+        course(dates24),
+        enr({ joinedOn: day(25) }),
+        DEC,
+        [],
+        new Map(),
+      ),
+    ).toBeNull();
+  });
+
+  it('thiếu cấu hình (courseDates null) → shortcut cũ: đếm buổi chưa hủy hiện có', () => {
+    const r = computeEnrollmentInvoice(
+      course(null),
+      enr({ joinedOn: day(5) }),
+      DEC,
+      eightTaught,
+      new Map(),
+    );
+    expect(total(r)).toBe(1_800_000); // 3.600.000 × 4/8
+  });
+});

@@ -21,6 +21,7 @@ import {
   invoiceLines,
   invoices,
   recordOutboxEvent,
+  scheduleRules,
   sessions,
   students,
   tenants,
@@ -28,7 +29,11 @@ import {
   type Tx,
 } from '@teachhub/db';
 import { JobRuns } from '@teachhub/infra';
-import { localDate } from '@teachhub/modules/schedule';
+import {
+  generateSessions,
+  localDate,
+  MAX_HORIZON_DAYS,
+} from '@teachhub/modules/schedule';
 import {
   type ClassFee,
   type ClassSession,
@@ -128,6 +133,65 @@ export class BillingCloseJob {
       if (failed) throw new Error(`${failed} tenant không tạo được bản nháp`);
       return created;
     });
+  }
+
+  /**
+   * Ngày các buổi của từng lớp trọn khóa theo cấu hình (US-7.1 AC5). Lớp không đủ cấu hình (không ngày kết thúc, chưa có quy tắc lặp,
+   * khóa dài hơn mốc sinh buổi) vắng mặt trong kết quả và được cảnh báo: hóa đơn dùng shortcut đếm buổi hiện có.
+   */
+  private async loadCourseDates(
+    t: Tx,
+    tenantId: string,
+    tz: string,
+    courses: (typeof classes.$inferSelect)[],
+  ): Promise<Map<string, string[]>> {
+    const out = new Map<string, string[]>();
+    if (!courses.length) return out;
+    const rules = await t
+      .select({
+        classId: scheduleRules.classId,
+        id: scheduleRules.id,
+        weekday: scheduleRules.weekday,
+        startTime: scheduleRules.startTime,
+        durationMin: scheduleRules.durationMin,
+      })
+      .from(scheduleRules)
+      .where(
+        and(
+          eq(scheduleRules.tenantId, tenantId),
+          inArray(
+            scheduleRules.classId,
+            courses.map((c) => c.id),
+          ),
+        ),
+      );
+    for (const c of courses) {
+      const own = rules
+        .filter((r) => r.classId === c.id)
+        .map((r) => ({ ...r, startTime: r.startTime.slice(0, 5) }));
+      const days = c.endDate
+        ? (Date.parse(`${c.endDate}T00:00:00Z`) -
+            Date.parse(`${c.startDate}T00:00:00Z`)) /
+            86_400_000 +
+          1
+        : Infinity;
+      if (!own.length || days > MAX_HORIZON_DAYS) {
+        this.log.warn(
+          `tenant ${tenantId} lớp ${c.id}: trọn khóa thiếu cấu hình tổng buổi (cần ngày kết thúc ≤ ${MAX_HORIZON_DAYS} ngày và quy tắc lặp), dùng số buổi hiện có`,
+        );
+        continue;
+      }
+      out.set(
+        c.id,
+        generateSessions(own, {
+          classStart: c.startDate,
+          classEnd: c.endDate,
+          today: c.startDate,
+          tz,
+        }).map((g) => g.sessionDate),
+      );
+    }
+    return out;
   }
 
   /**
@@ -274,6 +338,14 @@ export class BillingCloseJob {
       }
     }
 
+    // Trọn khóa: tổng buổi theo cấu hình lớp (quy tắc lặp trong [ngày bắt đầu, ngày kết thúc]); lớp thiếu cấu hình dùng shortcut đếm buổi.
+    const courseDates = await this.loadCourseDates(
+      t,
+      tenantId,
+      tz,
+      classRows.filter((c) => c.feeType === 'course'),
+    );
+
     // Gộp mọi lớp của một học viên thành một hóa đơn (lớp theo tên cho thứ tự dòng ổn định).
     const classById = new Map(classRows.map((c) => [c.id, c]));
     type Draft = {
@@ -318,6 +390,7 @@ export class BillingCloseJob {
         feeType: c.feeType as FeeType,
         feeAmount: c.feeAmount!,
         feeRules: c.feeRules,
+        courseDates: courseDates.get(c.id) ?? null,
       };
       const r = computeEnrollmentInvoice(
         fee,

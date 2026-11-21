@@ -8,6 +8,8 @@
 
 - Catch-up: lỡ ngày chốt quá một tháng (worker dừng) thì job tạo MỌI kỳ còn thiếu, cũ → mới, trong một giao dịch của tenant (kỳ có tháng sau kỳ mới nhất đã có; tenant chưa có kỳ nào chỉ tạo kỳ mới nhất; tối đa 12 kỳ). Kỳ cũ tạo muộn vẫn có `closeDate`/`dueDate` như đã chốt đúng hạn; mỗi kỳ ghi riêng một sự kiện `billing_drafts_ready`. Idempotent: chạy lại không tạo gì mới.
 
+- Trọn khóa (US-7.1 AC5): tổng buổi của khóa lấy theo cấu hình lớp (quy tắc lặp hằng tuần trong [`startDate`, `endDate`]), buổi còn lại = các buổi từ ngày học viên vào, thay vì đếm buổi đã sinh cuốn chiếu. Vd. khóa 24 buổi 3.600.000 đ, vào khi còn 16 buổi → 2.400.000 đ. `PATCH /classes/{id}` đã bắt `course` phải có `endDate` và quy tắc lịch nên đủ cấu hình; lớp cũ thiếu cấu hình (hoặc khóa dài hơn 731 ngày) giữ cách đếm buổi hiện có và job ghi cảnh báo.
+
 ## Ngoại lệ một lần: hợp nhất thông báo và not_marked
 
 Hai thay đổi `oasdiff breaking` báo ERR, được Owner/TL chấp nhận MỘT LẦN vì chưa có bản app nào phát hành ra ngoài (xem "Đã chốt khi duyệt" ở Sprint 7). Sau PR này mọi thay đổi lại phải sạch `oasdiff` mà không cần ngoại lệ.

@@ -281,6 +281,11 @@ export function toCalcAttendance(
 // ---- Tính hóa đơn của một ghi danh ----
 
 export interface ClassFee {
+  /**
+   * Ngày của mọi buổi trong khóa theo cấu hình lớp (quy tắc lặp hằng tuần trong [ngày bắt đầu, ngày kết thúc]); chỉ dùng cho lớp
+   * trọn khóa. null/rỗng = cấu hình chưa đủ để tính (lớp không kỳ hạn, chưa có quy tắc lặp, khóa dài quá mốc sinh) → dùng shortcut.
+   */
+  courseDates?: string[] | null;
   className: string;
   feeType: FeeType;
   feeAmount: number;
@@ -313,8 +318,10 @@ export interface EnrollmentInvoice {
 /**
  * Tính phần hóa đơn của một ghi danh trong kỳ bằng `calculateInvoice`; null = ghi danh này không sinh dòng tiền
  * (trọn khóa đã hết đợt, hoặc lớp trọn khóa chưa có buổi nào để chia).
- * shortcut: trọn khóa lấy tổng buổi = số buổi chưa hủy hiện có của lớp (chưa có cột tổng buổi khóa); đợt n = kỳ thứ n
- * kể từ tháng học viên vào lớp. Nâng cấp khi có cấu hình tổng buổi của khóa.
+ * Trọn khóa (US-7.1 AC5): tổng buổi = số buổi của khóa theo cấu hình lớp (`courseDates`), còn lại = các buổi từ ngày học viên vào;
+ * học viên vào sau ngày cuối khóa không có dòng. Đợt n = kỳ thứ n kể từ tháng học viên vào lớp.
+ * shortcut: khi lớp không đủ cấu hình để biết tổng buổi (không ngày kết thúc, chưa có quy tắc lặp) lấy tổng = số buổi chưa hủy hiện có
+ * của lớp; lệch khi buổi được sinh cuốn chiếu (job ghi cảnh báo). Nâng cấp khi lớp trọn khóa bắt buộc có ngày kết thúc hoặc số buổi khai báo.
  */
 export function computeEnrollmentInvoice(
   cls: ClassFee,
@@ -376,15 +383,20 @@ export function computeEnrollmentInvoice(
     };
   }
   if (cls.feeType === 'course') {
+    const nominal = cls.courseDates?.length ? cls.courseDates : null;
     const live = sessions.filter((s) => s.status !== 'cancelled');
-    if (live.length < 1) return null;
+    const total = nominal ? nominal.length : live.length;
+    const remaining = nominal
+      ? nominal.filter((d) => d >= enr.joinedOn).length
+      : live.filter((s) => s.date >= enr.joinedOn).length;
+    if (total < 1 || (nominal && remaining < 1)) return null;
     const installmentNo = monthsBetween(enr.joinedOn, period.periodMonth) + 1;
     if (installmentNo < 1 || installmentNo > rules.installments) return null;
     return {
       result: calculateInvoice({
         ...input,
-        totalSessions: live.length,
-        remainingSessions: live.filter((s) => s.date >= enr.joinedOn).length,
+        totalSessions: total,
+        remainingSessions: remaining,
         installmentNo,
       }),
       installmentNo,
