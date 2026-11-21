@@ -34,6 +34,8 @@ import { PayoutAccountsService } from '../application/payout-accounts.service.js
 import {
   type CreatePayoutAccountRequest,
   createPayoutAccountRequestSchema,
+  type DeletePayoutAccountRequest,
+  deletePayoutAccountRequestSchema,
   type PayoutAccount,
   payoutAccountListSchema,
   type PayoutAccountList,
@@ -73,7 +75,7 @@ export class PayoutAccountsController {
   @ApiOperation({
     summary: 'Thêm tài khoản nhận tiền',
     description:
-      'Tài khoản đầu tiên tự là tài khoản chính. `isPrimary = true` ở tài khoản sau chuyển cờ chính sang tài khoản này trong cùng giao dịch. Tối đa 5 tài khoản mỗi tenant, vượt → 422 `VALIDATION_FAILED`. Cần `otpCode` (xem mô tả trường). Ghi tối đa 20 lần/phút/user (429 `RATE_LIMITED`). ' +
+      'Tài khoản đầu tiên tự là tài khoản chính. `isPrimary = true` ở tài khoản sau chuyển cờ chính sang tài khoản này trong cùng giao dịch. Tối đa 5 tài khoản mỗi tenant, vượt → 422 `VALIDATION_FAILED`. Cần `otpCode` (xem mô tả trường). Ghi tối đa 20 lần/phút/IP (429 `RATE_LIMITED`). ' +
       'Hóa đơn dùng tài khoản chính lúc phát hành và chụp lại vào hóa đơn (`payout`), nên sửa hay xóa tài khoản sau đó không đổi hóa đơn đã phát hành.',
   })
   @ApiCreatedResponse({ standardSchema: payoutAccountSchema })
@@ -101,7 +103,7 @@ export class PayoutAccountsController {
   @ApiOperation({
     summary: 'Sửa tài khoản nhận tiền',
     description:
-      'Chỉ gửi trường đổi. `isPrimary` chỉ nhận `true` (đặt làm chính). Đổi `bankBin` hoặc `accountNo` bắt buộc `otpCode`, thiếu → 422 `VALIDATION_FAILED`. Không ảnh hưởng hóa đơn đã phát hành.',
+      'Chỉ gửi trường đổi. `isPrimary` chỉ nhận `true` (đặt làm chính). Đổi `bankBin` hoặc `accountNo`, hoặc đặt tài khoản khác làm chính (`isPrimary = true`) bắt buộc `otpCode`, thiếu → 422 `VALIDATION_FAILED`. Body không đổi gì thì trả tài khoản hiện tại, không cần OTP. Không ảnh hưởng hóa đơn đã phát hành.',
   })
   @ApiOkResponse({ standardSchema: payoutAccountSchema })
   @ApiIdempotencyKey()
@@ -137,20 +139,33 @@ export class PayoutAccountsController {
   @ApiOperation({
     summary: 'Xóa tài khoản nhận tiền',
     description:
-      'Xóa tài khoản chính khi còn tài khoản khác thì tài khoản tạo sớm nhất còn lại thành chính. Xóa tài khoản cuối cùng cho phép: lần chốt kỳ sau bị chặn bằng 422 `PAYOUT_ACCOUNT_MISSING`. Gọi lại trên tài khoản đã xóa → 404.',
+      'Xóa tài khoản chính khi còn tài khoản khác thì tài khoản tạo sớm nhất còn lại thành chính. Xóa tài khoản cuối cùng cho phép: lần chốt kỳ sau bị chặn bằng 422 `PAYOUT_ACCOUNT_MISSING`. Xóa tài khoản chính khi còn tài khoản khác cần `otpCode` trong body (thiếu → 422). Gọi lại trên tài khoản đã xóa → 404.',
   })
   @ApiNoContentResponse()
   @ApiIdempotencyKey()
-  @ApiErrors('NOT_FOUND', 'RATE_LIMITED')
+  @ApiErrors(
+    'VALIDATION_FAILED',
+    'NOT_FOUND',
+    'OTP_INVALID',
+    'OTP_LOCKED',
+    'RATE_LIMITED',
+  )
   async remove(
     @Ctx() ctx: RequestContext,
     @Req() req: FastifyRequest,
     @Res({ passthrough: true }) reply: FastifyReply,
     @Param('id', { schema: idParam }) id: string,
+    @Body({ schema: deletePayoutAccountRequestSchema })
+    body: DeletePayoutAccountRequest,
   ): Promise<void> {
     await this.idem.run(req, reply, ctx, async (t) => ({
       status: 204,
-      body: await this.accounts.remove(t, ctx.tenantId!, id),
+      body: await this.accounts.remove(
+        t,
+        { tenantId: ctx.tenantId!, userId: ctx.userId! },
+        id,
+        body?.otpCode,
+      ),
     }));
   }
 }

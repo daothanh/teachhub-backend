@@ -4,7 +4,7 @@
 
 ## Sprint 5 (S4-FL-10, S4-CT-01)
 
-Thân hàm trả 501 `NOT_IMPLEMENTED` tới khi làm task backend tương ứng; schema đã validate thật. Riêng `PATCH /classes/{id}` có trường học phí vẫn trả 501 cho tới S5-BE-02 (các trường cũ giữ nguyên). Không có bảng hay migration (S5-BE-01 làm cùng task backend).
+Thân hàm trả 501 `NOT_IMPLEMENTED` tới khi làm task backend tương ứng; schema đã validate thật. Không có bảng hay migration (S5-BE-01 làm cùng task backend).
 
 | Endpoint | Task backend |
 | --- | --- |
@@ -19,6 +19,8 @@ Thay đổi trên endpoint cũ (chỉ thêm trường, `oasdiff breaking` sạch
 - `PATCH /classes/{id}` nhận thêm `feeType`, `feeAmount`, `feeRules`. `Class` thêm ba trường cùng tên (null với lớp chưa có học phí). `POST /classes` chưa nhận học phí: tạo lớp rồi `PATCH`.
 - `GET /classes/{id}/roster`: mỗi phần tử thêm `feeOverride` (khác null thì hiện nhãn "Giá riêng").
 - Thông báo `billing_ready` (cho giáo viên) và `invoice_issued` (cho phụ huynh): mô tả payload trong description `GET /notifications`, có sẵn `billingReadyPayloadSchema` và `invoiceIssuedPayloadSchema` trong mã, nhưng CHƯA nằm trong `oneOf` của `Notification`, cùng lý do `oasdiff` như `schedule_changed` ở Sprint 4. Cần Owner/TL chọn một lần cho cả ba loại: chấp nhận ngoại lệ `response-property-one-of-added` rồi thêm vào union, hoặc giữ như hiện tại.
+
+- `DELETE /payout-accounts/{id}` nhận thêm body tùy chọn `{ otpCode }` (S5-BE-02): bắt buộc khi xóa tài khoản chính còn tài khoản khác. `PATCH /payout-accounts/{id}` với `isPrimary = true` cũng cần `otpCode`. Giới hạn ghi 20 lần/phút tính theo IP.
 
 Mã lỗi mới: `PAYOUT_ACCOUNT_MISSING` (422), `INVOICE_IMMUTABLE` (409); cả hai đã có tên trong Spec §5.6. Repo chỉ có `contracts/error_codes.json` là nguồn, không có bước sinh mã; app và web sinh hằng số từ file này.
 

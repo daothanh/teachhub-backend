@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { and, asc, desc, eq, sql } from 'drizzle-orm';
 import { AppException, uuidv7 } from '@teachhub/core';
-import { payoutAccounts, type Tx, users } from '@teachhub/db';
+import { payoutAccounts, type Tx, users, writeAudit } from '@teachhub/db';
 import { OtpService } from '@teachhub/modules/auth';
 import {
   MAX_PAYOUT_ACCOUNTS,
@@ -16,6 +16,20 @@ import type {
 
 type Row = typeof payoutAccounts.$inferSelect;
 
+/** Chỉ trường đã che: số tài khoản đầy đủ không vào `audit_logs`. */
+const auditView = (r: Row) => ({
+  bankBin: r.bankBin,
+  accountNoMasked: maskAccountNo(r.accountNo),
+  accountName: r.accountName,
+  isPrimary: r.isPrimary,
+});
+
+const needOtp = (): never => {
+  throw new AppException('VALIDATION_FAILED', undefined, {
+    otpCode: ['Thao tác này cần mã OTP.'],
+  });
+};
+
 const toDto = (r: Row): PayoutAccount => ({
   id: r.id,
   bankBin: r.bankBin,
@@ -28,7 +42,7 @@ const toDto = (r: Row): PayoutAccount => ({
 /**
  * Tài khoản nhận tiền của tenant (S5-BE-02). Lọc `tenant_id` tường minh, RLS (`payout_accounts_staff_all`) là lớp thứ hai;
  * id của tenant khác → không thấy dòng → NOT_FOUND. Số tài khoản đầy đủ không trả ra ngoài.
- * shortcut: chưa ghi audit_logs (role app không có quyền ghi, cần hàm security definer ở migration mới).
+ * Mọi thay đổi ghi `audit_logs` (writeAudit) với số tài khoản đã che.
  */
 @Injectable()
 export class PayoutAccountsService {
@@ -61,7 +75,7 @@ export class PayoutAccountsService {
     // Kiểm điều kiện chặn trước khi tiêu OTP: bị chặn thì mã còn dùng lại được.
     await this.verifyOtp(tx, ctx.userId, body.otpCode);
     const isPrimary = existing.length === 0 || body.isPrimary === true;
-    if (isPrimary) await this.clearPrimary(tx, ctx.tenantId);
+    if (isPrimary) await this.clearPrimary(tx, ctx.tenantId, existing);
     const [row] = await tx
       .insert(payoutAccounts)
       .values({
@@ -76,6 +90,7 @@ export class PayoutAccountsService {
       .returning();
     // `id` do client gửi đã có (kể cả ở tenant khác): không tiết lộ, coi như dữ liệu cũ.
     if (!row) throw new AppException('CONFLICT_STALE');
+    await this.audit(tx, ctx.tenantId, row.id, 'insert', null, row);
     return toDto(row);
   }
 
@@ -88,22 +103,29 @@ export class PayoutAccountsService {
     const rows = await this.lockAndLoad(tx, ctx.tenantId);
     const cur = rows.find((r) => r.id === id);
     if (!cur) throw new AppException('NOT_FOUND');
-    if (body.bankBin !== undefined || body.accountNo !== undefined) {
-      await this.verifyOtp(tx, ctx.userId, body.otpCode!);
-    }
-    if (body.isPrimary && !cur.isPrimary) {
-      await this.clearPrimary(tx, ctx.tenantId);
-    }
-    const [row] = await tx
-      .update(payoutAccounts)
-      .set({
-        ...(body.bankBin !== undefined && { bankBin: body.bankBin }),
-        ...(body.accountNo !== undefined && { accountNo: body.accountNo }),
-        ...(body.accountName !== undefined && {
+    const switching = body.isPrimary === true && !cur.isPrimary;
+    const patch = {
+      ...(body.bankBin !== undefined &&
+        body.bankBin !== cur.bankBin && { bankBin: body.bankBin }),
+      ...(body.accountNo !== undefined &&
+        body.accountNo !== cur.accountNo && { accountNo: body.accountNo }),
+      ...(body.accountName !== undefined &&
+        body.accountName !== cur.accountName && {
           accountName: body.accountName,
         }),
-        ...(body.isPrimary && { isPrimary: true }),
-      })
+      ...(switching && { isPrimary: true }),
+    };
+    // Không đổi gì: trả bản hiện tại, không ghi và không tiêu OTP.
+    if (Object.keys(patch).length === 0) return toDto(cur);
+    // Đổi nơi nhận tiền (số, ngân hàng, hoặc chuyển cờ chính sang tài khoản này) cần OTP.
+    if ('bankBin' in patch || 'accountNo' in patch || switching) {
+      if (!body.otpCode) needOtp();
+      await this.verifyOtp(tx, ctx.userId, body.otpCode!);
+    }
+    if (switching) await this.clearPrimary(tx, ctx.tenantId, rows);
+    const [row] = await tx
+      .update(payoutAccounts)
+      .set(patch)
       .where(
         and(
           eq(payoutAccounts.tenantId, ctx.tenantId),
@@ -111,20 +133,33 @@ export class PayoutAccountsService {
         ),
       )
       .returning();
+    await this.audit(tx, ctx.tenantId, id, 'update', cur, row!);
     return toDto(row!);
   }
 
-  async remove(tx: Tx, tenantId: string, id: string): Promise<void> {
+  async remove(
+    tx: Tx,
+    ctx: { tenantId: string; userId: string },
+    id: string,
+    otpCode: string | undefined,
+  ): Promise<void> {
+    const { tenantId } = ctx;
     const rows = await this.lockAndLoad(tx, tenantId);
     const cur = rows.find((r) => r.id === id);
     if (!cur) throw new AppException('NOT_FOUND');
+    const next = rows.find((r) => r.id !== id);
+    // Xóa tài khoản chính khi còn tài khoản khác = chuyển nơi nhận tiền sang tài khoản kia: cần OTP.
+    if (cur.isPrimary && next) {
+      if (!otpCode) needOtp();
+      await this.verifyOtp(tx, ctx.userId, otpCode!);
+    }
     await tx
       .delete(payoutAccounts)
       .where(
         and(eq(payoutAccounts.tenantId, tenantId), eq(payoutAccounts.id, id)),
       );
+    await this.audit(tx, tenantId, id, 'delete', cur, null);
     // Xóa tài khoản chính: tài khoản tạo sớm nhất còn lại lên thay.
-    const next = rows.find((r) => r.id !== id);
     if (cur.isPrimary && next) {
       await tx
         .update(payoutAccounts)
@@ -135,7 +170,29 @@ export class PayoutAccountsService {
             eq(payoutAccounts.id, next.id),
           ),
         );
+      await this.audit(tx, tenantId, next.id, 'update', next, {
+        ...next,
+        isPrimary: true,
+      });
     }
+  }
+
+  private audit(
+    tx: Tx,
+    tenantId: string,
+    id: string,
+    action: 'insert' | 'update' | 'delete',
+    before: Row | null,
+    after: Row | null,
+  ): Promise<void> {
+    return writeAudit(tx, {
+      tenantId,
+      entity: 'payout_accounts',
+      entityId: id,
+      action,
+      before: before && auditView(before),
+      after: after && auditView(after),
+    });
   }
 
   /** Khóa theo tenant (ghi song song cùng tenant xếp hàng) rồi đọc các tài khoản, cũ nhất trước. */
@@ -151,16 +208,26 @@ export class PayoutAccountsService {
   }
 
   /** Unique partial `payout_accounts_primary_uq`: phải bỏ cờ cũ trước khi đặt cờ mới. */
-  private async clearPrimary(tx: Tx, tenantId: string): Promise<void> {
+  private async clearPrimary(
+    tx: Tx,
+    tenantId: string,
+    rows: Row[],
+  ): Promise<void> {
+    const old = rows.find((r) => r.isPrimary);
+    if (!old) return;
     await tx
       .update(payoutAccounts)
       .set({ isPrimary: false })
       .where(
         and(
           eq(payoutAccounts.tenantId, tenantId),
-          eq(payoutAccounts.isPrimary, true),
+          eq(payoutAccounts.id, old.id),
         ),
       );
+    await this.audit(tx, tenantId, old.id, 'update', old, {
+      ...old,
+      isPrimary: false,
+    });
   }
 
   private async verifyOtp(tx: Tx, userId: string, code: string): Promise<void> {

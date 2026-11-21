@@ -1500,7 +1500,7 @@
         ]
       },
       "post": {
-        "description": "Tài khoản đầu tiên tự là tài khoản chính. `isPrimary = true` ở tài khoản sau chuyển cờ chính sang tài khoản này trong cùng giao dịch. Tối đa 5 tài khoản mỗi tenant, vượt → 422 `VALIDATION_FAILED`. Cần `otpCode` (xem mô tả trường). Ghi tối đa 20 lần/phút/user (429 `RATE_LIMITED`). Hóa đơn dùng tài khoản chính lúc phát hành và chụp lại vào hóa đơn (`payout`), nên sửa hay xóa tài khoản sau đó không đổi hóa đơn đã phát hành.",
+        "description": "Tài khoản đầu tiên tự là tài khoản chính. `isPrimary = true` ở tài khoản sau chuyển cờ chính sang tài khoản này trong cùng giao dịch. Tối đa 5 tài khoản mỗi tenant, vượt → 422 `VALIDATION_FAILED`. Cần `otpCode` (xem mô tả trường). Ghi tối đa 20 lần/phút/IP (429 `RATE_LIMITED`). Hóa đơn dùng tài khoản chính lúc phát hành và chụp lại vào hóa đơn (`payout`), nên sửa hay xóa tài khoản sau đó không đổi hóa đơn đã phát hành.",
         "operationId": "payoutAccounts_create",
         "parameters": [
           {
@@ -1599,7 +1599,7 @@
     },
     "/v1/payout-accounts/{id}": {
       "patch": {
-        "description": "Chỉ gửi trường đổi. `isPrimary` chỉ nhận `true` (đặt làm chính). Đổi `bankBin` hoặc `accountNo` bắt buộc `otpCode`, thiếu → 422 `VALIDATION_FAILED`. Không ảnh hưởng hóa đơn đã phát hành.",
+        "description": "Chỉ gửi trường đổi. `isPrimary` chỉ nhận `true` (đặt làm chính). Đổi `bankBin` hoặc `accountNo`, hoặc đặt tài khoản khác làm chính (`isPrimary = true`) bắt buộc `otpCode`, thiếu → 422 `VALIDATION_FAILED`. Body không đổi gì thì trả tài khoản hiện tại, không cần OTP. Không ảnh hưởng hóa đơn đã phát hành.",
         "operationId": "payoutAccounts_update",
         "parameters": [
           {
@@ -1651,7 +1651,7 @@
                   "otpCode": {
                     "type": "string",
                     "pattern": "^\\d{6}$",
-                    "description": "Mã OTP 6 số gửi tới email của user qua `POST /auth/otp/send` với `purpose = payout_account`. Bắt buộc khi đặt hoặc đổi `bankBin` hoặc `accountNo` (chặn người cầm máy đổi nơi nhận tiền); sai → 401 `OTP_INVALID`, nhập sai quá nhiều → 429 `OTP_LOCKED`. Mã `payout_account` chỉ dùng được cho route này",
+                    "description": "Mã OTP 6 số gửi tới email của user qua `POST /auth/otp/send` với `purpose = payout_account`. Bắt buộc khi đặt hoặc đổi `bankBin` hoặc `accountNo`, khi đặt một tài khoản khác làm chính (`isPrimary = true`) và khi xóa tài khoản chính còn tài khoản khác (chặn người cầm máy đổi nơi nhận tiền); sai → 401 `OTP_INVALID`, nhập sai quá nhiều → 429 `OTP_LOCKED`. Mã `payout_account` chỉ dùng được cho route này",
                     "example": "482913"
                   },
                   "isPrimary": {
@@ -1752,7 +1752,7 @@
         ]
       },
       "delete": {
-        "description": "Xóa tài khoản chính khi còn tài khoản khác thì tài khoản tạo sớm nhất còn lại thành chính. Xóa tài khoản cuối cùng cho phép: lần chốt kỳ sau bị chặn bằng 422 `PAYOUT_ACCOUNT_MISSING`. Gọi lại trên tài khoản đã xóa → 404.",
+        "description": "Xóa tài khoản chính khi còn tài khoản khác thì tài khoản tạo sớm nhất còn lại thành chính. Xóa tài khoản cuối cùng cho phép: lần chốt kỳ sau bị chặn bằng 422 `PAYOUT_ACCOUNT_MISSING`. Xóa tài khoản chính khi còn tài khoản khác cần `otpCode` trong body (thiếu → 422). Gọi lại trên tài khoản đã xóa → 404.",
         "operationId": "payoutAccounts_remove",
         "parameters": [
           {
@@ -1776,12 +1776,22 @@
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeletePayoutAccountRequest"
+              }
+            }
+          }
+        },
         "responses": {
           "204": {
             "description": ""
           },
           "401": {
-            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "description": "OTP_INVALID",
             "content": {
               "application/json": {
                 "schema": {
@@ -1821,7 +1831,7 @@
             }
           },
           "422": {
-            "description": "IDEMPOTENCY_KEY_REUSED",
+            "description": "VALIDATION_FAILED\n\nIDEMPOTENCY_KEY_REUSED",
             "content": {
               "application/json": {
                 "schema": {
@@ -1831,7 +1841,7 @@
             }
           },
           "429": {
-            "description": "RATE_LIMITED",
+            "description": "OTP_LOCKED, RATE_LIMITED",
             "content": {
               "application/json": {
                 "schema": {
@@ -2718,7 +2728,7 @@
     },
     "/v1/enrollments/{id}/fee-override": {
       "put": {
-        "description": "Thay toàn bộ mức riêng của một ghi danh; thứ tự áp dụng học sinh > lớp > mặc định (US-1.3 AC1). Mức riêng chỉ áp dụng từ kỳ chưa chốt tiếp theo, hóa đơn đã phát hành không đổi. Có mức riêng (kể cả chỉ miễn giảm) thì `GET /classes/{id}/roster` trả `feeOverride` khác null để hiện nhãn \"Giá riêng\" (US-1.3 AC2). Miễn giảm 100% → hóa đơn 0 đ không được gửi và không nhắc nợ (AC3). Tối đa 5 khoản `discounts`, mỗi khoản có `description`; `installments` chỉ hợp lệ với lớp trọn khóa (vượt → 422). Giới hạn 20 lần/phút/user (429 `RATE_LIMITED`). `feeAmount` đòi lớp đã có học phí, nếu không → 422 `VALIDATION_FAILED`. Ghi danh đã rời lớp (`leftOn`) → 409 `CONFLICT_STALE`; ghi danh của tenant khác → 404.",
+        "description": "Thay toàn bộ mức riêng của một ghi danh; thứ tự áp dụng học sinh > lớp > mặc định (US-1.3 AC1). Mức riêng chỉ áp dụng từ kỳ chưa chốt tiếp theo, hóa đơn đã phát hành không đổi. Có mức riêng (kể cả chỉ miễn giảm) thì `GET /classes/{id}/roster` trả `feeOverride` khác null để hiện nhãn \"Giá riêng\" (US-1.3 AC2). Miễn giảm 100% → hóa đơn 0 đ không được gửi và không nhắc nợ (AC3). Tối đa 5 khoản `discounts`, mỗi khoản có `description`; `installments` chỉ hợp lệ với lớp trọn khóa (vượt → 422). Giới hạn 20 lần/phút/IP (429 `RATE_LIMITED`). `feeAmount` đòi lớp đã có học phí, nếu không → 422 `VALIDATION_FAILED`. Ghi danh đã rời lớp (`leftOn`) → 409 `CONFLICT_STALE`; ghi danh của tenant khác → 404.",
         "operationId": "enrollmentFees_put",
         "parameters": [
           {
@@ -7568,7 +7578,7 @@
           "otpCode": {
             "type": "string",
             "pattern": "^\\d{6}$",
-            "description": "Mã OTP 6 số gửi tới email của user qua `POST /auth/otp/send` với `purpose = payout_account`. Bắt buộc khi đặt hoặc đổi `bankBin` hoặc `accountNo` (chặn người cầm máy đổi nơi nhận tiền); sai → 401 `OTP_INVALID`, nhập sai quá nhiều → 429 `OTP_LOCKED`. Mã `payout_account` chỉ dùng được cho route này",
+            "description": "Mã OTP 6 số gửi tới email của user qua `POST /auth/otp/send` với `purpose = payout_account`. Bắt buộc khi đặt hoặc đổi `bankBin` hoặc `accountNo`, khi đặt một tài khoản khác làm chính (`isPrimary = true`) và khi xóa tài khoản chính còn tài khoản khác (chặn người cầm máy đổi nơi nhận tiền); sai → 401 `OTP_INVALID`, nhập sai quá nhiều → 429 `OTP_LOCKED`. Mã `payout_account` chỉ dùng được cho route này",
             "example": "482913"
           },
           "isPrimary": {
@@ -7587,6 +7597,18 @@
           "accountNo": "0123456789",
           "accountName": "NGUYEN VAN A",
           "otpCode": "482913"
+        }
+      },
+      "DeletePayoutAccountRequest": {
+        "description": "Xóa tài khoản chính khi còn tài khoản khác (chuyển nơi nhận tiền sang tài khoản khác) cần `otpCode`, thiếu → 422 `VALIDATION_FAILED`. Các trường hợp khác không cần body",
+        "type": "object",
+        "properties": {
+          "otpCode": {
+            "type": "string",
+            "pattern": "^\\d{6}$",
+            "description": "Mã OTP 6 số gửi tới email của user qua `POST /auth/otp/send` với `purpose = payout_account`. Bắt buộc khi đặt hoặc đổi `bankBin` hoặc `accountNo`, khi đặt một tài khoản khác làm chính (`isPrimary = true`) và khi xóa tài khoản chính còn tài khoản khác (chặn người cầm máy đổi nơi nhận tiền); sai → 401 `OTP_INVALID`, nhập sai quá nhiều → 429 `OTP_LOCKED`. Mã `payout_account` chỉ dùng được cho route này",
+            "example": "482913"
+          }
         }
       },
       "ClassPage": {
