@@ -22,8 +22,10 @@ import { FamilyModule } from '@teachhub/modules/family';
 import { IdentityModule } from '@teachhub/modules/identity';
 import { InvitesModule } from '@teachhub/modules/invites';
 import { NotificationsModule } from '@teachhub/modules/notifications';
+import { ReportsModule } from '@teachhub/modules/reports';
 import { ScheduleModule } from '@teachhub/modules/schedule';
 import { StudentsModule } from '@teachhub/modules/students';
+import { SubscriptionModule } from '@teachhub/modules/subscription';
 import { TenancyModule } from '@teachhub/modules/tenancy';
 import { AppConfigController } from './app-config/app-config.controller.js';
 import { HealthController } from './health/health.controller.js';
@@ -49,6 +51,8 @@ import { HealthController } from './health/health.controller.js';
     InvitesModule,
     FamilyModule,
     BillingModule,
+    ReportsModule,
+    SubscriptionModule,
   ],
   controllers: [AppConfigController, HealthController],
   providers: [

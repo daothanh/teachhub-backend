@@ -45,6 +45,17 @@ export function buildOpenApiDocument(app: INestApplication) {
       },
       'adminPermissions',
     )
+    // Webhook RevenueCat (US-0.8 AC2): server-to-server, giá trị do ta đặt trong cấu hình webhook của RevenueCat.
+    .addApiKey(
+      {
+        type: 'apiKey',
+        in: 'header',
+        name: 'Authorization',
+        description:
+          'Bí mật webhook RevenueCat (giá trị nguyên văn đặt ở mục Authorization header của webhook), xoay vòng định kỳ. Sai hoặc thiếu → 401 `UNAUTHENTICATED`.',
+      },
+      'revenuecatSecret',
+    )
     .build();
   return SwaggerModule.createDocument(app, config, {
     // `AppConfigController.get` → `appConfig_get`: tên ổn định cho mã sinh ở web/app.

@@ -316,3 +316,50 @@ Sửa sau review (PR #185):
 - Hóa đơn còn nợ thật nhưng chưa có mốc nào (phát hành trước khi có tính năng, hoặc lúc đó tenant/học viên tắt nhắc rồi bật lại) được job tự lập các mốc tương lai theo lịch tenant hiện hành, không tạo mốc quá khứ.
 - Đổi lịch `offsetsDays` không áp cho mốc đã lập; tắt rồi bật lại nhắc của tenant không lập lại mốc đã hủy của hóa đơn cũ. Bật lại nhắc của học viên và hủy thanh toán lập lại các mốc chưa tới đã hủy.
 - Thông báo `payment_reminder` do hệ thống đứng tên "DayHoc nhắc…"; trước khi gửi, hệ thống kiểm lại nợ thật (`total − paid − carried`), hết nợ hoặc hóa đơn hủy thì bỏ qua. Email có số còn nợ, hạn và đường dẫn mở đúng hóa đơn (`teachhub://invoices/{id}`); push chỉ chữ chung.
+
+## Sprint 7 "Báo cáo và gói Pro" (S6-FL-06, S6-CT-01)
+
+Thân hàm trả 501 `NOT_IMPLEMENTED` tới khi làm task backend tương ứng; schema đã validate thật. Không có bảng hay migration mới (`subscriptions`, `plans`, `subscription_events`, `bank_transfer_orders` đã có từ Sprint 2; `revenue_ledger` từ Sprint 6). Phạm vi theo R-10 (Plan §2.7 "Lộ trình": `subscription`, `reports`, `admin`, IAP, T12, T14 dồn sang Sprint 7–8).
+
+| Endpoint | Story | Ưu tiên | Màn |
+| --- | --- | --- | --- |
+| `GET /v1/reports/month-overview` | US-8.1, US-7.4 AC3 | P0 | T12 |
+| `GET /v1/reports/payments` (bổ sung ngoài Spec §5.4) | US-8.1 AC2, AC3 | P0 | T12 |
+| `GET /v1/reports/revenue-by-class`, `GET /v1/reports/revenue-12m` | US-8.2 | P0 | T12 |
+| `GET /v1/plan-usage` | US-0.7, US-0.8 | P0 | T14, tab Thêm |
+| `POST /v1/subscription/trial` | US-0.8 AC1 | P0 | T14 |
+| `POST /v1/subscription/bank-transfer-orders` (chỉ web, R6) | US-0.8 AC3 | P0 | T14a |
+| `POST /v1/webhooks/revenuecat` | US-0.8 AC2 | P0 | (RevenueCat gọi) |
+
+Thay đổi trên endpoint cũ (chỉ thêm, `oasdiff breaking` sạch):
+
+- `POST /invoices/{id}/adjustments` nhận thêm `kind` tùy chọn (`manual_adjustment` mặc định, `surcharge`) cho US-7.8 AC2 (P1): phụ thu một lần, `amount` > 0, dòng hóa đơn `surcharge`. Thân hàm hiện có chưa đọc `kind`, nên tới khi backend làm, `surcharge` rơi về `manual_adjustment` dương (cùng số tiền): task backend phải đọc `kind`. AC1 (giảm trừ cố định) đã có ở `PUT /enrollments/{id}/fee-override`, AC3 (tổng âm về 0) đã có.
+- Thêm security scheme `revenuecatSecret` (header `Authorization`) trong `components.securitySchemes`.
+
+Mã lỗi mới: `TRIAL_ALREADY_USED` (422, đã có tên trong Spec §5.6). `PLAN_LIMIT_EXCEEDED`, `FEATURE_REQUIRES_PRO`, `READONLY_PLAN_LIMIT` (402) đã có từ trước; `POST /classes` và `POST /students` đã khai 402 nên không đổi gì ở US-0.7.
+
+Quyết định khi soạn (cần TL chốt nếu muốn khác):
+
+Phạm vi:
+
+- **Không đưa `admin`**: `/v1/admin/**` (xác nhận chuyển khoản, bài quy định, tra cứu hỗ trợ) đã có trong hợp đồng từ Sprint 2 (S1-CT-02) và là BFF của repo `teachhub-admin`, không app Flutter hay web giáo viên nào gọi. Sprint 7 chỉ làm đầu giáo viên của luồng chuyển khoản (tạo đơn), đầu admin xác nhận đã có sẵn.
+- **Để Sprint 8**: US-7.7 `payment_claims` (P1): cần tải ảnh biên lai qua `files` (`POST /files/upload-urls`, `/complete`), module này chưa có trong hợp đồng và Spec chỉ ghi bảng, chưa có endpoint. Hóa đơn `pending_confirmation` đã có sẵn trong enum. US-9.5 AC2–AC4 (mục Thuế, thanh tiến độ ngưỡng, cảnh báo 80%, `tax_threshold_alerts`, `GET /compliance/revenue-book`): Spec chỉ ghi một dòng bảng và một dòng endpoint, Plan gắn vào E9 Tuân thủ (T13); đã có `revenue_ledger` nên không mất dữ liệu. US-8.4 (`GET /reports/attendance`), US-8.5 (`at-risk-students`, `POST /students/{id}/contacted`, ô nguy cơ nghỉ T12a): P1, phụ thuộc cảnh báo vắng US-3.6 và cảnh báo điểm US-5.4 chưa có. US-8.6 (`POST /exports`, nút "Xuất Excel / CSV" ở T12): P1, cần `files` và worker. Chuyên cần mỗi lớp vẫn có trong `revenue-by-class` (`attendancePercent`) cho thẻ "Theo lớp".
+- US-8.3 (công nợ T11) đã vào Sprint 6; ô "Công nợ" của T12 lấy `summary.totalAmount` của `GET /receivables`.
+
+Báo cáo (`reports`, chỉ `tenant_owner`, chỉ đọc):
+
+- Số liệu đọc từ `revenue_ledger` nên "Đã thu" khớp từng đồng với danh sách thanh toán (US-8.1 AC2): `collectedAmount` = Σ dòng sổ có `entry_date` trong tháng, gồm dòng đảo; hủy thanh toán của tháng trước làm tháng hiện tại giảm. `billedAmount` = Σ `totalAmount` hóa đơn đã phát hành (không nháp, không hủy) của kỳ thu tháng đó. `outstandingAmount` và `activeStudentCount` là giá trị hiện tại, không theo tháng chọn.
+- US-8.2 AC3 đòi tổng theo lớp bằng đúng "đã thu": hóa đơn gộp nhiều lớp nên **phải có quy tắc chia thanh toán cho lớp** (ghi ở `RevenueByClass`): theo tỷ lệ dòng học phí dương của từng lớp, làm tròn phần dư lớn nhất; phần không gán được là dòng "Khác" (`classId = null`). **Chờ TL xác nhận** (phương án khác: chỉ phân bổ theo hóa đơn phát hành, không theo thanh toán).
+- `month` là `YYYY-MM`, mặc định tháng hiện tại theo múi giờ tenant, không phân trang cho theo lớp và 12 tháng; `payments` phân trang offset. Phần "cập nhật báo cáo" của US-7.4 AC3 không cần job: đọc thẳng sổ.
+
+Gói và dùng thử (`subscription`, chỉ `tenant_owner`):
+
+- `GET /plan-usage` gom một lần gọi cho T14: gói, `limits` (null = không giới hạn), `usage`, `readOnly` (số lớp/học sinh chỉ đọc sau hết dùng thử, US-0.8 AC4), `features` (feature flag, khóa mở: Spec §4.4), `pendingBankTransferOrder` cho T14a. `trialAvailable` quyết định biến thể "Đã dùng thử" của T14. Giá Pro VNĐ (`proPriceVnd`) null tới khi PO chốt; giá IAP lấy từ RevenueCat ở app.
+- `POST /subscription/trial`: không body, `Idempotency-Key` bắt buộc, trả `PlanUsage`. Đã dùng thử → 422 `TRIAL_ALREADY_USED`; đang trialing/active → 409 `CONFLICT_STALE`. 14 ngày tính từ lúc gọi.
+- `POST /subscription/bank-transfer-orders` (R6: chỉ client web, app không dẫn tới): đã có đơn `pending` thì trả lại đơn đó. Tài khoản nhận và giá do cấu hình hệ thống; `transferNote` theo quy tắc `[A-Z0-9 ]` ≤ 25. Kích hoạt Pro qua `POST /admin/bank-transfer-orders/{id}/confirm` có sẵn. **Chờ PO xác nhận R6** (Spec §10) vì T14a trong Figma spec vẫn vẽ lựa chọn "Chuyển khoản" trong app.
+- Webhook RevenueCat: `app_user_id` = `tenant_id`; xác thực header `Authorization` bí mật, idempotent theo `event.id`; sự kiện hợp lệ nhưng không áp dụng (loại lạ, `TEST`, `SANDBOX` ở production, tenant lạ, kho khác App Store/Play, cũ hơn sự kiện đã xử lý) trả 200 `ignored` để RevenueCat không thử lại; chỉ sai bí mật (401) và thân sai (422) trả lỗi. Chưa có `@Public()` và guard bí mật: JwtAuthGuard toàn cục đang chặn 401, task backend thêm cả hai (cùng cách AdminGuard của Sprint 2).
+- Nhắc gia hạn còn 7 và 1 ngày (US-0.8 AC5, job `subscription.lifecycle`) và push "Pro đã kích hoạt": cần thêm loại thông báo vào `Notification`; **chưa khai** vì cùng vướng `oasdiff` `response-property-one-of-added` như `schedule_changed`, `billing_ready`, `invoice_issued`, `payment_recorded` (chờ Owner/TL chọn một lần cho tất cả). Hiện app đọc từ `GET /plan-usage` (`plan.daysLeft`).
+
+Chờ chốt:
+
+- Quy tắc chia doanh thu theo lớp (trên), R6 chuyển khoản trong app, giá Pro VNĐ, và ngoại lệ `oneOf` cho các loại thông báo mới.

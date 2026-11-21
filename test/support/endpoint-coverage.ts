@@ -329,4 +329,36 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
     file: 'carry-over.e2e-spec.ts',
     test: 'chỉ chủ tenant; 404 chéo tenant; RLS: tenant B không thấy sổ/công nợ của A',
   },
+  'GET /v1/reports/month-overview': {
+    notApplicable:
+      'hợp đồng S6-FL-06, thân hàm trả 501 tới task backend `reports` Sprint 7; test chéo tenant làm cùng task đó',
+  },
+  'GET /v1/reports/payments': {
+    notApplicable:
+      'hợp đồng S6-FL-06, thân hàm trả 501 tới task backend `reports` Sprint 7; test chéo tenant làm cùng task đó',
+  },
+  'GET /v1/reports/revenue-by-class': {
+    notApplicable:
+      'hợp đồng S6-FL-06, thân hàm trả 501 tới task backend `reports` Sprint 7; test chéo tenant làm cùng task đó',
+  },
+  'GET /v1/reports/revenue-12m': {
+    notApplicable:
+      'hợp đồng S6-FL-06, thân hàm trả 501 tới task backend `reports` Sprint 7; test chéo tenant làm cùng task đó',
+  },
+  'GET /v1/plan-usage': {
+    notApplicable:
+      'hợp đồng S6-FL-06, thân hàm trả 501 tới task backend `subscription` Sprint 7; test chéo tenant làm cùng task đó',
+  },
+  'POST /v1/subscription/trial': {
+    notApplicable:
+      'hợp đồng S6-FL-06, thân hàm trả 501 tới task backend `subscription` Sprint 7; test chéo tenant làm cùng task đó',
+  },
+  'POST /v1/subscription/bank-transfer-orders': {
+    notApplicable:
+      'hợp đồng S6-FL-06, thân hàm trả 501 tới task backend `subscription` Sprint 7; test chéo tenant làm cùng task đó',
+  },
+  'POST /v1/webhooks/revenuecat': {
+    notApplicable:
+      'webhook server-to-server xác thực bằng bí mật, không có dữ liệu user; hợp đồng S6-FL-06, thân hàm 501 tới task backend `subscription` Sprint 7',
+  },
 };
