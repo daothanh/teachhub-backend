@@ -9,6 +9,10 @@ vi.mock('@teachhub/modules/billing', () => ({
   PAYMENT_RECORDED: 'payment_recorded',
   PAYMENT_REMINDER: 'payment_reminder',
 }));
+vi.mock('@teachhub/modules/subscription', () => ({
+  SUBSCRIPTION_EXPIRING: 'subscription_expiring',
+  SUBSCRIPTION_ACTIVATED: 'subscription_activated',
+}));
 vi.mock('@teachhub/modules/schedule', () => ({
   SCHEDULE_CHANGED: 'schedule_changed',
 }));
@@ -17,6 +21,7 @@ vi.mock('@teachhub/modules/notifications', () => ({
   InvoiceIssuedNotifier: class {},
   PaymentRecordedNotifier: class {},
   PaymentReminderNotifier: class {},
+  SubscriptionNotifier: class {},
 }));
 
 const job = (name: string, data: unknown) => ({ name, data }) as Job;
@@ -27,16 +32,21 @@ describe('EventsProcessor: phân loại sự kiện outbox', () => {
     const issued = vi.fn().mockResolvedValue(undefined);
     const paid = vi.fn().mockResolvedValue(undefined);
     const reminder = vi.fn().mockResolvedValue(undefined);
+    const expiring = vi.fn().mockResolvedValue(undefined);
+    const activated = vi.fn().mockResolvedValue(undefined);
     return {
       handle,
       issued,
       paid,
       reminder,
+      expiring,
+      activated,
       p: new EventsProcessor(
         { handle } as never,
         { handle: issued } as never,
         { handle: paid } as never,
         { handle: reminder } as never,
+        { handleExpiring: expiring, handleActivated: activated } as never,
       ),
     };
   };
@@ -71,6 +81,17 @@ describe('EventsProcessor: phân loại sự kiện outbox', () => {
     await p.process(job('payment_reminder', data));
     expect(reminder).toHaveBeenCalledExactlyOnceWith(data);
     expect(paid).not.toHaveBeenCalled();
+  });
+
+  it('subscription_expiring / subscription_activated → SubscriptionNotifier tương ứng, không đụng notifier khác', async () => {
+    const { p, expiring, activated, reminder } = make();
+    const data = { eventId: 'e', tenantId: 't', payload: {} };
+    await p.process(job('subscription_expiring', data));
+    expect(expiring).toHaveBeenCalledExactlyOnceWith(data);
+    expect(activated).not.toHaveBeenCalled();
+    await p.process(job('subscription_activated', data));
+    expect(activated).toHaveBeenCalledExactlyOnceWith(data);
+    expect(reminder).not.toHaveBeenCalled();
   });
 
   it('schedule_changed → chỉ ghi log, không gọi notifier', async () => {

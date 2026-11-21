@@ -13,6 +13,8 @@ export type PushType =
   | 'payment_recorded'
   | 'payment_reminder'
   | 'billing_ready'
+  | 'subscription_expiring'
+  | 'subscription_activated'
   | 'schedule_changed';
 
 const OPEN = 'Mở DayHoc để xem.';
@@ -51,6 +53,16 @@ export const PUSH_COPY: Record<PushType, PushCopy> = {
     title: 'Học phí đã sẵn sàng',
     body: `Bảng học phí kỳ này đã sẵn sàng để bạn xem lại. ${OPEN}`,
     channelId: 'billing',
+  },
+  subscription_expiring: {
+    title: 'Gói Pro sắp hết hạn',
+    body: `Gói Pro của bạn sắp hết hạn, hãy gia hạn để dùng liền mạch. ${OPEN}`,
+    channelId: 'general',
+  },
+  subscription_activated: {
+    title: 'Gói Pro đã kích hoạt',
+    body: `Gói Pro của bạn đã được kích hoạt. ${OPEN}`,
+    channelId: 'general',
   },
   schedule_changed: {
     title: 'Lịch học thay đổi',

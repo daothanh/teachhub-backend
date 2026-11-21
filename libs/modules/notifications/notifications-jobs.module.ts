@@ -5,6 +5,7 @@ import { BillingReadyNotifier } from './application/billing-ready-notifier.servi
 import { InvoiceIssuedNotifier } from './application/invoice-issued-notifier.service.js';
 import { PaymentRecordedNotifier } from './application/payment-recorded-notifier.service.js';
 import { PaymentReminderNotifier } from './application/payment-reminder-notifier.service.js';
+import { SubscriptionNotifier } from './application/subscription-notifier.service.js';
 import { PurgeStaleDevicesJob } from './application/devices.service.js';
 
 /** Phần không có controller của module notifications cho `worker` dùng (job nền, báo vắng). */
@@ -17,6 +18,7 @@ import { PurgeStaleDevicesJob } from './application/devices.service.js';
     InvoiceIssuedNotifier,
     PaymentRecordedNotifier,
     PaymentReminderNotifier,
+    SubscriptionNotifier,
   ],
   exports: [
     PurgeStaleDevicesJob,
@@ -25,6 +27,7 @@ import { PurgeStaleDevicesJob } from './application/devices.service.js';
     InvoiceIssuedNotifier,
     PaymentRecordedNotifier,
     PaymentReminderNotifier,
+    SubscriptionNotifier,
   ],
 })
 export class NotificationsJobsModule {}
