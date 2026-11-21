@@ -1,10 +1,17 @@
 import { Injectable } from '@nestjs/common';
 import { and, asc, eq, inArray, isNull, ne } from 'drizzle-orm';
-import { AppException, uuidv7 } from '@teachhub/core';
+import {
+  AppException,
+  guardianInviteStatus,
+  toLatestInvite,
+  mergeInviteStatus,
+  uuidv7,
+} from '@teachhub/core';
 import {
   classes,
   enrollments,
   guardians,
+  latestInvitesByGuardian,
   students,
   tenants,
   type Tx,
@@ -120,6 +127,7 @@ export class EnrollmentsService {
             studentId: guardians.studentId,
             fullName: guardians.fullName,
             relation: guardians.relation,
+            userId: guardians.userId,
           })
           .from(guardians)
           .where(
@@ -134,25 +142,35 @@ export class EnrollmentsService {
           )
           .orderBy(asc(guardians.createdAt), asc(guardians.id))
       : [];
+    const latest = await latestInvitesByGuardian(
+      tx,
+      tenantId,
+      gs.map((g) => g.id),
+    );
+    const now = new Date();
     return {
-      items: rows.map((r) => ({
-        ...r,
-        studentStatus: r.studentStatus as 'active' | 'paused',
-        // shortcut: chưa có bảng lời mời phụ huynh; S4-BE-03 thay bằng trạng thái gộp thật (activated > invited > expired).
-        inviteStatus: 'not_invited' as const,
-        // Ghi ở `putFeeOverride`: null khi không còn mức riêng nên khác null = hiện nhãn "Giá riêng".
-        feeOverride: r.feeOverride as FeeOverride | null,
+      items: rows.map((r) => {
         // Trigger CSDL giữ tối đa 2 phụ huynh chưa gỡ cho mỗi học viên.
-        guardians: gs
+        const guardianItems = gs
           .filter((g) => g.studentId === r.studentId)
           .map((g) => ({
             id: g.id,
             fullName: g.fullName,
             relation: g.relation as 'father' | 'mother' | 'guardian',
-            inviteStatus: 'not_invited' as const, // shortcut: như trên, S4-BE-03
-            latestInvite: null,
-          })),
-      })),
+            inviteStatus: guardianInviteStatus(g, latest.get(g.id), now),
+            latestInvite: toLatestInvite(latest.get(g.id)),
+          }));
+        return {
+          ...r,
+          studentStatus: r.studentStatus as 'active' | 'paused',
+          // Ghi ở `putFeeOverride`: null khi không còn mức riêng nên khác null = hiện nhãn "Giá riêng".
+          feeOverride: r.feeOverride as FeeOverride | null,
+          inviteStatus: mergeInviteStatus(
+            guardianItems.map((g) => g.inviteStatus),
+          ),
+          guardians: guardianItems,
+        };
+      }),
     };
   }
 

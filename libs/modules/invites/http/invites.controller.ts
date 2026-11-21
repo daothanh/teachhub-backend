@@ -1,4 +1,13 @@
-import { Body, Controller, Get, HttpCode, Param, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Req,
+  Res,
+} from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiCreatedResponse,
@@ -6,9 +15,18 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { ApiErrors, ApiIdempotencyKey, AppException } from '@teachhub/core';
+import {
+  ApiErrors,
+  ApiIdempotencyKey,
+  Ctx,
+  type RequestContext,
+} from '@teachhub/core';
+import { TxService } from '@teachhub/db';
+import { Idempotency } from '@teachhub/infra';
 import { RequiresRole } from '@teachhub/modules/identity';
+import { InvitesService } from '../application/invites.service.js';
 import {
   type CreateInviteRequest,
   createInviteRequestSchema,
@@ -22,13 +40,19 @@ import {
 
 const idParam = z.uuid();
 
-// Hợp đồng Sprint 4 (S3-FL-12); thân hàm ở S4-BE-03. Token và mã ngắn chỉ có trong phản hồi tạo/gửi lại.
+// Hợp đồng Sprint 4 (S3-FL-12); S4-BE-03. Token và mã ngắn chỉ có trong phản hồi tạo/gửi lại.
 @ApiTags('invites')
 @ApiBearerAuth('bearer')
 @RequiresRole('tenant_owner')
 @ApiErrors('UNAUTHENTICATED', 'TOKEN_EXPIRED', 'FORBIDDEN')
 @Controller()
 export class InvitesController {
+  constructor(
+    private readonly tx: TxService,
+    private readonly idem: Idempotency,
+    private readonly invites: InvitesService,
+  ) {}
+
   @Post('students/:id/invites')
   @ApiOperation({
     summary: 'Tạo lời mời phụ huynh: link + mã ngắn (US-1.6 AC2, AC3)',
@@ -41,10 +65,28 @@ export class InvitesController {
   @ApiIdempotencyKey()
   @ApiErrors('VALIDATION_FAILED', 'NOT_FOUND', 'CONFLICT_STALE')
   create(
-    @Param('id', { schema: idParam }) _studentId: string,
-    @Body({ schema: createInviteRequestSchema }) _body: CreateInviteRequest,
-  ): InviteCreated {
-    throw new AppException('NOT_IMPLEMENTED');
+    @Ctx() ctx: RequestContext,
+    @Req() req: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @Param('id', { schema: idParam }) studentId: string,
+    @Body({ schema: createInviteRequestSchema }) body: CreateInviteRequest,
+  ): Promise<InviteCreated> {
+    return this.idem.run(
+      req,
+      reply,
+      ctx,
+      async (t) => ({
+        status: 201,
+        body: await this.invites.create(
+          t,
+          { tenantId: ctx.tenantId!, userId: ctx.userId! },
+          studentId,
+          body.guardianId,
+        ),
+      }),
+      // Phản hồi có token và mã: lưu mã hóa, phát lại tối đa 10 phút.
+      { sensitive: true },
+    );
   }
 
   @Get('students/:id/invites')
@@ -56,8 +98,13 @@ export class InvitesController {
   })
   @ApiOkResponse({ standardSchema: inviteListSchema })
   @ApiErrors('NOT_FOUND')
-  list(@Param('id', { schema: idParam }) _studentId: string): InviteList {
-    throw new AppException('NOT_IMPLEMENTED');
+  list(
+    @Ctx() ctx: RequestContext,
+    @Param('id', { schema: idParam }) studentId: string,
+  ): Promise<InviteList> {
+    return this.tx.run(ctx, (t) =>
+      this.invites.list(t, ctx.tenantId!, studentId),
+    );
   }
 
   @Post('invites/:id/revoke')
@@ -70,8 +117,16 @@ export class InvitesController {
   @ApiOkResponse({ standardSchema: inviteSchema })
   @ApiIdempotencyKey()
   @ApiErrors('NOT_FOUND', 'CONFLICT_STALE')
-  revoke(@Param('id', { schema: idParam }) _id: string): Invite {
-    throw new AppException('NOT_IMPLEMENTED');
+  revoke(
+    @Ctx() ctx: RequestContext,
+    @Req() req: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @Param('id', { schema: idParam }) id: string,
+  ): Promise<Invite> {
+    return this.idem.run(req, reply, ctx, async (t) => ({
+      status: 200,
+      body: await this.invites.revoke(t, ctx.tenantId!, id),
+    }));
   }
 
   @Post('invites/:id/resend')
@@ -85,7 +140,25 @@ export class InvitesController {
   @ApiCreatedResponse({ standardSchema: inviteCreatedSchema })
   @ApiIdempotencyKey()
   @ApiErrors('NOT_FOUND', 'CONFLICT_STALE')
-  resend(@Param('id', { schema: idParam }) _id: string): InviteCreated {
-    throw new AppException('NOT_IMPLEMENTED');
+  resend(
+    @Ctx() ctx: RequestContext,
+    @Req() req: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @Param('id', { schema: idParam }) id: string,
+  ): Promise<InviteCreated> {
+    return this.idem.run(
+      req,
+      reply,
+      ctx,
+      async (t) => ({
+        status: 201,
+        body: await this.invites.resend(
+          t,
+          { tenantId: ctx.tenantId!, userId: ctx.userId! },
+          id,
+        ),
+      }),
+      { sensitive: true },
+    );
   }
 }

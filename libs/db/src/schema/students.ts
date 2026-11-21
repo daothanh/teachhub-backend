@@ -91,6 +91,8 @@ export const guardians = pgTable(
       columns: [t.tenantId, t.studentId],
       foreignColumns: [students.tenantId, students.id],
     }),
+    // Đích của khóa ngoại kép (tenant_id, student_id, guardian_id) từ invites.
+    unique('guardians_tenant_student_id_uq').on(t.tenantId, t.studentId, t.id),
     index('guardians_student_id_idx').on(t.studentId),
     index('guardians_user_id_idx')
       .on(t.userId)

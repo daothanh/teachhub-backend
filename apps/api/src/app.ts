@@ -35,6 +35,21 @@ export async function createApp(): Promise<NestFastifyApplication> {
     .addHook('onSend', async (req, reply) => {
       void reply.header('x-request-id', req.id);
     });
+  // Route nhận token/mã mời: không cache, không lộ qua Referer (kể cả khi lỗi, nên đặt ở hook chứ không ở handler).
+  app
+    .getHttpAdapter()
+    .getInstance()
+    .addHook('onSend', async (req, reply) => {
+      if (
+        /^\/v1\/invites\/(preview|accept|redeem-code)$/.test(
+          req.url.split('?')[0]!,
+        )
+      ) {
+        void reply
+          .header('cache-control', 'no-store')
+          .header('referrer-policy', 'no-referrer');
+      }
+    });
   app.setGlobalPrefix('v1', {
     exclude: [
       { path: 'health/live', method: RequestMethod.GET },
