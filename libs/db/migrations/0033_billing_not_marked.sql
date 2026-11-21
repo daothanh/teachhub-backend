@@ -1,0 +1,3 @@
+ALTER TABLE "invoice_lines" DROP CONSTRAINT "invoice_lines_not_charged_reason_check";--> statement-breakpoint
+ALTER TABLE "invoice_lines" ADD CONSTRAINT "invoice_lines_not_charged_reason_check" CHECK (("invoice_lines"."not_charged_reason" is not null) = ("invoice_lines"."kind" = 'session' and not "invoice_lines"."charged")
+        and ("invoice_lines"."not_charged_reason" is null or "invoice_lines"."not_charged_reason" in ('excused_not_charged', 'unexcused_not_charged', 'cancelled', 'makeup', 'not_marked')));

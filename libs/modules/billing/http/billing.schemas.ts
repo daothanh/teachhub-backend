@@ -211,12 +211,18 @@ export const invoiceLineKindSchema = z
   });
 
 export const sessionNotChargedReasonSchema = z
-  .enum(['excused_not_charged', 'unexcused_not_charged', 'cancelled', 'makeup'])
+  .enum([
+    'excused_not_charged',
+    'unexcused_not_charged',
+    'cancelled',
+    'makeup',
+    'not_marked',
+  ])
   .meta({
     id: 'SessionNotChargedReason',
     description:
       '`excused_not_charged`/`unexcused_not_charged` = lớp hoặc học viên tắt tính vắng có phép/không phép, `cancelled` = giáo viên hủy buổi, `makeup` = buổi bù không tính thêm tiền (US-7.1 AC3). Ứng với `reason` của `InvoiceCalculator` (trừ `taught`, nghĩa là có tính). ' +
-      'Chưa có lý do riêng cho buổi chưa điểm danh lúc chốt (issue #179): thêm `not_marked` vào enum bị `oasdiff` coi là breaking (`response-property-enum-value-added`), nên chờ Owner/TL chọn ngoại lệ, xem `contracts/CHANGELOG.md`. Client coi giá trị lạ như "không tính"',
+      '`not_marked` = buổi chưa điểm danh lúc chốt kỳ (issue #179), 0 đ. Client coi giá trị lạ như "không tính"',
   });
 
 export const invoiceLineSchema = z

@@ -150,7 +150,7 @@ describe('computeEnrollmentInvoice: bản nháp từ buổi và điểm danh', (
       'taught',
       'cancelled',
       'makeup',
-      undefined,
+      'not_marked',
     ]);
     expect(r.result.lines.map((l) => l.amount)).toEqual([150_000, 0, 0, 0]);
   });
@@ -310,6 +310,10 @@ describe('computeEnrollmentInvoice: bản nháp từ buổi và điểm danh', (
       ['s3', 150_000],
     ]);
     expect(r.result.lines[1]!.description).toContain('chưa điểm danh');
+    expect(r.result.lines[1]).toMatchObject({
+      charged: false,
+      reason: 'not_marked',
+    });
   });
   it('D3: lớp theo tháng không phụ thuộc điểm danh; buổi planned vẫn nằm trong mẫu số lịch', () => {
     const cls: ClassFee = {
