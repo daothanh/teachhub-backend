@@ -404,6 +404,26 @@ describe('family: phụ huynh xem con', () => {
       );
     });
 
+    it('học sinh (membership student) gọi /family/* → 403', async () => {
+      const c = await child(A);
+      const userId = randomUUID();
+      await t.worker.query(
+        `insert into users (id, email, display_name) values ($1, $2, 'HS')`,
+        [userId, `${userId}@example.com`],
+      );
+      await t.worker.query(
+        `insert into memberships (id, user_id, role, student_id) values ($1, $2, 'student', $3)`,
+        [randomUUID(), userId, c.studentId],
+      );
+      const token = await t.tokenFor(userId);
+      for (const url of [
+        '/family/students',
+        `/family/students/${c.studentId}/attendance`,
+      ]) {
+        expect((await call(token, 'GET', url)).statusCode, url).toBe(403);
+      }
+    });
+
     it('chưa đồng ý điều khoản → 403 CONSENT_REQUIRED kèm termsVersion, trước cả khi tra dữ liệu', async () => {
       const p = await mkParent(false);
       const c = await child(A, await mkParent(), 'Toán 9A');
