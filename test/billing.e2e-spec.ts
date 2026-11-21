@@ -21,8 +21,7 @@ describe('billing: job billing.close + API kỳ thu, hóa đơn, điều chỉnh
   let pushed: {
     token: string;
     urgent: boolean;
-    title: string;
-    channelId: string;
+    copy: { title: string; channelId: string };
     data: Record<string, string>;
   }[];
   let A: Who;
@@ -424,8 +423,7 @@ describe('billing: job billing.close + API kỳ thu, hóa đơn, điều chỉnh
     expect(pushed[0]).toMatchObject({
       token: 'tok-billing-a',
       urgent: false,
-      title: 'Học phí đã sẵn sàng',
-      channelId: 'billing',
+      copy: { title: 'Học phí đã sẵn sàng', channelId: 'billing' },
     });
     expect(JSON.stringify(pushed)).not.toContain(
       String(ev.payload.draftTotalAmount),

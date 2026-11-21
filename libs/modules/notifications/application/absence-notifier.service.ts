@@ -226,7 +226,7 @@ export class AbsenceNotifier {
         ? await this.push.send(
             devices.map((token) => ({
               token,
-              ...copy,
+              copy,
               urgent: p.urgent ?? true,
               data: { notificationId: p.notificationId, type: p.type },
             })),

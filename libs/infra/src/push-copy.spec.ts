@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { FirebasePushSender } from './push.js';
-import { PUSH_COPY, pushCopyFor } from './push-copy.js';
+import { PUSH_COPY, pushCopyFor, type PushType } from './push-copy.js';
 
 // Mọi loại thông báo đang gửi push (TYPE_* trong notifications/application).
 const SENT_TYPES = [
@@ -15,7 +15,7 @@ const SENT_TYPES = [
 describe('pushCopyFor', () => {
   it('mọi loại đang dùng đều có tiêu đề, nội dung và kênh', () => {
     for (const t of SENT_TYPES) {
-      const c = PUSH_COPY[t];
+      const c = PUSH_COPY[t as PushType];
       expect(c, t).toBeDefined();
       expect(c!.title.length).toBeGreaterThan(0);
       expect(c!.body).toContain('DayHoc');
@@ -25,7 +25,7 @@ describe('pushCopyFor', () => {
 
   it('chữ chung không chứa chữ số (số tiền, ngày) nào', () => {
     for (const c of [...Object.values(PUSH_COPY), pushCopyFor('lạ')])
-      expect(`${c.title} ${c.body}`).not.toMatch(/\d/);
+      expect(`${c.title} ${c.body}`).not.toMatch(/[\d{}$]/);
   });
 
   it('loại lạ dùng chuỗi mặc định chung', () => {
@@ -49,7 +49,7 @@ describe('FirebasePushSender payload', () => {
       {
         token: 't',
         urgent,
-        ...pushCopyFor('student_absent'),
+        copy: pushCopyFor('student_absent'),
         data: { notificationId: 'n1', type: 'student_absent' },
       },
     ]);
@@ -67,7 +67,7 @@ describe('FirebasePushSender payload', () => {
     expect(m.apns.headers['apns-push-type']).toBe('alert');
     expect(m.android).toEqual({
       priority: 'high',
-      notification: { channelId: 'attendance' },
+      notification: { channelId: 'attendance', visibility: 'private' },
     });
   });
 

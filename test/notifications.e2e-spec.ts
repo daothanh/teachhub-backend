@@ -174,8 +174,7 @@ describe('thông báo báo vắng', () => {
     ]);
     expect(JSON.stringify(sent)).not.toMatch(/Châu|Toán 9A/);
     expect(sent[0]).toMatchObject({
-      title: 'Thông báo vắng học',
-      channelId: 'attendance',
+      copy: { title: 'Thông báo vắng học', channelId: 'attendance' },
       urgent: true,
     });
     const d = await rows(

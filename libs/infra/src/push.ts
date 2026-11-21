@@ -3,14 +3,13 @@ import { ConfigService } from '@nestjs/config';
 import { cert, getApps, initializeApp } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
 import type { Env } from '@teachhub/core';
+import type { PushCopy } from './push-copy.js';
 
 /** Một tin push tới một token: `title`/`body` chung theo loại (không PII), `data` chỉ chứa chuỗi định danh (`notificationId`, `type`). */
 export interface PushMessage {
   token: string;
-  title: string;
-  body: string;
-  /** Kênh thông báo Android (`attendance`, `billing`, `general`). */
-  channelId: string;
+  /** Chữ khay + kênh Android, chỉ lấy từ `pushCopyFor(type)` để không lọt PII. */
+  copy: PushCopy;
   data: Record<string, string>;
   urgent: boolean;
 }
@@ -70,11 +69,15 @@ export class FirebasePushSender extends PushSender {
     const res = await this.messaging.sendEach(
       messages.map((m) => ({
         token: m.token,
-        notification: { title: m.title, body: m.body },
+        notification: { title: m.copy.title, body: m.copy.body },
         data: m.data,
         android: {
           priority: m.urgent ? ('high' as const) : ('normal' as const),
-          notification: { channelId: m.channelId },
+          // 'private': máy khóa thì Android che nội dung.
+          notification: {
+            channelId: m.copy.channelId,
+            visibility: 'private' as const,
+          },
         },
         apns: {
           headers: {
