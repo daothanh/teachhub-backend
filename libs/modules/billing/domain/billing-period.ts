@@ -9,6 +9,26 @@
 // D4 Học viên `paused`: vẫn tính buổi theo buổi đã dạy, không thu học phí tháng/đợt trọn khóa; `left` hoặc ghi danh rời
 //    lớp trước kỳ: không tính.
 // D5 Học viên không có dòng nào: không có hóa đơn.
+// D6 Số dư chuyển kỳ (S6-BE-03, US-7.6): KẾT CHUYỂN TẠI THỜI ĐIỂM PHÁT HÀNH qua sổ học viên (Coordinator chốt; giữ cách ghi thanh
+//    toán theo hóa đơn, ít rủi ro sai tiền nhất). `billing.close` chỉ tạo bản nháp có dòng `carry_over` XEM TRƯỚC = Σ còn nợ các
+//    hóa đơn kỳ trước đã phát hành (issued/partially_paid, không nháp/hủy) + số dư sổ (dương nợ, âm trả thừa): không ghi sổ, không
+//    đụng hóa đơn cũ, nên hóa đơn cũ vẫn thu được cho tới khi hóa đơn mới được phát hành. Dòng xem trước được tính lại khi đọc
+//    nháp (không ghi), khi `adjust` (ghi) và khi phát hành; tổng nháp = max(0, Σ dòng). `issue()` (một giao dịch) khóa hóa đơn cũ
+//    còn nợ `ORDER BY id FOR UPDATE`, tính lại số dư dưới khóa, ghi `unpaid_carried` (nợ, gắn hóa đơn cũ) + `invoices.carried_amount`
+//    của hóa đơn cũ, đặt dòng `carry_over` và tổng chốt, ghi `applied_to_invoice` (đối ứng, gắn hóa đơn mới) và
+//    `oldest_due_date` = hạn cũ nhất của các hóa đơn nguồn (tuổi nợ T11 không bị "làm mới" khi chuyển kỳ). Σ dòng ngoài carry_over = 0 (vd.
+//    miễn giảm 100%; nháp lưu total = 0, không chặn đóng kỳ, không tính vào thông báo bản nháp sẵn sàng): không phát hành (ZERO_AMOUNT, US-1.3 AC3), không kết chuyển. Còn lại luôn chốt: tổng = max(0, Σ dòng ngoài
+//    carry + số dư); tổng ≤ 0 (số dư đủ trả, hoặc điều chỉnh tay âm vượt phát sinh) thì hóa đơn có mã, `total = 0`, `paid`, không QR,
+//    không `invoice_issued`; `applied_to_invoice` đưa số dư sổ về min(0, tổng): ghi nợ đúng phần phát sinh được số dư trả, hoặc ghi
+//    có phần âm của điều chỉnh tay; phần dư ở lại sổ cho kỳ sau. Hệ quả: `remainingAmount` hóa đơn cũ = tổng − đã thu − carried_amount
+//    nên công nợ chỉ tính ở hóa đơn mới (không đếm hai lần, nợ không chuyển lần hai); hóa đơn cũ thu được phần còn nợ, hết còn nợ
+//    thì 409; không hủy được hóa đơn đã chuyển nợ hoặc mang dòng carry_over ≠ 0. Học viên không có dòng tiền kỳ đó (D5) không có
+//    hóa đơn mới nên nợ vẫn ở hóa đơn cũ. Bất biến: Σ(dòng ngoài carry_over của hóa đơn đã phát hành chưa hủy) − Σ đã thu =
+//    Σ remainingAmount + số dư sổ.
+// D7 Điều chỉnh kỳ trước (US-3.3 AC4): điểm danh/buổi sửa sau khi hóa đơn kỳ cũ (12 tháng gần nhất, chưa hủy) đã phát hành → tính lại
+//    bằng cùng calculator và so với dòng buổi đã phát hành; chênh lệch (buổi mới tính / bỏ tính / bị hủy / bị xóa) thành dòng
+//    `prev_adjustment` ở bản nháp mới, trừ phần đã điều chỉnh ở các hóa đơn sau đã chốt (dòng trong nháp chưa chốt chưa tính); hóa đơn cũ không đổi. Các dòng này trong nháp chỉ là xem trước: GET/`adjust` tính lại, và `issue()` xóa rồi tính lại dưới khóa tenant cho từng nháp sắp chốt (chốt nháp nào trước cũng không điều chỉnh hai lần, điểm danh đổi sau khi tạo nháp thì chốt theo số mới). Chỉ lớp theo buổi. Giáo viên thấy
+//    số tiền chênh ở dòng trong nháp. shortcut: chưa có thông báo riêng "đã điều chỉnh".
 import {
   type AttendanceStatus,
   calculateInvoice,

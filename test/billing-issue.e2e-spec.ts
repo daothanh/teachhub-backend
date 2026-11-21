@@ -55,6 +55,12 @@ describe('billing: phát hành và hủy hóa đơn', () => {
         `insert into invoices (id, tenant_id, period_id, student_id, total_amount) values ($1, $2, $3, $4, $5)`,
         [inv, who.tenantId, periodId, stu, amount],
       );
+      // Phát hành tính lại tổng từ dòng hóa đơn: hóa đơn có tiền cần một dòng gốc.
+      if (amount > 0)
+        await q(
+          `insert into invoice_lines (id, tenant_id, invoice_id, position, kind, description, amount) values ($1, $2, $3, 1, 'monthly', 'Học phí tháng', $4)`,
+          [randomUUID(), who.tenantId, inv, amount],
+        );
       invoiceIds.push(inv);
     }
     return { periodId, invoiceIds };

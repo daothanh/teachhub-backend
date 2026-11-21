@@ -48,7 +48,7 @@ export const receivableRowSchema = z
     classNames: z.array(z.string()).meta({
       description: 'Lớp học viên đang học (hiện ở mỗi dòng, US-8.3 AC1)',
     }),
-    outstandingAmount: vndSchema('Tổng số còn nợ, > 0'),
+    outstandingAmount: vndSchema('Nợ ròng của học viên, > 0'),
     openInvoiceCount: z.int().min(1),
     oldestDueDate: z.iso.date().meta({
       description: 'Hạn thanh toán của hóa đơn cũ nhất còn nợ',
@@ -81,7 +81,7 @@ export const receivablesSchema = paginatedSchema(receivableRowSchema)
   .meta({
     id: 'Receivables',
     description:
-      'Công nợ của tenant (T11): mỗi dòng một học viên còn nợ, sắp theo số nợ giảm dần mặc định, kèm tổng theo nhóm tuổi nợ (US-8.3 AC1, AC2). Nợ = Σ `remainingAmount` các hóa đơn `issued`/`partially_paid` của học viên; khoản đã nằm trong dòng `carry_over` của hóa đơn kỳ sau chỉ tính ở hóa đơn kỳ sau, không tính hai lần. Học viên không còn nợ không có dòng',
+      'Công nợ của tenant (T11): mỗi dòng một học viên còn nợ, sắp theo số nợ giảm dần mặc định, kèm tổng theo nhóm tuổi nợ (US-8.3 AC1, AC2). Nợ ròng của học viên = max(0, Σ `remainingAmount` các hóa đơn `issued`/`partially_paid` + số dư sổ học viên): số dư âm (trả thừa) giảm nợ, số dư dương (nợ ở sổ, vd. hủy thanh toán sau khi trả thừa đã được trừ) tăng nợ; khoản đã nằm trong dòng `carry_over` của hóa đơn kỳ sau chỉ tính ở hóa đơn kỳ sau, không tính hai lần. Số dư âm bù vào hóa đơn cũ nhất trước (FIFO): `oldestDueDate`, tuổi nợ và `openInvoiceCount` tính theo các hóa đơn còn nợ SAU khi bù (ít nhất 1 khi nợ ròng > 0 chỉ nằm ở sổ). Nhóm tuổi nợ và `summary` theo nợ ròng. Học viên có nợ ròng 0 không có dòng',
     example: {
       items: [
         {
@@ -120,7 +120,9 @@ export const receivableInvoiceSchema = z
     status: invoiceStatusSchema,
     totalAmount: vndSchema('VND'),
     paidAmount: vndSchema('Σ thanh toán chưa hủy'),
-    remainingAmount: vndSchema('max(0, `totalAmount` − `paidAmount`)'),
+    remainingAmount: vndSchema(
+      'max(0, `totalAmount` − `paidAmount` − phần nợ đã chuyển sang hóa đơn kỳ sau)',
+    ),
     dueDate: z.iso.date(),
   })
   .meta({ id: 'ReceivableInvoice' });
@@ -155,7 +157,12 @@ export const studentReceivableHistorySchema = z
   .object({
     studentId: z.uuid(),
     studentName: z.string(),
-    outstandingAmount: vndSchema('Tổng nợ hiện tại; 0 khi hết nợ'),
+    outstandingAmount: vndSchema(
+      'Nợ ròng = max(0, `invoiceOutstandingAmount` + `ledgerBalanceAmount`); 0 khi hết nợ. Khớp `outstandingAmount` của dòng ở `GET /receivables`',
+    ),
+    invoiceOutstandingAmount: vndSchema(
+      'Σ `remainingAmount` các hóa đơn còn nợ (không gồm phần đã chuyển sang hóa đơn kỳ sau)',
+    ),
     ledgerBalanceAmount: signedVndSchema(
       'Số dư sổ học viên (`GET /students/{id}/ledger`): dương = nợ cũ chưa vào hóa đơn, âm = trả thừa',
     ),

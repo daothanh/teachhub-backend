@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import {
   AppException,
   MAX_VND,
@@ -13,6 +13,7 @@ import {
   invoices,
   outboxEvents,
   payoutAccounts,
+  studentLedger,
   students,
   tenants,
   type Tx,
@@ -39,6 +40,16 @@ import {
   transferNoteOf,
 } from '../domain/invoice-issue.js';
 import { remainingOf } from '../domain/payment.js';
+import {
+  planCarryOver,
+  prevAdjustmentDescription,
+  stableUuid,
+} from '../domain/carry-over.js';
+import {
+  previewDrafts,
+  setCarryLine,
+  setPrevAdjustmentLines,
+} from './carry-over.queries.js';
 import { buildVietQrPayload } from '../domain/vietqr.js';
 
 const MAX_ADJUSTMENTS = 20;
@@ -107,6 +118,11 @@ export class BillingService {
       );
     if (!row) throw new AppException('NOT_FOUND');
     const stats = await this.stats(tx, tenantId, [id]);
+    // Bản nháp: tổng xem trước tính lại theo số liệu hiện tại (hóa đơn cũ có thể vừa được thu); listPeriods giữ số lưu lúc
+    // tạo/điều chỉnh/phát hành (shortcut: không tính lại cho cả trang kỳ).
+    const live = await this.liveDraftTotals(tx, tenantId, id, row.periodMonth);
+    const st = stats.get(id);
+    if (st) st.draftTotalAmount = [...live.values()].reduce((n, v) => n + v, 0);
 
     const where = and(
       eq(invoices.tenantId, tenantId),
@@ -149,7 +165,11 @@ export class BillingService {
     return {
       ...toPeriod(row, stats.get(id)),
       invoices: paginated(
-        items.map((i) => ({ ...i, status: i.status as Invoice['status'] })),
+        items.map((i) => ({
+          ...i,
+          totalAmount: live.get(i.id) ?? i.totalAmount,
+          status: i.status as Invoice['status'],
+        })),
         cnt?.n ?? 0,
         query,
       ),
@@ -175,11 +195,7 @@ export class BillingService {
     if (inv.status !== 'draft') throw new AppException('INVOICE_IMMUTABLE');
 
     const lines = await tx
-      .select({
-        position: invoiceLines.position,
-        kind: invoiceLines.kind,
-        amount: invoiceLines.amount,
-      })
+      .select({ position: invoiceLines.position, kind: invoiceLines.kind })
       .from(invoiceLines)
       .where(
         and(
@@ -206,16 +222,33 @@ export class BillingService {
       charged: true,
       adjustmentReason: body.adjustmentReason,
     });
-    // Tổng = max(0, Σ tổng từng ghi danh đã cắt bởi calculator + Σ dòng điều chỉnh). `total - clamped` chính là tổng chưa
-    // cắt đó (total khi ≥ 0, -clamped khi âm), nên không tính lại từ tổng thô các dòng.
-    const sum = inv.totalAmount - inv.clampedAmount + body.amount;
-    if (Math.abs(sum) > MAX_VND) {
+    // Hai dòng xem trước (điều chỉnh kỳ trước, chuyển kỳ) làm mới theo số liệu hiện tại; tổng = max(0, Σ dòng), cùng công thức job/GET/issue.
+    const [period] = await tx
+      .select({ periodMonth: billingPeriods.periodMonth })
+      .from(billingPeriods)
+      .where(
+        and(
+          eq(billingPeriods.tenantId, actor.tenantId),
+          eq(billingPeriods.id, inv.periodId),
+        ),
+      );
+    const { previews } = await previewDrafts(
+      tx,
+      actor.tenantId,
+      [{ id, studentId: inv.studentId }],
+      period!.periodMonth,
+    );
+    const pv = previews.get(id)!;
+    await setPrevAdjustmentLines(tx, actor.tenantId, id, pv.adjustments);
+    await setCarryLine(tx, actor.tenantId, id, pv.carry);
+    const plan = planCarryOver(pv.charges, pv.carry);
+    if (Math.abs(plan.sum) > MAX_VND) {
       throw new AppException('VALIDATION_FAILED', undefined, {
         amount: ['Tổng hóa đơn vượt giới hạn cho phép.'],
       });
     }
-    const totalAmount = Math.max(0, sum);
-    const clampedAmount = Math.max(0, -sum);
+    const totalAmount = plan.total;
+    const clampedAmount = plan.clamped;
     await tx
       .update(invoices)
       .set({ totalAmount, clampedAmount })
@@ -307,6 +340,22 @@ export class BillingService {
     const nameOf = (id: string) => names.get(id) ?? '';
 
     const skipped: IssueInvoicesResult['skipped'] = [];
+    const drafts = rows.filter((r) => r.status === 'draft');
+    // Kết chuyển tại lúc phát hành (D6): khóa các hóa đơn cũ còn nợ một lần cho cả lô (`ORDER BY id FOR UPDATE`, sau khóa kỳ và
+    // hóa đơn nháp) rồi tính lại số dư dưới khóa; số dư xem trước trong bản nháp có thể đã cũ.
+    const { previews, states } = await previewDrafts(
+      tx,
+      tenantId,
+      drafts,
+      period.periodMonth,
+      true,
+    );
+    const fresh = new Map(
+      drafts.map((r) => {
+        const pv = previews.get(r.id)!;
+        return [r.id, planCarryOver(pv.charges, pv.carry)] as const;
+      }),
+    );
     const todo: InvoiceRow[] = [];
     for (const r of rows) {
       if (r.status !== 'draft')
@@ -315,13 +364,14 @@ export class BillingService {
           studentName: nameOf(r.studentId),
           reason: 'NOT_DRAFT',
         });
-      else if (r.totalAmount <= 0)
+      else if (!fresh.get(r.id)!.issuable)
+        // Σ dòng ngoài carry_over = 0 (vd. miễn giảm 100%): không phát hành, không kết chuyển (US-1.3 AC3).
         skipped.push({
           invoiceId: r.id,
           studentName: nameOf(r.studentId),
           reason: 'ZERO_AMOUNT',
         });
-      else todo.push(r);
+      else todo.push({ ...r, totalAmount: fresh.get(r.id)!.total });
     }
 
     const codes = await this.freshCodes(tx, tenantId, todo.length);
@@ -337,15 +387,62 @@ export class BillingService {
     for (const [i, inv] of todo.entries()) {
       const code = codes[i]!;
       const transferNote = transferNoteOf(code);
-      const qrPayload = buildVietQrPayload({
-        bankBin: account.bankBin,
-        accountNo: account.accountNo,
-        amount: inv.totalAmount,
-        transferNote,
-      });
+      // Tổng 0 do số dư trả đủ: hóa đơn đã `paid`, không có QR (không còn gì để chuyển khoản).
+      const paidByCredit = inv.totalAmount === 0;
+      const qrPayload = paidByCredit
+        ? null
+        : buildVietQrPayload({
+            bankBin: account.bankBin,
+            accountNo: account.accountNo,
+            amount: inv.totalAmount,
+            transferNote,
+          });
+      const st = states.get(inv.studentId)!;
+      const f = fresh.get(inv.id)!;
+      // Cập nhật dòng xem trước thành số chốt, rồi ghi sổ: nợ từng hóa đơn cũ (+carried_amount) và phần hóa đơn hấp thụ.
+      await setPrevAdjustmentLines(
+        tx,
+        tenantId,
+        inv.id,
+        previews.get(inv.id)!.adjustments,
+      );
+      await setCarryLine(tx, tenantId, inv.id, f.carryOver);
+      for (const o of st.open) {
+        await tx.insert(studentLedger).values({
+          id: uuidv7(),
+          tenantId,
+          studentId: inv.studentId,
+          invoiceId: o.id,
+          kind: 'unpaid_carried',
+          debit: o.remaining,
+          description: `Nợ kỳ trước (tháng ${o.periodMonth.slice(5, 7)}/${o.periodMonth.slice(0, 4)})`,
+        });
+        await tx
+          .update(invoices)
+          .set({
+            carriedAmount: sql`${invoices.carriedAmount} + ${o.remaining}`,
+          })
+          .where(and(eq(invoices.tenantId, tenantId), eq(invoices.id, o.id)));
+      }
+      if (f.applied)
+        await tx.insert(studentLedger).values({
+          id: uuidv7(),
+          tenantId,
+          studentId: inv.studentId,
+          invoiceId: inv.id,
+          kind: 'applied_to_invoice',
+          debit: f.applied < 0 ? -f.applied : 0,
+          credit: f.applied > 0 ? f.applied : 0,
+          description: `Số dư chuyển vào hóa đơn kỳ ${period.periodMonth.slice(5, 7)}/${period.periodMonth.slice(0, 4)}`,
+        });
       await tx
         .update(invoices)
         .set({
+          totalAmount: inv.totalAmount,
+          clampedAmount: 0,
+          oldestDueDate: st.open.length
+            ? st.open.map((o) => o.dueDate).sort()[0]!
+            : null,
           status: 'issued',
           code,
           transferNote,
@@ -354,23 +451,35 @@ export class BillingService {
           issuedAt: new Date(),
         })
         .where(and(eq(invoices.tenantId, tenantId), eq(invoices.id, inv.id)));
-      events.push({
-        id: uuidv7(),
-        tenantId,
-        type: INVOICE_ISSUED,
-        payload: {
-          invoiceId: inv.id,
-          studentId: inv.studentId,
-          periodMonth: period.periodMonth,
-          totalAmount: inv.totalAmount,
-          dueDate: period.dueDate,
-        } satisfies InvoiceIssuedPayload,
-      });
+      if (paidByCredit)
+        await tx
+          .update(invoices)
+          .set({ status: 'paid' })
+          .where(and(eq(invoices.tenantId, tenantId), eq(invoices.id, inv.id)));
+      // shortcut: hóa đơn 0 đ đã trả bằng số dư không ghi `invoice_issued` (consumer đòi `totalAmount ≥ 1`); phụ huynh thấy nó đã
+      // `paid` ở danh sách hóa đơn nhưng không có push. Nới consumer nếu cần báo.
+      if (!paidByCredit)
+        events.push({
+          id: uuidv7(),
+          tenantId,
+          type: INVOICE_ISSUED,
+          payload: {
+            invoiceId: inv.id,
+            studentId: inv.studentId,
+            periodMonth: period.periodMonth,
+            totalAmount: inv.totalAmount,
+            dueDate: period.dueDate,
+          } satisfies InvoiceIssuedPayload,
+        });
       audits.push({
         id: inv.id,
         before: { status: 'draft', totalAmount: inv.totalAmount },
         // Không đưa số tài khoản vào audit_logs.
-        after: { status: 'issued', code, totalAmount: inv.totalAmount },
+        after: {
+          status: paidByCredit ? 'paid' : 'issued',
+          code,
+          totalAmount: inv.totalAmount,
+        },
       });
       issued.push({
         id: inv.id,
@@ -380,12 +489,12 @@ export class BillingService {
         totalAmount: inv.totalAmount,
         dueDate: period.dueDate,
         transferNote,
-        qrPayload,
+        qrPayload: qrPayload ?? '', // '' thay null: nullable ở response bị oasdiff coi là breaking
       });
     }
 
-    if (events.length) {
-      await tx.insert(outboxEvents).values(events);
+    if (events.length) await tx.insert(outboxEvents).values(events);
+    if (audits.length) {
       await tx.execute(
         sql`select app_private.audit_insert(${tenantId}::uuid, 'invoice', v.id::uuid, 'update', v.b::jsonb, v.a::jsonb)
           from (values ${sql.join(
@@ -398,19 +507,39 @@ export class BillingService {
       );
     }
 
-    // Kỳ đóng khi không còn bản nháp nào có tiền để phát hành (bản nháp 0 đ không chặn).
-    const [left] = await tx
-      .select({ n: sql<number>`count(*)::int` })
+    // Kỳ đóng khi không còn bản nháp nào chốt được. Quyết định theo giá trị TÍNH LẠI (cùng `issuable` với phần chốt ở trên):
+    // làm mới xem trước (điều chỉnh kỳ trước, chuyển kỳ, tổng) cho mọi nháp còn lại của kỳ, kể cả nháp bị bỏ qua hay không được chọn.
+    const rest = await tx
+      .select({ id: invoices.id, studentId: invoices.studentId })
       .from(invoices)
       .where(
         and(
           eq(invoices.tenantId, tenantId),
           eq(invoices.periodId, periodId),
           eq(invoices.status, 'draft'),
-          sql`${invoices.totalAmount} > 0`,
         ),
-      );
-    if (!left?.n && period.status !== 'closed')
+      )
+      .orderBy(asc(invoices.id))
+      .for('update');
+    const { previews: restPreviews } = await previewDrafts(
+      tx,
+      tenantId,
+      rest,
+      period.periodMonth,
+    );
+    let left = 0;
+    for (const d of rest) {
+      const pv = restPreviews.get(d.id)!;
+      const plan = planCarryOver(pv.charges, pv.carry);
+      await setPrevAdjustmentLines(tx, tenantId, d.id, pv.adjustments);
+      await setCarryLine(tx, tenantId, d.id, pv.carry);
+      await tx
+        .update(invoices)
+        .set({ totalAmount: plan.total, clampedAmount: plan.clamped })
+        .where(and(eq(invoices.tenantId, tenantId), eq(invoices.id, d.id)));
+      if (plan.issuable) left += 1;
+    }
+    if (!left && period.status !== 'closed')
       await tx
         .update(billingPeriods)
         .set({ status: 'closed' })
@@ -451,6 +580,22 @@ export class BillingService {
         replacementInvoiceId: null,
       };
     if (inv.status !== 'issued') throw new AppException('CONFLICT_STALE');
+    // shortcut: hóa đơn đã chuyển nợ sang kỳ sau, hoặc mang số dư chuyển kỳ (dòng carry_over ≠ 0), chưa hủy được (hủy phải trả
+    // khoản chuyển kỳ về sổ/hóa đơn cũ); chặn để không mất nợ, trigger `invoices_guard` cũng chặn. Làm khi có yêu cầu.
+    const [carryLine] = await tx
+      .select({ id: invoiceLines.id })
+      .from(invoiceLines)
+      .where(
+        and(
+          eq(invoiceLines.tenantId, actor.tenantId),
+          eq(invoiceLines.invoiceId, id),
+          eq(invoiceLines.kind, 'carry_over'),
+          ne(invoiceLines.amount, 0),
+        ),
+      )
+      .limit(1);
+    if (carryLine || inv.carriedAmount > 0)
+      throw new AppException('CONFLICT_STALE');
     await tx
       .update(invoices)
       .set({ status: 'void', voidedAt: new Date(), voidReason: body.reason })
@@ -539,6 +684,67 @@ export class BillingService {
       )
       .orderBy(asc(invoiceLines.position));
     const at = (d: Date | null) => (d ? formatInZone(d, tz) : null);
+    let shown = lines.map(toLine);
+    let totalAmount = inv.totalAmount;
+    let clampedAmount = inv.clampedAmount;
+    if (inv.status === 'draft') {
+      // Hai dòng xem trước (điều chỉnh kỳ trước, chuyển kỳ) tính lại theo số liệu hiện tại, không ghi (GET không đổi dữ liệu).
+      const { previews } = await previewDrafts(
+        tx,
+        tenantId,
+        [{ id: inv.id, studentId: inv.studentId }],
+        period!.periodMonth,
+      );
+      const pv = previews.get(inv.id)!;
+      const virtual = (
+        kind: 'carry_over' | 'prev_adjustment',
+        key: string,
+        description: string,
+        amount: number,
+        more: Partial<Invoice['lines'][number]> = {},
+      ): Invoice['lines'][number] => ({
+        id: stableUuid(`${kind}:${inv.id}:${key}`),
+        kind,
+        description,
+        amount,
+        charged: true,
+        notChargedReason: null,
+        sessionId: null,
+        sessionDate: null,
+        className: null,
+        adjustmentReason: null,
+        ...more,
+      });
+      shown = shown.filter(
+        (l) => l.kind !== 'carry_over' && l.kind !== 'prev_adjustment',
+      );
+      for (const a of pv.adjustments)
+        shown.push(
+          virtual(
+            'prev_adjustment',
+            a.sessionId,
+            prevAdjustmentDescription(a),
+            a.amount,
+            {
+              sessionId: a.sessionId,
+              sessionDate: a.date || null,
+              className: a.className,
+            },
+          ),
+        );
+      if (pv.carry)
+        shown.push(
+          virtual(
+            'carry_over',
+            'carry',
+            pv.carry > 0 ? 'Nợ kỳ trước' : 'Trả thừa kỳ trước',
+            pv.carry,
+          ),
+        );
+      const plan = planCarryOver(pv.charges, pv.carry);
+      totalAmount = plan.total;
+      clampedAmount = plan.clamped;
+    }
     return {
       id: inv.id,
       periodId: inv.periodId,
@@ -549,12 +755,13 @@ export class BillingService {
       status: inv.status as Invoice['status'],
       studentId: inv.studentId,
       studentName: student?.fullName ?? '',
-      totalAmount: inv.totalAmount,
+      totalAmount,
       paidAmount: inv.paidAmount,
+      carriedAmount: inv.carriedAmount,
       remainingAmount:
         inv.status === 'void' || inv.status === 'draft'
           ? 0
-          : remainingOf(inv.totalAmount, inv.paidAmount),
+          : remainingOf(inv.totalAmount, inv.paidAmount, inv.carriedAmount),
       dueDate: period!.dueDate,
       issuedAt: at(inv.issuedAt),
       payout: inv.payout as Invoice['payout'],
@@ -562,12 +769,38 @@ export class BillingService {
       voidReason: inv.voidReason,
       replacesInvoiceId: inv.replacesInvoiceId,
       replacementInvoiceId: inv.replacementInvoiceId,
-      lines: lines.map(toLine),
+      lines: shown,
       installmentNo: inv.installmentNo,
       installmentCount: inv.installmentCount,
-      clampedAmount: inv.clampedAmount,
+      clampedAmount,
       createdAt: formatInZone(inv.createdAt, tz),
     };
+  }
+
+  /** Tổng xem trước hiện tại của mọi bản nháp trong kỳ: max(0, Σ dòng ngoài carry_over + số dư chuyển kỳ hiện tại). */
+  private async liveDraftTotals(
+    tx: Tx,
+    tenantId: string,
+    periodId: string,
+    periodMonth: string,
+  ): Promise<Map<string, number>> {
+    const drafts = await tx
+      .select({ id: invoices.id, studentId: invoices.studentId })
+      .from(invoices)
+      .where(
+        and(
+          eq(invoices.tenantId, tenantId),
+          eq(invoices.periodId, periodId),
+          eq(invoices.status, 'draft'),
+        ),
+      );
+    const { previews } = await previewDrafts(tx, tenantId, drafts, periodMonth);
+    return new Map(
+      drafts.map((d) => {
+        const pv = previews.get(d.id)!;
+        return [d.id, planCarryOver(pv.charges, pv.carry).total];
+      }),
+    );
   }
 
   /** Số hóa đơn và tổng tiền theo trạng thái của các kỳ cho trước. */

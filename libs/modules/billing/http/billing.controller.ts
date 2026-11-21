@@ -113,7 +113,7 @@ export class BillingController {
     summary: 'Chốt & phát hành hóa đơn của kỳ (US-7.2 AC4, US-7.3)',
     description:
       'Chạy trong một giao dịch: cấp mã duy nhất trong tenant (`TH-xxxxxx`), nội dung chuyển khoản `TH xxxxxx`, `qrPayload` VietQR từ tài khoản nhận tiền chính, chụp `payout` vào hóa đơn rồi khóa bất biến. `invoiceIds = null` là "Chốt & gửi tất cả", mảng là chốt từng hóa đơn. ' +
-      'Hóa đơn 0 đ không phát hành, không nhắc nợ (US-1.3 AC3): nằm trong `skipped` với `ZERO_AMOUNT` và vẫn là bản nháp. Hóa đơn đã phát hành hay đã hủy trong `invoiceIds` vào `skipped` với `NOT_DRAFT`. `invoiceIds` chứa id không thuộc kỳ này → 404. ' +
+      'Bản nháp không có khoản phát sinh (Σ dòng ngoài `carry_over` = 0) không phát hành, không nhắc nợ (US-1.3 AC3): nằm trong `skipped` với `ZERO_AMOUNT` và vẫn là bản nháp. Bản nháp có phát sinh mà số dư sổ trả đủ (tổng ≤ 0) vẫn được chốt: `totalAmount` 0, trạng thái `paid`, có mã, `qrPayload` rỗng, tính vào `issuedCount`, không nhắc nợ, không push `invoice_issued`. Hóa đơn đã phát hành hay đã hủy trong `invoiceIds` vào `skipped` với `NOT_DRAFT`. `invoiceIds` chứa id không thuộc kỳ này → 404. ' +
       'Tenant chưa có tài khoản nhận tiền → 422 `PAYOUT_ACCOUNT_MISSING`, không phát hành hóa đơn nào (client mở màn tài khoản nhận tiền, US-7.3 AC5). ' +
       '`Idempotency-Key` bắt buộc: gửi lặp cùng khóa trả lại kết quả đã lưu, gọi lại bằng khóa mới khi đã hết bản nháp thì `issuedCount = 0`, không phát hành hai lần. Mỗi hóa đơn phát hành ghi sự kiện outbox `invoice_issued` → thông báo `invoice_issued` + email cho phụ huynh. ' +
       'Phản hồi chứa số tài khoản nhận tiền (`qrPayload`) nên lưu mã hóa và chỉ phát lại trong 10 phút; quá hạn → 409 `CONFLICT_STALE`, dùng khóa mới. Giới hạn 20 lần/phút/user (429 `RATE_LIMITED`). Kỳ chuyển `closed` khi không còn bản nháp nào có số tiền > 0.',
@@ -210,7 +210,7 @@ export class BillingController {
   @ApiOperation({
     summary: 'Hủy hóa đơn đã phát hành, có lý do (US-7.3 AC4)',
     description:
-      'Chỉ hóa đơn `issued`: hóa đơn chưa phát hành (`draft`) → 409 `CONFLICT_STALE`; hóa đơn đã có thanh toán (Sprint 6) cũng 409, phải hủy thanh toán trước. Hóa đơn đã `void` gọi lại vẫn 200, trả bản hiện tại, `replacementInvoiceId = null`. ' +
+      'Chỉ hóa đơn `issued`: hóa đơn chưa phát hành (`draft`) → 409 `CONFLICT_STALE`; hóa đơn đã có thanh toán (Sprint 6) cũng 409, phải hủy thanh toán trước; hóa đơn đã chuyển nợ sang kỳ sau hoặc đang mang dòng `carry_over` cũng 409 (chưa hỗ trợ trả khoản chuyển kỳ về). Hóa đơn đã `void` gọi lại vẫn 200, trả bản hiện tại, `replacementInvoiceId = null`. ' +
       'Mã QR của hóa đơn đã hủy không còn hiển thị cho phụ huynh (`payout` và `qrPayload` null phía phụ huynh). `createReplacementDraft = true` chưa hỗ trợ ở MVP → 422 `VALIDATION_FAILED`, `replacementInvoiceId` luôn null; hóa đơn thay thế = tạo lại bản nháp rồi chốt. Phản hồi có `payout` nên lưu mã hóa, phát lại tối đa 10 phút. Giới hạn 20 lần/phút/user (429 `RATE_LIMITED`).',
   })
   @ApiOkResponse({ standardSchema: voidInvoiceResultSchema })

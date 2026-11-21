@@ -112,6 +112,10 @@ export const invoices = pgTable(
     clampedAmount: bigint({ mode: 'number' }).notNull().default(0),
     /** Σ thanh toán chưa hủy (S6-BE-02), cập nhật cùng giao dịch ghi/hủy thanh toán dưới `FOR UPDATE`; có thể > total_amount khi trả thừa. */
     paidAmount: bigint({ mode: 'number' }).notNull().default(0),
+    /** Phần còn nợ đã chuyển sang hóa đơn kỳ sau (S6-BE-03) = Σ(debit − credit) `unpaid_carried` của hóa đơn trong sổ (constraint trigger); không còn tính vào công nợ ở đây. */
+    carriedAmount: bigint({ mode: 'number' }).notNull().default(0),
+    /** Hạn cũ nhất của các khoản nợ được chuyển vào hóa đơn này lúc phát hành (tuổi nợ T11); null = không có kết chuyển. */
+    oldestDueDate: date({ mode: 'string' }),
     installmentNo: integer(),
     installmentCount: integer(),
     transferNote: text(),
@@ -186,6 +190,16 @@ export const invoices = pgTable(
       'invoices_paid_amount_check',
       sql`${t.paidAmount} >= 0 and ${t.paidAmount} <= ${sql.raw(MAX_VND)}`,
     ),
+    check(
+      'invoices_carried_amount_check',
+      sql`${t.carriedAmount} >= 0 and ${t.carriedAmount} <= ${t.totalAmount}
+        and (${t.carriedAmount} = 0 or ${t.paidAmount} + ${t.carriedAmount} <= ${t.totalAmount})
+        and (${t.status} <> 'draft' or ${t.carriedAmount} = 0)`,
+    ),
+    // Công nợ T11: chỉ quét hóa đơn còn mở của học viên.
+    index('invoices_debt_idx')
+      .on(t.tenantId, t.studentId)
+      .where(sql`${t.status} in ('issued', 'partially_paid', 'pending_confirmation')`),
     // Trạng thái khớp số đã thu; `pending_confirmation` (US-7.7, chưa làm) chưa thu đủ. paid_amount = Σ payments chưa hủy do constraint trigger.
     check(
       'invoices_paid_status_check',
@@ -206,12 +220,12 @@ export const invoices = pgTable(
       sql`(${t.installmentNo} is null) = (${t.installmentCount} is null)
         and (${t.installmentNo} is null or (${t.installmentCount} between 1 and 36 and ${t.installmentNo} between 1 and ${t.installmentCount}))`,
     ),
-    // Bản nháp chưa có gì của phát hành; từ `issued` trở đi phải đủ mã, nội dung chuyển khoản, QR, snapshot, giờ phát hành.
+    // Bản nháp chưa có gì của phát hành; từ `issued` trở đi phải đủ mã, nội dung chuyển khoản, QR, snapshot, giờ phát hành (hóa đơn 0 đ đã trả bằng số dư, S6-BE-03, không có QR).
     check(
       'invoices_issue_fields_check',
       sql`case when ${t.status} = 'draft'
         then ${t.code} is null and ${t.transferNote} is null and ${t.qrPayload} is null and ${t.payout} is null and ${t.issuedAt} is null
-        else ${t.code} is not null and ${t.transferNote} is not null and ${t.qrPayload} is not null and ${t.payout} is not null and ${t.issuedAt} is not null end`,
+        else ${t.code} is not null and ${t.transferNote} is not null and (${t.qrPayload} is not null or ${t.totalAmount} = 0) and ${t.payout} is not null and ${t.issuedAt} is not null end`,
     ),
     check(
       'invoices_void_fields_check',

@@ -95,7 +95,9 @@ export const paymentResultSchema = z
         'Trạng thái hóa đơn sau thao tác: `partially_paid`, `paid` hoặc (sau hủy thanh toán cuối) `issued`',
     }),
     paidAmount: vndSchema('Σ thanh toán chưa hủy của hóa đơn sau thao tác'),
-    remainingAmount: vndSchema('max(0, `totalAmount` − `paidAmount`)'),
+    remainingAmount: vndSchema(
+      'max(0, `totalAmount` − `paidAmount` − phần nợ đã chuyển sang hóa đơn kỳ sau)',
+    ),
     overpaidAmount: vndSchema(
       'max(0, `paidAmount` − `totalAmount`): phần trả thừa đã ghi vào sổ học viên (US-7.6 AC2); 0 khi không thừa',
     ),

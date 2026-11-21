@@ -37,7 +37,16 @@ import {
   parseBillingSettings,
   latestClosablePeriod,
 } from '../domain/billing-period.js';
+import {
+  planCarryOver,
+  prevAdjustmentDescription,
+} from '../domain/carry-over.js';
 import type { FeeType } from '../domain/invoice-calculator.js';
+import {
+  loadCarryState,
+  loadPrevAdjustments,
+  newLine,
+} from './carry-over.queries.js';
 
 export const JOB_BILLING_CLOSE = 'billing.close';
 /** Tên sự kiện outbox báo giáo viên bản nháp đã sẵn sàng (Technical Spec §3). */
@@ -311,8 +320,8 @@ export class BillingCloseJob {
           adjustmentReason: null,
         });
       }
-      // Tổng hóa đơn = Σ tổng từng ghi danh (calculator đã cắt về ≥ 0) rồi cắt lần cuối cùng với dòng điều chỉnh khi sửa.
-      d.total += r.result.total;
+      // Tổng = Σ dòng thô của mọi ghi danh, cắt ở mức hóa đơn (cùng công thức với xem trước, `adjust` và `issue`).
+      d.total += r.result.lines.reduce((n, l) => n + l.amount, 0);
       if (r.installmentNo && r.installmentCount)
         d.courses.push({ no: r.installmentNo, count: r.installmentCount });
       drafts.set(enr.studentId, d);
@@ -340,12 +349,40 @@ export class BillingCloseJob {
     const invoiced = await invoicedStudents(bp.id);
 
     let draftCount = 0;
-    let draftTotalAmount = 0;
+    let readyCount = 0;
+    let readyTotalAmount = 0;
     const lineRows: (typeof invoiceLines.$inferInsert)[] = [];
-    for (const d of drafts.values()) {
-      if (invoiced.has(d.studentId)) continue;
+    const todo = [...drafts.values()].filter((d) => !invoiced.has(d.studentId));
+    const todoIds = todo.map((d) => d.studentId);
+    const prevAdj = await loadPrevAdjustments(
+      t,
+      tenantId,
+      period.periodMonth,
+      todoIds,
+      classById,
+    );
+    // Dòng `carry_over` ở bản nháp chỉ là XEM TRƯỚC: không ghi sổ, không đụng hóa đơn cũ. Kết chuyển thật ở `issue()` (D6).
+    const carry = await loadCarryState(
+      t,
+      tenantId,
+      todoIds,
+      period.periodMonth,
+    );
+    for (const d of todo) {
       if (d.total > MAX_VND) {
         // Một hóa đơn vượt trần không được làm hỏng cả tenant mỗi đêm: bỏ qua, chỉ log mã lỗi và id học viên.
+        this.log.error(
+          `tenant ${tenantId} học viên ${d.studentId}: TOTAL_EXCEEDS_CAP`,
+        );
+        continue;
+      }
+      const adjustments = prevAdj.get(d.studentId) ?? [];
+      const preview = carry.get(d.studentId)?.carry ?? 0;
+      const plan = planCarryOver(
+        d.total + adjustments.reduce((n, a) => n + a.amount, 0),
+        preview,
+      );
+      if (plan.total > MAX_VND) {
         this.log.error(
           `tenant ${tenantId} học viên ${d.studentId}: TOTAL_EXCEEDS_CAP`,
         );
@@ -361,8 +398,8 @@ export class BillingCloseJob {
           tenantId,
           periodId: bp.id,
           studentId: d.studentId,
-          totalAmount: d.total,
-          clampedAmount: 0,
+          totalAmount: plan.total,
+          clampedAmount: plan.clamped,
           installmentNo: course?.no ?? null,
           installmentCount: course?.count ?? null,
         })
@@ -370,15 +407,41 @@ export class BillingCloseJob {
         .returning({ id: invoices.id });
       if (!row) continue; // đã có bản nháp (chạy chồng): bỏ qua
       draftCount += 1;
-      draftTotalAmount += d.total;
+      // Chỉ nháp chốt được (có khoản phát sinh ≠ 0) tính vào thông báo "bản nháp sẵn sàng".
+      if (plan.issuable) {
+        readyCount += 1;
+        readyTotalAmount += plan.total;
+      }
+      let position = d.lines.length;
       for (const l of d.lines) lineRows.push({ ...l, invoiceId: id });
+      const extra = (
+        kind: string,
+        description: string,
+        amount: number,
+        more: Partial<typeof invoiceLines.$inferInsert> = {},
+      ) =>
+        lineRows.push(
+          newLine(tenantId, id, ++position, kind, description, amount, more),
+        );
+      if (preview)
+        extra(
+          'carry_over',
+          preview > 0 ? 'Nợ kỳ trước' : 'Trả thừa kỳ trước',
+          preview,
+        );
+      for (const a of adjustments)
+        extra('prev_adjustment', prevAdjustmentDescription(a), a.amount, {
+          sessionId: a.sessionId,
+          sessionDate: a.date || null,
+          className: a.className,
+        });
     }
     for (let i = 0; i < lineRows.length; i += LINE_CHUNK)
       await t.insert(invoiceLines).values(lineRows.slice(i, i + LINE_CHUNK));
     if (!draftCount) return 0;
 
-    // Kỳ đã `closed` mà có bản nháp có tiền mới (học viên vào muộn) thì quay lại `drafting`.
-    if (bp.status === 'closed' && draftTotalAmount > 0)
+    // Kỳ đã `closed` mà có bản nháp chốt được mới (học viên vào muộn) thì quay lại `drafting`.
+    if (bp.status === 'closed' && readyCount > 0)
       await t
         .update(billingPeriods)
         .set({ status: 'drafting' })
@@ -389,11 +452,13 @@ export class BillingCloseJob {
           ),
         );
 
+    if (!readyCount) return draftCount; // chỉ có nháp không phát sinh: không báo giáo viên
+
     const payload: BillingDraftsReadyPayload = {
       periodId: bp.id,
       periodMonth: bp.periodMonth,
-      draftCount,
-      draftTotalAmount,
+      draftCount: readyCount,
+      draftTotalAmount: readyTotalAmount,
     };
     await recordOutboxEvent(t, {
       tenantId,

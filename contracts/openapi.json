@@ -6417,7 +6417,7 @@
     },
     "/v1/billing-periods/{id}/issue": {
       "post": {
-        "description": "Chạy trong một giao dịch: cấp mã duy nhất trong tenant (`TH-xxxxxx`), nội dung chuyển khoản `TH xxxxxx`, `qrPayload` VietQR từ tài khoản nhận tiền chính, chụp `payout` vào hóa đơn rồi khóa bất biến. `invoiceIds = null` là \"Chốt & gửi tất cả\", mảng là chốt từng hóa đơn. Hóa đơn 0 đ không phát hành, không nhắc nợ (US-1.3 AC3): nằm trong `skipped` với `ZERO_AMOUNT` và vẫn là bản nháp. Hóa đơn đã phát hành hay đã hủy trong `invoiceIds` vào `skipped` với `NOT_DRAFT`. `invoiceIds` chứa id không thuộc kỳ này → 404. Tenant chưa có tài khoản nhận tiền → 422 `PAYOUT_ACCOUNT_MISSING`, không phát hành hóa đơn nào (client mở màn tài khoản nhận tiền, US-7.3 AC5). `Idempotency-Key` bắt buộc: gửi lặp cùng khóa trả lại kết quả đã lưu, gọi lại bằng khóa mới khi đã hết bản nháp thì `issuedCount = 0`, không phát hành hai lần. Mỗi hóa đơn phát hành ghi sự kiện outbox `invoice_issued` → thông báo `invoice_issued` + email cho phụ huynh. Phản hồi chứa số tài khoản nhận tiền (`qrPayload`) nên lưu mã hóa và chỉ phát lại trong 10 phút; quá hạn → 409 `CONFLICT_STALE`, dùng khóa mới. Giới hạn 20 lần/phút/user (429 `RATE_LIMITED`). Kỳ chuyển `closed` khi không còn bản nháp nào có số tiền > 0.",
+        "description": "Chạy trong một giao dịch: cấp mã duy nhất trong tenant (`TH-xxxxxx`), nội dung chuyển khoản `TH xxxxxx`, `qrPayload` VietQR từ tài khoản nhận tiền chính, chụp `payout` vào hóa đơn rồi khóa bất biến. `invoiceIds = null` là \"Chốt & gửi tất cả\", mảng là chốt từng hóa đơn. Bản nháp không có khoản phát sinh (Σ dòng ngoài `carry_over` = 0) không phát hành, không nhắc nợ (US-1.3 AC3): nằm trong `skipped` với `ZERO_AMOUNT` và vẫn là bản nháp. Bản nháp có phát sinh mà số dư sổ trả đủ (tổng ≤ 0) vẫn được chốt: `totalAmount` 0, trạng thái `paid`, có mã, `qrPayload` rỗng, tính vào `issuedCount`, không nhắc nợ, không push `invoice_issued`. Hóa đơn đã phát hành hay đã hủy trong `invoiceIds` vào `skipped` với `NOT_DRAFT`. `invoiceIds` chứa id không thuộc kỳ này → 404. Tenant chưa có tài khoản nhận tiền → 422 `PAYOUT_ACCOUNT_MISSING`, không phát hành hóa đơn nào (client mở màn tài khoản nhận tiền, US-7.3 AC5). `Idempotency-Key` bắt buộc: gửi lặp cùng khóa trả lại kết quả đã lưu, gọi lại bằng khóa mới khi đã hết bản nháp thì `issuedCount = 0`, không phát hành hai lần. Mỗi hóa đơn phát hành ghi sự kiện outbox `invoice_issued` → thông báo `invoice_issued` + email cho phụ huynh. Phản hồi chứa số tài khoản nhận tiền (`qrPayload`) nên lưu mã hóa và chỉ phát lại trong 10 phút; quá hạn → 409 `CONFLICT_STALE`, dùng khóa mới. Giới hạn 20 lần/phút/user (429 `RATE_LIMITED`). Kỳ chuyển `closed` khi không còn bản nháp nào có số tiền > 0.",
         "operationId": "billing_issue",
         "parameters": [
           {
@@ -6724,7 +6724,7 @@
     },
     "/v1/invoices/{id}/void": {
       "post": {
-        "description": "Chỉ hóa đơn `issued`: hóa đơn chưa phát hành (`draft`) → 409 `CONFLICT_STALE`; hóa đơn đã có thanh toán (Sprint 6) cũng 409, phải hủy thanh toán trước. Hóa đơn đã `void` gọi lại vẫn 200, trả bản hiện tại, `replacementInvoiceId = null`. Mã QR của hóa đơn đã hủy không còn hiển thị cho phụ huynh (`payout` và `qrPayload` null phía phụ huynh). `createReplacementDraft = true` chưa hỗ trợ ở MVP → 422 `VALIDATION_FAILED`, `replacementInvoiceId` luôn null; hóa đơn thay thế = tạo lại bản nháp rồi chốt. Phản hồi có `payout` nên lưu mã hóa, phát lại tối đa 10 phút. Giới hạn 20 lần/phút/user (429 `RATE_LIMITED`).",
+        "description": "Chỉ hóa đơn `issued`: hóa đơn chưa phát hành (`draft`) → 409 `CONFLICT_STALE`; hóa đơn đã có thanh toán (Sprint 6) cũng 409, phải hủy thanh toán trước; hóa đơn đã chuyển nợ sang kỳ sau hoặc đang mang dòng `carry_over` cũng 409 (chưa hỗ trợ trả khoản chuyển kỳ về). Hóa đơn đã `void` gọi lại vẫn 200, trả bản hiện tại, `replacementInvoiceId = null`. Mã QR của hóa đơn đã hủy không còn hiển thị cho phụ huynh (`payout` và `qrPayload` null phía phụ huynh). `createReplacementDraft = true` chưa hỗ trợ ở MVP → 422 `VALIDATION_FAILED`, `replacementInvoiceId` luôn null; hóa đơn thay thế = tạo lại bản nháp rồi chốt. Phản hồi có `payout` nên lưu mã hóa, phát lại tối đa 10 phút. Giới hạn 20 lần/phút/user (429 `RATE_LIMITED`).",
         "operationId": "billing_voidInvoice",
         "parameters": [
           {
@@ -7032,7 +7032,7 @@
     },
     "/v1/invoices/{id}/payments": {
       "post": {
-        "description": "Chạy trong MỘT giao dịch có khóa hàng hóa đơn (`SELECT … FOR UPDATE`): thêm `payments`, tính lại trạng thái hóa đơn (`partially_paid` khi 0 < Σ < `totalAmount`, `paid` khi Σ ≥ `totalAmount`), ghi `student_ledger` (phần trả thừa) và `revenue_ledger` (một dòng đúng số tiền, US-9.5 AC1), ghi nhật ký kiểm toán, hủy các lời nhắc nợ chưa gửi khi thu đủ (US-7.5 AC2). Sự kiện outbox `payment_recorded` sinh thông báo `payment_recorded` cho phụ huynh trong ≤ 1 phút (US-7.4 AC3); phụ huynh mở `GET /family/invoices/{id}` làm biên nhận. `amount` nhỏ hơn số còn nợ là thu một phần; bằng là thu đủ; lớn hơn vẫn nhận, hóa đơn `paid` và `overpaidAmount` > 0 (vào sổ học viên, trừ ở kỳ sau, US-7.6 AC2). `paidOn` mặc định hôm nay theo múi giờ tenant; phải từ ngày phát hành hóa đơn đến hôm nay, ngoài khoảng đó → 422 `VALIDATION_FAILED`. Chỉ hóa đơn `issued`, `partially_paid` hoặc `pending_confirmation`; hóa đơn `draft`, `void` hay đã `paid` → 409 `INVOICE_NOT_PAYABLE`. Hóa đơn đã `paid` không nhận thêm: muốn nhận thêm tiền thì ghi vào kỳ sau (trả thừa ở lần ghi cuối đã vào sổ học viên). `Idempotency-Key` bắt buộc: gửi lại cùng khóa khi request đầu đang chạy → 409 `IDEMPOTENCY_IN_PROGRESS`; bấm lặp khi mạng chập chờn trả lại đúng kết quả đã lưu, chỉ có MỘT thanh toán; cùng khóa khác nội dung → 422 `IDEMPOTENCY_KEY_REUSED`. Giới hạn 20 lần/phút/user (429 `RATE_LIMITED`). Số tiền là số nguyên đồng. Hóa đơn của tenant khác → 404.",
+        "description": "Chạy trong MỘT giao dịch có khóa hàng hóa đơn (`SELECT … FOR UPDATE`): thêm `payments`, tính lại trạng thái hóa đơn (`partially_paid` khi 0 < Σ < `totalAmount`, `paid` khi Σ ≥ `totalAmount`), ghi `student_ledger` (phần trả thừa) và `revenue_ledger` (một dòng đúng số tiền, US-9.5 AC1), ghi nhật ký kiểm toán, hủy các lời nhắc nợ chưa gửi khi thu đủ (US-7.5 AC2). Sự kiện outbox `payment_recorded` sinh thông báo `payment_recorded` cho phụ huynh trong ≤ 1 phút (US-7.4 AC3); phụ huynh mở `GET /family/invoices/{id}` làm biên nhận. `amount` nhỏ hơn số còn nợ là thu một phần; bằng là thu đủ; lớn hơn vẫn nhận, hóa đơn `paid` và `overpaidAmount` > 0 (vào sổ học viên, trừ ở kỳ sau, US-7.6 AC2). `paidOn` mặc định hôm nay theo múi giờ tenant; phải từ ngày phát hành hóa đơn đến hôm nay, ngoài khoảng đó → 422 `VALIDATION_FAILED`. Chỉ hóa đơn `issued`, `partially_paid` hoặc `pending_confirmation`; hóa đơn `draft`, `void`, đã `paid` hay đã chuyển nợ sang hóa đơn kỳ sau (có dòng `carry_over` ở hóa đơn sau, `remainingAmount` về 0; thu ở hóa đơn sau) → 409 `INVOICE_NOT_PAYABLE`. Hóa đơn đã `paid` không nhận thêm: muốn nhận thêm tiền thì ghi vào kỳ sau (trả thừa ở lần ghi cuối đã vào sổ học viên). `Idempotency-Key` bắt buộc: gửi lại cùng khóa khi request đầu đang chạy → 409 `IDEMPOTENCY_IN_PROGRESS`; bấm lặp khi mạng chập chờn trả lại đúng kết quả đã lưu, chỉ có MỘT thanh toán; cùng khóa khác nội dung → 422 `IDEMPOTENCY_KEY_REUSED`. Giới hạn 20 lần/phút/user (429 `RATE_LIMITED`). Số tiền là số nguyên đồng. Hóa đơn của tenant khác → 404.",
         "operationId": "payments_record",
         "parameters": [
           {
@@ -12759,7 +12759,7 @@
               "ZERO_AMOUNT",
               "NOT_DRAFT"
             ],
-            "description": "`ZERO_AMOUNT` = hóa đơn 0 đ, không gửi và không nhắc nợ (US-1.3 AC3, bản nháp vẫn còn). `NOT_DRAFT` = đã phát hành hoặc đã hủy từ trước (chỉ gặp khi chọn `invoiceIds`)"
+            "description": "`ZERO_AMOUNT` = bản nháp không có khoản phát sinh nào (tổng các dòng ngoài `carry_over` bằng 0, vd. miễn giảm 100%), không gửi và không nhắc nợ (US-1.3 AC3, bản nháp vẫn còn). Bản nháp có phát sinh nhưng được số dư sổ trả đủ vẫn được chốt với `totalAmount` 0 và trạng thái `paid`. `NOT_DRAFT` = đã phát hành hoặc đã hủy từ trước (chỉ gặp khi chọn `invoiceIds`)"
           }
         },
         "required": [
@@ -12795,7 +12795,7 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 100000000000,
-            "description": "VND, > 0 (hóa đơn 0 đ không bao giờ được phát hành)"
+            "description": "VND. 0 chỉ khi số dư sổ (trả thừa) đã trả đủ kỳ này: hóa đơn có mã, trạng thái `paid`, không có QR (`qrPayload` là chuỗi rỗng ở phản hồi `issue`: đổi thành nullable bị oasdiff coi là breaking; `GET /invoices/{id}` trả null), không nhắc nợ, không thông báo phụ huynh riêng"
           },
           "dueDate": {
             "type": "string",
@@ -12893,11 +12893,17 @@
             "maximum": 100000000000,
             "description": "Σ thanh toán chưa hủy của hóa đơn (Sprint 6); 0 khi chưa có. Có thể lớn hơn `totalAmount` khi trả thừa (phần thừa vào sổ học viên, US-7.6)"
           },
+          "carriedAmount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "Phần còn nợ của hóa đơn này đã chuyển sang hóa đơn kỳ sau lúc phát hành hóa đơn đó (dòng `carry_over` ở hóa đơn sau); 0 nếu chưa chuyển. Phần này không còn tính vào `remainingAmount`"
+          },
           "remainingAmount": {
             "type": "integer",
             "minimum": 0,
             "maximum": 100000000000,
-            "description": "0 khi `status` là `void` (hóa đơn hủy, không còn phải trả) hoặc `draft` (chưa phát hành); các trạng thái khác = max(0, `totalAmount` − `paidAmount`). Còn nợ 700.000 đ trên hóa đơn 1.200.000 đ đã thu 500.000 đ (US-7.4 AC2)"
+            "description": "0 khi `status` là `void` (hóa đơn hủy, không còn phải trả) hoặc `draft` (chưa phát hành); các trạng thái khác = max(0, `totalAmount` − `paidAmount` − phần nợ đã chuyển sang hóa đơn kỳ sau). Còn nợ 700.000 đ trên hóa đơn 1.200.000 đ đã thu 500.000 đ (US-7.4 AC2)"
           },
           "dueDate": {
             "type": "string",
@@ -13002,6 +13008,7 @@
           "studentName",
           "totalAmount",
           "paidAmount",
+          "carriedAmount",
           "remainingAmount",
           "dueDate",
           "issuedAt",
@@ -13030,6 +13037,7 @@
           "studentName": "Nguyễn Minh Anh",
           "totalAmount": 150000,
           "paidAmount": 0,
+          "carriedAmount": 0,
           "remainingAmount": 150000,
           "dueDate": "2027-01-10",
           "issuedAt": null,
@@ -13358,11 +13366,17 @@
             "maximum": 100000000000,
             "description": "Σ thanh toán chưa hủy (Sprint 6); 0 khi chưa có. Có thể lớn hơn `totalAmount` khi trả thừa"
           },
+          "carriedAmount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "Phần còn nợ đã chuyển sang hóa đơn kỳ sau; 0 nếu chưa chuyển. Không còn tính vào `remainingAmount`"
+          },
           "remainingAmount": {
             "type": "integer",
             "minimum": 0,
             "maximum": 100000000000,
-            "description": "0 khi `status = void`; các trạng thái khác = max(0, `totalAmount` − `paidAmount`) (P03: \"Còn nợ\" khi `issued` hoặc `partially_paid`)"
+            "description": "0 khi `status = void`; các trạng thái khác = max(0, `totalAmount` − `paidAmount` − phần nợ đã chuyển sang hóa đơn kỳ sau) (P03: \"Còn nợ\" khi `issued` hoặc `partially_paid`)"
           },
           "dueDate": {
             "type": "string",
@@ -13385,6 +13399,7 @@
           "periodMonth",
           "totalAmount",
           "paidAmount",
+          "carriedAmount",
           "remainingAmount",
           "dueDate",
           "issuedAt"
@@ -13400,6 +13415,7 @@
           "periodMonth": "2026-12-01",
           "totalAmount": 1200000,
           "paidAmount": 0,
+          "carriedAmount": 0,
           "remainingAmount": 1200000,
           "dueDate": "2027-01-10",
           "issuedAt": "2027-01-02T09:00:00+07:00"
@@ -13457,11 +13473,17 @@
             "maximum": 100000000000,
             "description": "Σ thanh toán chưa hủy (Sprint 6); 0 khi chưa có. Có thể lớn hơn `totalAmount` khi trả thừa"
           },
+          "carriedAmount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "Phần còn nợ đã chuyển sang hóa đơn kỳ sau; 0 nếu chưa chuyển. Không còn tính vào `remainingAmount`"
+          },
           "remainingAmount": {
             "type": "integer",
             "minimum": 0,
             "maximum": 100000000000,
-            "description": "0 khi `status = void`; các trạng thái khác = max(0, `totalAmount` − `paidAmount`) (P03: \"Còn nợ\" khi `issued` hoặc `partially_paid`)"
+            "description": "0 khi `status = void`; các trạng thái khác = max(0, `totalAmount` − `paidAmount` − phần nợ đã chuyển sang hóa đơn kỳ sau) (P03: \"Còn nợ\" khi `issued` hoặc `partially_paid`)"
           },
           "dueDate": {
             "type": "string",
@@ -13530,6 +13552,7 @@
           "periodMonth",
           "totalAmount",
           "paidAmount",
+          "carriedAmount",
           "remainingAmount",
           "dueDate",
           "issuedAt",
@@ -13696,7 +13719,7 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 100000000000,
-            "description": "max(0, `totalAmount` − `paidAmount`)"
+            "description": "max(0, `totalAmount` − `paidAmount` − phần nợ đã chuyển sang hóa đơn kỳ sau)"
           },
           "overpaidAmount": {
             "type": "integer",
@@ -14198,7 +14221,7 @@
           "summary"
         ],
         "additionalProperties": false,
-        "description": "Công nợ của tenant (T11): mỗi dòng một học viên còn nợ, sắp theo số nợ giảm dần mặc định, kèm tổng theo nhóm tuổi nợ (US-8.3 AC1, AC2). Nợ = Σ `remainingAmount` các hóa đơn `issued`/`partially_paid` của học viên; khoản đã nằm trong dòng `carry_over` của hóa đơn kỳ sau chỉ tính ở hóa đơn kỳ sau, không tính hai lần. Học viên không còn nợ không có dòng",
+        "description": "Công nợ của tenant (T11): mỗi dòng một học viên còn nợ, sắp theo số nợ giảm dần mặc định, kèm tổng theo nhóm tuổi nợ (US-8.3 AC1, AC2). Nợ ròng của học viên = max(0, Σ `remainingAmount` các hóa đơn `issued`/`partially_paid` + số dư sổ học viên): số dư âm (trả thừa) giảm nợ, số dư dương (nợ ở sổ, vd. hủy thanh toán sau khi trả thừa đã được trừ) tăng nợ; khoản đã nằm trong dòng `carry_over` của hóa đơn kỳ sau chỉ tính ở hóa đơn kỳ sau, không tính hai lần. Số dư âm bù vào hóa đơn cũ nhất trước (FIFO): `oldestDueDate`, tuổi nợ và `openInvoiceCount` tính theo các hóa đơn còn nợ SAU khi bù (ít nhất 1 khi nợ ròng > 0 chỉ nằm ở sổ). Nhóm tuổi nợ và `summary` theo nợ ròng. Học viên có nợ ròng 0 không có dòng",
         "example": {
           "items": [
             {
@@ -14261,7 +14284,7 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 100000000000,
-            "description": "Tổng số còn nợ, > 0"
+            "description": "Nợ ròng của học viên, > 0"
           },
           "openInvoiceCount": {
             "type": "integer",
@@ -14336,7 +14359,13 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 100000000000,
-            "description": "Tổng nợ hiện tại; 0 khi hết nợ"
+            "description": "Nợ ròng = max(0, `invoiceOutstandingAmount` + `ledgerBalanceAmount`); 0 khi hết nợ. Khớp `outstandingAmount` của dòng ở `GET /receivables`"
+          },
+          "invoiceOutstandingAmount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "Σ `remainingAmount` các hóa đơn còn nợ (không gồm phần đã chuyển sang hóa đơn kỳ sau)"
           },
           "ledgerBalanceAmount": {
             "type": "integer",
@@ -14378,6 +14407,7 @@
           "studentId",
           "studentName",
           "outstandingAmount",
+          "invoiceOutstandingAmount",
           "ledgerBalanceAmount",
           "dunningEnabled",
           "enrollments",
@@ -14454,7 +14484,7 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 100000000000,
-            "description": "max(0, `totalAmount` − `paidAmount`)"
+            "description": "max(0, `totalAmount` − `paidAmount` − phần nợ đã chuyển sang hóa đơn kỳ sau)"
           },
           "dueDate": {
             "type": "string",

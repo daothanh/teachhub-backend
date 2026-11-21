@@ -818,6 +818,12 @@ describe('billing: job billing.close + API kỳ thu, hóa đơn, điều chỉnh
 
     it('AC-5: điều chỉnh làm tổng vượt 100 tỷ → 422 VALIDATION_FAILED ở amount, tiền không đổi', async () => {
       const ha = (await invoicesOf(A)).find((i) => i.full_name === 'Hà')!;
+      // Tổng = Σ dòng: thêm dòng lớn (không chỉ sửa total_amount) để điều chỉnh +1.000.000 vượt trần.
+      await q(
+        `insert into invoice_lines (id, tenant_id, invoice_id, position, kind, description, amount)
+         values ($1, $2, $3, 99, 'monthly', 'Lớn', 99999500000)`,
+        [randomUUID(), A.tenantId, ha.id],
+      );
       await q(`update invoices set total_amount = 99999500000 where id = $1`, [
         ha.id,
       ]);

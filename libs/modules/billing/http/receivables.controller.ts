@@ -6,8 +6,10 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { z } from 'zod';
-import { ApiErrors, AppException } from '@teachhub/core';
+import { ApiErrors, Ctx, type RequestContext } from '@teachhub/core';
+import { TxService } from '@teachhub/db';
 import { RequiresRole } from '@teachhub/modules/identity';
+import { ReceivablesService } from '../application/receivables.service.js';
 import {
   type StudentLedger,
   type StudentLedgerQuery,
@@ -25,13 +27,18 @@ import {
 
 const idParam = z.uuid();
 
-// Hợp đồng Sprint 6 (S5-FL-09, S5-CT-01): công nợ T11 (thân hàm S6-BE-05, P1) và sổ học viên (S6-BE-03). Chỉ đọc, chỉ `tenant_owner`.
+// Hợp đồng Sprint 6 (S5-FL-09, S5-CT-01): công nợ T11 (S6-BE-05, P1) và sổ học viên (S6-BE-03). Chỉ đọc, chỉ `tenant_owner`.
 @ApiTags('billing')
 @ApiBearerAuth('bearer')
 @RequiresRole('tenant_owner')
 @ApiErrors('UNAUTHENTICATED', 'TOKEN_EXPIRED', 'FORBIDDEN')
 @Controller()
 export class ReceivablesController {
+  constructor(
+    private readonly tx: TxService,
+    private readonly receivables: ReceivablesService,
+  ) {}
+
   @Get('receivables')
   @ApiOperation({
     summary: 'Công nợ và tuổi nợ theo học viên (T11, US-8.3)',
@@ -42,9 +49,12 @@ export class ReceivablesController {
   @ApiOkResponse({ standardSchema: receivablesSchema })
   @ApiErrors('VALIDATION_FAILED')
   list(
-    @Query({ schema: receivablesQuerySchema }) _query: ReceivablesQuery,
-  ): Receivables {
-    throw new AppException('NOT_IMPLEMENTED');
+    @Ctx() ctx: RequestContext,
+    @Query({ schema: receivablesQuerySchema }) query: ReceivablesQuery,
+  ): Promise<Receivables> {
+    return this.tx.run(ctx, (t) =>
+      this.receivables.list(t, ctx.tenantId!, query),
+    );
   }
 
   @Get('receivables/:studentId')
@@ -57,9 +67,12 @@ export class ReceivablesController {
   @ApiOkResponse({ standardSchema: studentReceivableHistorySchema })
   @ApiErrors('NOT_FOUND')
   history(
-    @Param('studentId', { schema: idParam }) _studentId: string,
-  ): StudentReceivableHistory {
-    throw new AppException('NOT_IMPLEMENTED');
+    @Ctx() ctx: RequestContext,
+    @Param('studentId', { schema: idParam }) studentId: string,
+  ): Promise<StudentReceivableHistory> {
+    return this.tx.run(ctx, (t) =>
+      this.receivables.history(t, ctx.tenantId!, studentId),
+    );
   }
 
   @Get('students/:id/ledger')
@@ -72,9 +85,12 @@ export class ReceivablesController {
   @ApiOkResponse({ standardSchema: studentLedgerSchema })
   @ApiErrors('VALIDATION_FAILED', 'NOT_FOUND')
   ledger(
-    @Param('id', { schema: idParam }) _id: string,
-    @Query({ schema: studentLedgerQuerySchema }) _query: StudentLedgerQuery,
-  ): StudentLedger {
-    throw new AppException('NOT_IMPLEMENTED');
+    @Ctx() ctx: RequestContext,
+    @Param('id', { schema: idParam }) id: string,
+    @Query({ schema: studentLedgerQuerySchema }) query: StudentLedgerQuery,
+  ): Promise<StudentLedger> {
+    return this.tx.run(ctx, (t) =>
+      this.receivables.ledger(t, ctx.tenantId!, id, query),
+    );
   }
 }
