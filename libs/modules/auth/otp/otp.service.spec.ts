@@ -121,10 +121,10 @@ describe('OtpService', () => {
     await expect(otp.verify(EMAIL, code, OWNER)).resolves.toBeUndefined();
   });
 
-  it(`đoán qua nhiều IP: quá ${OTP.maxFailsPerCode} lượt cho một mã → mã bị hủy (không khóa), mã mới dùng được`, async () => {
+  it(`đoán qua nhiều IP: quá ${OTP.maxFailsPerHour} lượt sai/giờ → hủy mã; xin mã mới không mở thêm lượt`, async () => {
     const code = await otp.issue(EMAIL, OWNER);
     // 5 IP × 4 lần sai = 20 lượt, chưa IP nào bị khóa.
-    for (let i = 0; i < OTP.maxFailsPerCode / 4; i++)
+    for (let i = 0; i < OTP.maxFailsPerHour / 4; i++)
       expect(await fails(code, `203.0.113.${i + 10}`, 4)).toEqual(
         Array(4).fill('OTP_INVALID'),
       );
@@ -132,11 +132,20 @@ describe('OtpService', () => {
     await expect(otp.verify(EMAIL, code, OWNER)).rejects.toMatchObject({
       code: 'OTP_INVALID',
     });
-    await expect(otp.verify(EMAIL, code, OWNER)).rejects.toMatchObject({
+    const clearCooldown = () => {
+      for (const k of redis.data.keys())
+        if (k.startsWith('otp:cooldown:')) redis.data.delete(k);
+    };
+    // Mã mới trong cùng giờ không đặt lại bộ đếm: dò tiếp vẫn bị chặn.
+    clearCooldown();
+    const again = await otp.issue(EMAIL, OWNER);
+    await expect(otp.verify(EMAIL, again, OWNER)).rejects.toMatchObject({
       code: 'OTP_INVALID',
     });
+    // Hết cửa sổ (khóa cfail hết hạn) thì mã mới dùng được.
     for (const k of redis.data.keys())
-      if (k.startsWith('otp:cooldown:')) redis.data.delete(k);
+      if (k.startsWith('otp:cfail:')) redis.data.delete(k);
+    clearCooldown();
     const fresh = await otp.issue(EMAIL, OWNER);
     await expect(otp.verify(EMAIL, fresh, OWNER)).resolves.toBeUndefined();
   });
