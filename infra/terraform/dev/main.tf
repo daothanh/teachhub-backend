@@ -1,112 +1,82 @@
-# S0-OPS-01: 1 VM development ở sin gộp api/worker/PostgreSQL/Redis/MinIO (Plan Mục 2, Spec Mục 9.1).
-# Cloudflare → (443, chỉ dải IP Cloudflare) → Caddy trên VM (chứng chỉ Origin CA, Full strict) → api.
+# S0-OPS-01: 1 VM development ở sin (Plan Mục 2, Spec Mục 9.1). Phần dựng VM dùng chung với staging: ../modules/teachhub_vm.
+module "vm" {
+  source = "../modules/teachhub_vm"
 
+  env             = "dev"
+  env_label       = "development"
+  zone            = var.zone
+  location        = var.location
+  server_type     = var.server_type
+  ssh_public_key  = var.ssh_public_key
+  admin_ssh_cidrs = var.admin_ssh_cidrs
+  hostnames       = var.hostnames
+  network_cidr    = "10.0.0.0/16"
+  subnet_cidr     = "10.0.1.0/24"
+  server_ip       = "10.0.1.10"
+  dns_comment     = "teachhub dev (S0-OPS-01, Terraform)" # giữ nguyên chuỗi cũ để plan không có diff
+}
+
+# Chuyển tài nguyên đã có vào module mà KHÔNG tạo lại (tên Hetzner/Cloudflare, ID và state giữ nguyên).
+# `tofu plan` dev lần đầu sau khi tách phải chỉ báo "has moved to" cho các dòng dưới và 0 add/0 destroy.
+moved {
+  from = hcloud_network.this
+  to   = module.vm.hcloud_network.this
+}
+moved {
+  from = hcloud_network_subnet.app
+  to   = module.vm.hcloud_network_subnet.app
+}
+moved {
+  from = hcloud_firewall.dev
+  to   = module.vm.hcloud_firewall.this
+}
+moved {
+  from = hcloud_ssh_key.admin
+  to   = module.vm.hcloud_ssh_key.admin
+}
+moved {
+  from = hcloud_server.dev
+  to   = module.vm.hcloud_server.this
+}
+moved {
+  from = cloudflare_dns_record.dev
+  to   = module.vm.cloudflare_dns_record.this
+}
+moved {
+  from = tls_private_key.origin
+  to   = module.vm.tls_private_key.origin
+}
+moved {
+  from = tls_cert_request.origin
+  to   = module.vm.tls_cert_request.origin
+}
+moved {
+  from = cloudflare_origin_ca_certificate.origin
+  to   = module.vm.cloudflare_origin_ca_certificate.origin
+}
+moved {
+  from = tls_private_key.jwt
+  to   = module.vm.tls_private_key.jwt
+}
+moved {
+  from = random_password.db
+  to   = module.vm.random_password.db
+}
+moved {
+  from = random_password.minio
+  to   = module.vm.random_password.minio
+}
+moved {
+  from = random_password.app_key
+  to   = module.vm.random_password.app_key
+}
+
+# Cấu hình cấp zone: áp cho mọi hostname của dayhoc.app (R2 custom domain không bị ảnh hưởng), kể cả staging.
+# CHỈ khai ở state dev; staging không khai lại, nếu không hai state giành quyền với cùng một setting.
 data "cloudflare_zone" "this" {
   filter = { name = var.zone }
 }
 
-data "cloudflare_ip_ranges" "this" {}
-
-data "hcloud_location" "this" {
-  name = var.location
-}
-
-data "hcloud_server_type" "dev" {
-  name = var.server_type
-}
-
-check "server_type_in_location" {
-  assert {
-    condition = anytrue([
-      for l in data.hcloud_server_type.dev.locations : l.name == var.location && !l.is_deprecated
-    ])
-    error_message = "Loại máy ${var.server_type} không có (hoặc sắp ngừng) ở ${var.location}. Chạy infra/terraform/r25-probe để xem loại máy có ở vùng này."
-  }
-}
-
-# --- Mạng ---
-
-resource "hcloud_network" "this" {
-  name     = "teachhub-dev"
-  ip_range = "10.0.0.0/16"
-}
-
-resource "hcloud_network_subnet" "app" {
-  network_id   = hcloud_network.this.id
-  type         = "cloud"
-  network_zone = data.hcloud_location.this.network_zone
-  ip_range     = "10.0.1.0/24"
-}
-
-resource "hcloud_firewall" "dev" {
-  name = "teachhub-dev"
-
-  # Chỉ Cloudflare vào được origin (Spec Mục 6: origin chỉ nhận lưu lượng từ Cloudflare).
-  rule {
-    description = "HTTPS từ Cloudflare"
-    direction   = "in"
-    protocol    = "tcp"
-    port        = "443"
-    source_ips  = concat(data.cloudflare_ip_ranges.this.ipv4_cidrs, data.cloudflare_ip_ranges.this.ipv6_cidrs)
-  }
-
-  rule {
-    description = "SSH từ IP admin"
-    direction   = "in"
-    protocol    = "tcp"
-    port        = "22"
-    source_ips  = var.admin_ssh_cidrs
-  }
-
-  rule {
-    description = "Ping"
-    direction   = "in"
-    protocol    = "icmp"
-    source_ips  = ["0.0.0.0/0", "::/0"]
-  }
-}
-
-# --- Máy ---
-
-resource "hcloud_ssh_key" "admin" {
-  name       = "teachhub-dev-admin"
-  public_key = var.ssh_public_key
-}
-
-resource "hcloud_server" "dev" {
-  name         = "teachhub-dev-1"
-  server_type  = var.server_type
-  image        = "ubuntu-24.04"
-  location     = var.location
-  ssh_keys     = [hcloud_ssh_key.admin.id]
-  firewall_ids = [hcloud_firewall.dev.id]
-  labels       = { env = "development", app = "teachhub" }
-
-  # Khai `network_id` (không `subnet_id`): state chỉ lưu network_id, khai subnet_id làm plan luôn đòi gỡ/gắn lại mạng.
-  network {
-    network_id = hcloud_network.this.id
-    ip         = "10.0.1.10"
-  }
-
-  # Subnet phải có trước khi gắn máy.
-  depends_on = [hcloud_network_subnet.app]
-}
-
-# --- DNS + TLS ---
-
-resource "cloudflare_dns_record" "dev" {
-  for_each = var.hostnames
-
-  zone_id = data.cloudflare_zone.this.zone_id
-  name    = "${each.value}.${var.zone}"
-  type    = "A"
-  content = hcloud_server.dev.ipv4_address
-  proxied = true
-  ttl     = 1
-  comment = "teachhub dev (S0-OPS-01, Terraform)"
-}
-
-# Cấu hình cấp zone: áp cho mọi hostname của dayhoc.app (R2 custom domain không bị ảnh hưởng).
 resource "cloudflare_zone_setting" "ssl" {
   zone_id    = data.cloudflare_zone.this.zone_id
   setting_id = "ssl"
@@ -123,57 +93,4 @@ resource "cloudflare_zone_setting" "min_tls_version" {
   zone_id    = data.cloudflare_zone.this.zone_id
   setting_id = "min_tls_version"
   value      = "1.2"
-}
-
-# Chứng chỉ Origin CA (chỉ Cloudflare tin) cho Caddy trên VM — đủ cho Full (strict).
-resource "tls_private_key" "origin" {
-  algorithm   = "ECDSA"
-  ecdsa_curve = "P256"
-}
-
-resource "tls_cert_request" "origin" {
-  private_key_pem = tls_private_key.origin.private_key_pem
-  dns_names       = [var.zone, "*.${var.zone}"]
-  subject {
-    common_name = var.zone
-  }
-}
-
-resource "cloudflare_origin_ca_certificate" "origin" {
-  csr                = tls_cert_request.origin.cert_request_pem
-  hostnames          = [var.zone, "*.${var.zone}"]
-  request_type       = "origin-ecc"
-  requested_validity = 5475
-
-  # Provider Cloudflare đọc lại csr/requested_validity khác giá trị khai báo (validity còn lại, PEM chuẩn hóa) → mỗi
-  # lần apply đòi thay chứng chỉ, chứng chỉ cũ bị thu hồi trong khi VM còn dùng → 526. Muốn xoay chứng chỉ thì
-  # `tofu apply -replace=cloudflare_origin_ca_certificate.origin` rồi xuất lại dev-vars.json và chạy playbook.
-  lifecycle {
-    ignore_changes = [csr, requested_validity, hostnames, request_type]
-  }
-}
-
-# --- Bí mật của ứng dụng (sang Ansible qua output `ansible_vars`) ---
-
-resource "tls_private_key" "jwt" {
-  algorithm   = "ECDSA"
-  ecdsa_curve = "P256"
-}
-
-resource "random_password" "db" {
-  for_each = toset(["postgres", "owner", "app", "worker", "readonly"])
-  length   = 32
-  special  = false # nằm trong URL kết nối
-}
-
-resource "random_password" "minio" {
-  length  = 32
-  special = false
-}
-
-# Khóa ứng dụng bắt buộc ngoài local/test (libs/core/src/config.ts): ba khóa phải khác nhau.
-resource "random_password" "app_key" {
-  for_each = toset(["consent_ip_hmac", "invite_code_hmac", "idempotency_enc", "admin_api"])
-  length   = 48
-  special  = false
 }

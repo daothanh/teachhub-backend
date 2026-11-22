@@ -1,0 +1,34 @@
+# S3-OPS-01: cấu hình VM staging (cùng role với dev, khác biến). Chạy trong infra/ansible (xem infra/README.md mục Staging):
+#   ansible-playbook -i "$IP," -u root staging.yml -e @staging-vars.json -e ghcr_user=<user> -e ghcr_token=<PAT read:packages> \
+#     -e smtp_url='smtps://<user>:<pass-url-encoded>@email-smtp.ap-southeast-1.amazonaws.com:465' \
+#     -e initial_image_tag=v0.1.0 -e deploy_ssh_pubkey="ssh-ed25519 ..." -e ts_authkey=<tskey-auth-... gắn tag:staging>
+#   Tùy chọn (push FCM): jq -n --slurpfile k fcm-stg.json '{fcm_service_account_json: $k[0]}' > fcm-stg-vars.json  rồi thêm -e @fcm-stg-vars.json
+- name: VM staging
+  hosts: all
+  become: true
+  vars:
+    app_dir: /opt/teachhub
+    backend_image: ghcr.io/daothanh/teachhub-backend
+    env_name: staging
+    node_env: staging
+    # Email thật qua SES (sandbox tới khi được duyệt): không chạy Mailpit; smtp_url bắt buộc, truyền bằng -e.
+    use_mailpit: false
+    # Project dayhoc-stg (753323722874-): Web, iOS, Android debug, Android upload (teachhub-app/app/docs/native-setup.md).
+    google_client_ids:
+      - 753323722874-khh3u3aobf813cib4l2m6bvotebld0q7.apps.googleusercontent.com
+      - 753323722874-o79dktgt6nnak8npj90nm114p1jv6aca.apps.googleusercontent.com
+      - 753323722874-at7jre1ehfam9pt140oar0d3k3dqbnd2.apps.googleusercontent.com
+      - 753323722874-hmhkvu7f1bkgm00mgjkv40k52hrs6pig.apps.googleusercontent.com
+    # Bundle ID iOS flavor staging (bắt buộc ở staging, libs/core/src/config.ts).
+    apple_bundle_id: [vn.dayhoc.app.stg]
+    # CD staging theo tag SemVer `v1.2.3` / `v1.2.3-rc.1` (tag image do image.yml tạo), hoặc sha-<40 hex> để quay lại bản cũ.
+    deploy_tag_regex: '^(sha-[0-9a-f]{40}|v[0-9]+[.][0-9]+[.][0-9]+(-[0-9A-Za-z.]+)?)$'
+  pre_tasks:
+    - name: Bắt buộc truyền initial_image_tag là tag v<semver> đã có image (không dùng `main` cho staging)
+      ansible.builtin.assert:
+        that: initial_image_tag is match('^v[0-9]+[.][0-9]+[.][0-9]+(-[0-9A-Za-z.]+)?$')
+        fail_msg: "Truyền -e initial_image_tag=v<semver> (tag đã push và đã build xong image)"
+  roles:
+    - docker
+    - tailscale
+    - teachhub_app

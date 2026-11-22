@@ -1,10 +1,11 @@
 name: image
 
-# PR: build + quét Trivy (không push). Merge main: build, quét, push GHCR — CD dev (S0-OPS-02) kéo tag `main`.
+# PR: build + quét Trivy (không push). Merge main: build, quét, push GHCR — CD dev (S0-OPS-02). Tag `v*`: thêm tag image `v<semver>` — CD staging (S3-OPS-01).
 on:
   pull_request:
   push:
     branches: [main]
+    tags: ['v*']
 
 concurrency:
   group: image-${{ github.ref }}
@@ -29,6 +30,7 @@ jobs:
           tags: |
             type=sha,format=long
             type=raw,value=main,enable={{is_default_branch}}
+            type=ref,event=tag
       - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .

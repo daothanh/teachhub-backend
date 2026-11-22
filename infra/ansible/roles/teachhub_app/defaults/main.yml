@@ -1,0 +1,6 @@
+# Mặc định của môi trường dev; staging.yml ghi đè.
+use_mailpit: true
+apple_bundle_id: []
+# Tag image cho phép CD đẩy lên VM (kiểm trong teachhub-deploy.sh, bash ERE).
+deploy_tag_regex: '^(main|sha-[0-9a-f]{40})$'
+initial_image_tag: main

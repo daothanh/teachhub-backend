@@ -1,4 +1,4 @@
-# VM development (S0-OPS-01) — sinh bởi Ansible, đừng sửa tay. Chỉ Caddy mở cổng ra ngoài.
+# VM {{ env_name }} (S0-OPS-01, S3-OPS-01) — sinh bởi Ansible, đừng sửa tay. Chỉ Caddy mở cổng ra ngoài.
 name: teachhub
 
 x-backend: &backend
@@ -88,16 +88,18 @@ services:
     entrypoint: ['/bin/sh', '/init.sh']
     environment:
       MC_HOST_local: 'http://teachhub:{{ minio_password }}@minio:9000'
-      S3_BUCKET_PRIVATE: teachhub-dev-private
-      S3_BUCKET_PUBLIC: teachhub-dev-public
+      S3_BUCKET_PRIVATE: teachhub-{{ env_name }}-private
+      S3_BUCKET_PUBLIC: teachhub-{{ env_name }}-public
     volumes: ['./minio/init.sh:/init.sh:ro']
     restart: 'no'
 
+{% if use_mailpit %}
   # Bắt email OTP; xem qua SSH tunnel: ssh -L 8025:127.0.0.1:8025 root@<IP>
   mailpit:
     image: axllent/mailpit:v1.33.1
     ports: ['127.0.0.1:8025:8025']
     restart: unless-stopped
+{% endif %}
 
 volumes:
   caddy-data:

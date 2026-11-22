@@ -1,0 +1,2 @@
+ts_hostname: "teachhub-{{ env_name }}"
+ts_tag: "tag:{{ env_name }}"
