@@ -16,6 +16,7 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
+import { files } from './files.js';
 import { users } from './identity.js';
 import { students } from './students.js';
 import { tenants } from './tenancy.js';
@@ -199,8 +200,10 @@ export const invoices = pgTable(
     // Công nợ T11: chỉ quét hóa đơn còn mở của học viên.
     index('invoices_debt_idx')
       .on(t.tenantId, t.studentId)
-      .where(sql`${t.status} in ('issued', 'partially_paid', 'pending_confirmation')`),
-    // Trạng thái khớp số đã thu; `pending_confirmation` (US-7.7, chưa làm) chưa thu đủ. paid_amount = Σ payments chưa hủy do constraint trigger.
+      .where(
+        sql`${t.status} in ('issued', 'partially_paid', 'pending_confirmation')`,
+      ),
+    // Trạng thái khớp số đã thu; `pending_confirmation` (US-7.7) chưa thu đủ. paid_amount = Σ payments chưa hủy do constraint trigger.
     check(
       'invoices_paid_status_check',
       sql`case ${t.status}
@@ -507,7 +510,91 @@ export const dunningJobs = pgTable(
     check(
       'dunning_jobs_cancel_reason_check',
       sql`(${t.status} = 'cancelled') = (${t.cancelReason} is not null)
-        and (${t.cancelReason} is null or ${t.cancelReason} in ('settled', 'void', 'student_disabled', 'tenant_disabled', 'superseded'))`,
+        and (${t.cancelReason} is null or ${t.cancelReason} in ('settled', 'void', 'student_disabled', 'tenant_disabled', 'superseded', 'claim_pending'))`,
+    ),
+  ],
+);
+
+/**
+ * Phụ huynh báo đã chuyển khoản kèm biên lai (US-7.7). Tạo chỉ qua `app_private.create_payment_claim` (phụ huynh không có quyền ghi
+ * hóa đơn/nhắc nợ); giáo viên xử lý (`confirm` sinh một `payments`, `reject` ghi lý do). Mỗi hóa đơn tối đa MỘT lần báo `pending`.
+ * Tên người báo/xử lý là ảnh chụp lúc ghi (như `payments.recorded_by_name`).
+ */
+export const paymentClaims = pgTable(
+  'payment_claims',
+  {
+    id: uuid().primaryKey(),
+    tenantId: uuid()
+      .notNull()
+      .references(() => tenants.id),
+    invoiceId: uuid().notNull(),
+    receiptFileId: uuid().notNull(),
+    status: text().notNull().default('pending'),
+    /** VND phụ huynh khai, chỉ để đối chiếu; số ghi thu do giáo viên quyết khi `confirm`. */
+    amount: bigint({ mode: 'number' }).notNull(),
+    note: text(),
+    claimedBy: uuid()
+      .notNull()
+      .references(() => users.id),
+    claimedByName: text().notNull(),
+    resolvedAt: timestamp({ withTimezone: true }),
+    resolvedBy: uuid().references(() => users.id),
+    resolvedByName: text(),
+    rejectReason: text(),
+    paymentId: uuid(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    foreignKey({
+      name: 'payment_claims_tenant_invoice_fk',
+      columns: [t.tenantId, t.invoiceId],
+      foreignColumns: [invoices.tenantId, invoices.id],
+    }),
+    foreignKey({
+      name: 'payment_claims_tenant_file_fk',
+      columns: [t.tenantId, t.receiptFileId],
+      foreignColumns: [files.tenantId, files.id],
+    }),
+    foreignKey({
+      name: 'payment_claims_tenant_payment_fk',
+      columns: [t.tenantId, t.paymentId],
+      foreignColumns: [payments.tenantId, payments.id],
+    }),
+    unique('payment_claims_tenant_id_id_uq').on(t.tenantId, t.id),
+    // Một lần báo chờ xử lý mỗi hóa đơn; một biên lai chỉ dùng cho một lần báo.
+    uniqueIndex('payment_claims_pending_uq')
+      .on(t.invoiceId)
+      .where(sql`${t.status} = 'pending'`),
+    uniqueIndex('payment_claims_receipt_uq').on(t.receiptFileId),
+    index('payment_claims_invoice_idx').on(
+      t.tenantId,
+      t.invoiceId,
+      t.createdAt.desc(),
+      t.id.desc(),
+    ),
+    index('payment_claims_claimed_by_idx').on(t.claimedBy),
+    index('payment_claims_resolved_by_idx')
+      .on(t.resolvedBy)
+      .where(sql`${t.resolvedBy} is not null`),
+    check(
+      'payment_claims_status_check',
+      sql`${t.status} in ('pending', 'confirmed', 'rejected')`,
+    ),
+    check(
+      'payment_claims_amount_check',
+      sql`${t.amount} > 0 and ${t.amount} <= ${sql.raw(MAX_VND)}`,
+    ),
+    check('payment_claims_note_check', sql`char_length(${t.note}) <= 300`),
+    // Trạng thái khớp các cột xử lý: pending chưa có gì; confirmed có thanh toán; rejected có lý do.
+    check(
+      'payment_claims_resolved_check',
+      sql`(${t.status} = 'pending') = (${t.resolvedAt} is null)
+        and (${t.resolvedAt} is null) = (${t.resolvedBy} is null)
+        and (${t.resolvedAt} is null) = (${t.resolvedByName} is null)
+        and (${t.status} = 'confirmed') = (${t.paymentId} is not null)
+        and (${t.status} = 'rejected') = (${t.rejectReason} is not null)
+        and (${t.rejectReason} is null or char_length(${t.rejectReason}) between 1 and 300)`,
     ),
   ],
 );

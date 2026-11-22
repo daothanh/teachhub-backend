@@ -14,6 +14,10 @@ import {
   JOB_BILLING_RECONCILE,
 } from '@teachhub/modules/billing';
 import {
+  JOB_PURGE_PENDING_FILES,
+  PurgePendingFilesJob,
+} from '@teachhub/modules/files';
+import {
   JOB_PURGE_STALE_DEVICES,
   PurgeStaleDevicesJob,
 } from '@teachhub/modules/notifications';
@@ -45,6 +49,7 @@ export class CronProcessor
     private readonly purge: PurgeIdempotencyKeysJob,
     private readonly purgeDevices: PurgeStaleDevicesJob,
     private readonly lifecycle: SubscriptionLifecycleJob,
+    private readonly purgeFiles: PurgePendingFilesJob,
   ) {
     super();
   }
@@ -93,6 +98,11 @@ export class CronProcessor
       { pattern: '45 1 * * *', tz: TZ },
       { name: JOB_PURGE_STALE_DEVICES, opts },
     );
+    await this.queue.upsertJobScheduler(
+      JOB_PURGE_PENDING_FILES,
+      { pattern: '0 4 * * *', tz: TZ },
+      { name: JOB_PURGE_PENDING_FILES, opts },
+    );
   }
 
   async process(job: Job): Promise<number> {
@@ -114,6 +124,8 @@ export class CronProcessor
         return this.purge.run();
       case JOB_PURGE_STALE_DEVICES:
         return this.purgeDevices.run();
+      case JOB_PURGE_PENDING_FILES:
+        return this.purgeFiles.run();
       default:
         throw new Error(`Job không biết: ${job.name}`);
     }
