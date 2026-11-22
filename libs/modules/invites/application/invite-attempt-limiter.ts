@@ -11,7 +11,8 @@ const WINDOW_SEC = 15 * 60;
 /**
  * Ngưỡng lần thử SAI trong 15 phút. User: 5 (US-0.12 AC5). IP cao hơn vì một IP có thể là wifi chung của cả trường.
  * Bộ đếm toàn cục chặn dò mã ngắn phân tán nhiều IP/tài khoản và CHỈ áp cho đổi mã ngắn (không gian 2^40); token
- * 32 byte không đoán được nên không đếm toàn cục, tránh bị lợi dụng để khóa mọi người (DoS).
+ * 32 byte không đoán được nên không đếm toàn cục. Vượt trần toàn cục chỉ chặn user/IP đã sai ít nhất một lần trong
+ * cửa sổ: kẻ dò không khóa được người nhập mã lần đầu (DoS).
  */
 const LIMITS = {
   accept: { user: 5, ip: 20, global: 500 },
@@ -26,20 +27,25 @@ export interface AttemptReservation {
   keys: string[];
 }
 
-// KEYS = các bộ đếm; ARGV[1] = TTL, ARGV[2..] = ngưỡng theo từng khóa. Trả [đếm, pttl] cho từng khóa.
-// Có khóa vượt ngưỡng thì hoàn lại các khóa còn lại (người bị khóa không đốt bộ đếm của IP/toàn cục).
+// KEYS = các bộ đếm; ARGV[1] = TTL, ARGV[2..n+1] = ngưỡng theo từng khóa, ARGV[n+2] = vị trí khóa toàn cục (0 = không
+// có; luôn là khóa cuối). Khóa toàn cục vượt ngưỡng chỉ chặn khi khóa user/IP trước nó đã có lần sai (đếm > 1 sau INCR).
+// Trả [đếm, pttl, chặn] cho từng khóa. Có khóa chặn thì hoàn lại các khóa không chặn (người bị khóa không đốt bộ đếm khác).
 const RESERVE = `
-local out, over = {}, false
+local n, out, over, prior = #KEYS, {}, false, false
+local g = tonumber(ARGV[n + 2])
 for i, k in ipairs(KEYS) do
   local c = redis.call('INCR', k)
   if c == 1 then redis.call('EXPIRE', k, ARGV[1]) end
+  local hit = c > tonumber(ARGV[i + 1])
+  if i == g then hit = hit and prior elseif c > 1 then prior = true end
   out[#out + 1] = c
   out[#out + 1] = redis.call('PTTL', k)
-  if c > tonumber(ARGV[i + 1]) then over = true end
+  out[#out + 1] = hit and 1 or 0
+  if hit then over = true end
 end
 if over then
   for i, k in ipairs(KEYS) do
-    if out[2 * i - 1] <= tonumber(ARGV[i + 1]) then redis.call('DECR', k) end
+    if out[3 * i] == 0 then redis.call('DECR', k) end
   end
 end
 return out`;
@@ -108,6 +114,7 @@ export class InviteAttemptLimiter {
         ...layers.map((l) => l.key),
         WINDOW_SEC,
         ...layers.map((l) => l.max),
+        layers.at(-1)!.layer === 'global' ? layers.length : 0,
       )) as number[];
     } catch (e) {
       this.log.error(
@@ -118,16 +125,18 @@ export class InviteAttemptLimiter {
     const hits = layers
       .map((l, i) => ({
         ...l,
-        count: Number(res[2 * i]),
-        pttl: Number(res[2 * i + 1]),
+        count: Number(res[3 * i]),
+        pttl: Number(res[3 * i + 1]),
+        hit: Number(res[3 * i + 2]) === 1,
       }))
-      .filter((l) => l.count > l.max);
+      .filter((l) => l.hit);
     if (hits.length === 0) return { keys: layers.map((l) => l.key) };
     for (const h of hits) {
-      // Audit đúng một lần, ở lượt đầu tiên bị từ chối của lớp đó.
+      // Audit đúng một lần, ở lượt đầu tiên bị từ chối của lớp đó (lớp toàn cục: chỉ khi lượt vượt trần đầu tiên bị chặn).
       if (h.count === h.max + 1) await this.auditLock(scope, userId, h.layer);
       if (h.layer === 'global') {
-        // shortcut: chỉ cảnh báo và từ chối mã ngắn; cần CAPTCHA/chống bot khi bị dò thật, chưa có.
+        // shortcut: vượt trần toàn cục chỉ chặn user/IP đã sai trong cửa sổ, kẻ dò dùng nhiều tài khoản + IP mới vẫn được
+        // một lượt mỗi cặp; cần CAPTCHA/chống bot khi bị dò thật, chưa có.
         this.log.warn(
           `Bộ đếm toàn cục đổi mã mời chạm ngưỡng (${h.count}/${h.max})`,
         );
