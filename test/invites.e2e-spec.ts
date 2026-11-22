@@ -709,6 +709,45 @@ describe('lời mời phụ huynh và đồng ý điều khoản', () => {
       expect(await failures('inv:f:accept:g')).toBe(before + 1);
     });
 
+    it('vượt trần toàn cục chỉ chặn user/IP đã sai; người chưa sai lần nào vẫn thử được', async () => {
+      const s = await student(A, 1);
+      const inv = await invite(A, s.id, s.guardians[0]!.id);
+      await redis.set('inv:f:accept:g', '500', 'EX', 900);
+      try {
+        const p = await mkParent();
+        expect(
+          (await redeem(p, 'ZZZZZZZW', undefined, '198.51.100.70')).statusCode,
+        ).toBe(410);
+        const again = await redeem(p, 'ZZZZZZZW', undefined, '198.51.100.71');
+        expect(again.statusCode).toBe(429);
+        expect(again.json().code).toBe('RATE_LIMITED');
+        // User mới cùng IP đã sai cũng bị chặn.
+        expect(
+          (
+            await redeem(
+              await mkParent(),
+              inv.shortCode,
+              undefined,
+              '198.51.100.70',
+            )
+          ).statusCode,
+        ).toBe(429);
+        // User mới, IP mới: được thử.
+        expect(
+          (
+            await redeem(
+              await mkParent(),
+              inv.shortCode,
+              undefined,
+              '198.51.100.72',
+            )
+          ).statusCode,
+        ).toBe(200);
+      } finally {
+        await redis.del('inv:f:accept:g');
+      }
+    });
+
     it('membership Phụ huynh đã revoked: nhận lời mời trả 410 đồng nhất, lời mời không bị đốt, không khôi phục', async () => {
       const s = await student(A, 1);
       const inv = await invite(A, s.id, s.guardians[0]!.id);
