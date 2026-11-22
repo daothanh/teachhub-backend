@@ -7,6 +7,7 @@ export * from './students.js';
 export * from './schedule.js';
 export * from './attendance.js';
 export * from './notifications.js';
+export * from './files.js';
 export * from './billing.js';
 export * from './invites.js';
 export * from './subscription.js';

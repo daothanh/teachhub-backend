@@ -19,7 +19,7 @@ export const createPaymentClaimRequestSchema = z
   .object({
     receiptFileId: z.uuid().meta({
       description:
-        'Tệp biên lai: `purpose = receipt`, `entityId` = hóa đơn này, `status = ready`, do chính user này tải lên (US-7.7 AC1 "đính ảnh" bắt buộc). Sai điều kiện nào → 422 `VALIDATION_FAILED` ở `receiptFileId`',
+        'Tệp biên lai: `purpose = receipt`, `entityId` = hóa đơn này, `status = ready`, do chính user này tải lên (US-7.7 AC1 "đính ảnh" bắt buộc). Tệp bị ghi đè sau `complete` (ETag hoặc kích thước đổi) cũng bị từ chối. Mỗi biên lai chỉ dùng cho một lần báo (bị từ chối thì tải biên lai mới). Sai điều kiện nào → 422 `VALIDATION_FAILED` ở `receiptFileId`',
     }),
     amount: z.int().min(1).max(MAX_VND).optional().meta({
       description:

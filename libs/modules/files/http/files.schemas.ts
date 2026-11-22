@@ -50,7 +50,7 @@ export const uploadUrlSchema = z
     }),
     uploadUrl: z.url().meta({
       description:
-        'URL presigned (SigV4) để client PUT trực tiếp lên kho S3; hết hạn sau 10 phút (`expiresAt`)',
+        'URL presigned (SigV4) để client PUT trực tiếp lên kho S3; hết hạn sau 2 phút (`expiresAt`), xin lại nếu quá hạn',
     }),
     method: z.literal('PUT'),
     headers: z.record(z.string(), z.string()).meta({

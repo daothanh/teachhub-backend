@@ -7,6 +7,14 @@ import { createHash } from 'node:crypto';
 // cũ, ghi `applied_to_invoice`. Σ dòng ngoài carry = 0 thì không phát hành; còn lại luôn chốt, tổng ≤ 0 thì hóa đơn 0 đ đã `paid`.
 
 /**
+ * Hóa đơn kỳ trước còn nợ được kết chuyển (xem trước nháp, job chốt kỳ, `issue` cùng đọc qua `loadCarryState`). Không gồm
+ * `pending_confirmation` (US-7.7): phụ huynh đã báo chuyển, nợ chưa chắc còn. Kết chuyển lúc này thì khi giáo viên xác nhận, hóa
+ * đơn cũ không thu được (409) và phụ huynh bị đòi lại ở kỳ sau. Bị từ chối thì hóa đơn về `issued`/`partially_paid` và lần phát
+ * hành kế tiếp mới kết chuyển.
+ */
+export const CARRY_OPEN_STATUSES = ['issued', 'partially_paid'];
+
+/**
  * `charges` = Σ dòng ngoài `carry_over` (phát sinh + điều chỉnh); `balance` = số dư chuyển kỳ (Σ còn nợ hóa đơn cũ + số dư sổ:
  * dương = nợ, âm = trả thừa). Tổng = max(0, charges + balance). `charges = 0` thì không phát hành (US-1.3 AC3, `issuable` false).
  * Ngược lại luôn chốt: `applied` = bút toán `applied_to_invoice` (> 0 ghi có, < 0 ghi nợ) đưa số dư sổ về `min(0, sum)`: tổng > 0

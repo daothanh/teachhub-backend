@@ -1,5 +1,5 @@
 {
-  "id": "bf5a51e8-eb28-4155-a51a-b41a5ee3d518",
+  "id": "d6502560-8fa3-442c-938d-23ddc318c4be",
   "prevId": "6285dd70-78ea-45a8-af60-4a1cda2648d9",
   "version": "7",
   "dialect": "postgresql",
@@ -409,7 +409,7 @@
         },
         "dunning_jobs_cancel_reason_check": {
           "name": "dunning_jobs_cancel_reason_check",
-          "value": "(\"dunning_jobs\".\"status\" = 'cancelled') = (\"dunning_jobs\".\"cancel_reason\" is not null)\n        and (\"dunning_jobs\".\"cancel_reason\" is null or \"dunning_jobs\".\"cancel_reason\" in ('settled', 'void', 'student_disabled', 'tenant_disabled', 'superseded'))"
+          "value": "(\"dunning_jobs\".\"status\" = 'cancelled') = (\"dunning_jobs\".\"cancel_reason\" is not null)\n        and (\"dunning_jobs\".\"cancel_reason\" is null or \"dunning_jobs\".\"cancel_reason\" in ('settled', 'void', 'student_disabled', 'tenant_disabled', 'superseded', 'claim_pending'))"
         }
       },
       "isRLSEnabled": false
@@ -999,6 +999,292 @@
         "invoices_void_reason_check": {
           "name": "invoices_void_reason_check",
           "value": "char_length(\"invoices\".\"void_reason\") <= 300"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.payment_claims": {
+      "name": "payment_claims",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "invoice_id": {
+          "name": "invoice_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "receipt_file_id": {
+          "name": "receipt_file_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "amount": {
+          "name": "amount",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "note": {
+          "name": "note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "claimed_by": {
+          "name": "claimed_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "claimed_by_name": {
+          "name": "claimed_by_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "resolved_at": {
+          "name": "resolved_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resolved_by": {
+          "name": "resolved_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resolved_by_name": {
+          "name": "resolved_by_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reject_reason": {
+          "name": "reject_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "payment_id": {
+          "name": "payment_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "payment_claims_pending_uq": {
+          "name": "payment_claims_pending_uq",
+          "columns": [
+            {
+              "expression": "invoice_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"payment_claims\".\"status\" = 'pending'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "payment_claims_receipt_uq": {
+          "name": "payment_claims_receipt_uq",
+          "columns": [
+            {
+              "expression": "receipt_file_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "payment_claims_invoice_idx": {
+          "name": "payment_claims_invoice_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "invoice_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "payment_claims_claimed_by_idx": {
+          "name": "payment_claims_claimed_by_idx",
+          "columns": [
+            {
+              "expression": "claimed_by",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "payment_claims_resolved_by_idx": {
+          "name": "payment_claims_resolved_by_idx",
+          "columns": [
+            {
+              "expression": "resolved_by",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"payment_claims\".\"resolved_by\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "payment_claims_tenant_id_tenants_id_fk": {
+          "name": "payment_claims_tenant_id_tenants_id_fk",
+          "tableFrom": "payment_claims",
+          "tableTo": "tenants",
+          "columnsFrom": ["tenant_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "payment_claims_claimed_by_users_id_fk": {
+          "name": "payment_claims_claimed_by_users_id_fk",
+          "tableFrom": "payment_claims",
+          "tableTo": "users",
+          "columnsFrom": ["claimed_by"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "payment_claims_resolved_by_users_id_fk": {
+          "name": "payment_claims_resolved_by_users_id_fk",
+          "tableFrom": "payment_claims",
+          "tableTo": "users",
+          "columnsFrom": ["resolved_by"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "payment_claims_tenant_invoice_fk": {
+          "name": "payment_claims_tenant_invoice_fk",
+          "tableFrom": "payment_claims",
+          "tableTo": "invoices",
+          "columnsFrom": ["tenant_id", "invoice_id"],
+          "columnsTo": ["tenant_id", "id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "payment_claims_tenant_file_fk": {
+          "name": "payment_claims_tenant_file_fk",
+          "tableFrom": "payment_claims",
+          "tableTo": "files",
+          "columnsFrom": ["tenant_id", "receipt_file_id"],
+          "columnsTo": ["tenant_id", "id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "payment_claims_tenant_payment_fk": {
+          "name": "payment_claims_tenant_payment_fk",
+          "tableFrom": "payment_claims",
+          "tableTo": "payments",
+          "columnsFrom": ["tenant_id", "payment_id"],
+          "columnsTo": ["tenant_id", "id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "payment_claims_tenant_id_id_uq": {
+          "name": "payment_claims_tenant_id_id_uq",
+          "nullsNotDistinct": false,
+          "columns": ["tenant_id", "id"]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "payment_claims_status_check": {
+          "name": "payment_claims_status_check",
+          "value": "\"payment_claims\".\"status\" in ('pending', 'confirmed', 'rejected')"
+        },
+        "payment_claims_amount_check": {
+          "name": "payment_claims_amount_check",
+          "value": "\"payment_claims\".\"amount\" > 0 and \"payment_claims\".\"amount\" <= 100000000000"
+        },
+        "payment_claims_note_check": {
+          "name": "payment_claims_note_check",
+          "value": "char_length(\"payment_claims\".\"note\") <= 300"
+        },
+        "payment_claims_resolved_check": {
+          "name": "payment_claims_resolved_check",
+          "value": "(\"payment_claims\".\"status\" = 'pending') = (\"payment_claims\".\"resolved_at\" is null)\n        and (\"payment_claims\".\"resolved_at\" is null) = (\"payment_claims\".\"resolved_by\" is null)\n        and (\"payment_claims\".\"resolved_at\" is null) = (\"payment_claims\".\"resolved_by_name\" is null)\n        and (\"payment_claims\".\"status\" = 'confirmed') = (\"payment_claims\".\"payment_id\" is not null)\n        and (\"payment_claims\".\"status\" = 'rejected') = (\"payment_claims\".\"reject_reason\" is not null)\n        and (\"payment_claims\".\"reject_reason\" is null or char_length(\"payment_claims\".\"reject_reason\") between 1 and 300)"
         }
       },
       "isRLSEnabled": false
@@ -1903,8 +2189,8 @@
       },
       "isRLSEnabled": false
     },
-    "public.acknowledgements": {
-      "name": "acknowledgements",
+    "public.files": {
+      "name": "files",
       "schema": "",
       "columns": {
         "id": {
@@ -1919,8 +2205,14 @@
           "primaryKey": false,
           "notNull": true
         },
-        "kind": {
-          "name": "kind",
+        "owner_user_id": {
+          "name": "owner_user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "purpose": {
+          "name": "purpose",
           "type": "text",
           "primaryKey": false,
           "notNull": true
@@ -1931,83 +2223,33 @@
           "primaryKey": false,
           "notNull": true
         },
-        "code": {
-          "name": "code",
+        "bucket": {
+          "name": "bucket",
           "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "user_id": {
-          "name": "user_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "acknowledgements_tenant_id_tenants_id_fk": {
-          "name": "acknowledgements_tenant_id_tenants_id_fk",
-          "tableFrom": "acknowledgements",
-          "tableTo": "tenants",
-          "columnsFrom": ["tenant_id"],
-          "columnsTo": ["id"],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "acknowledgements_user_id_users_id_fk": {
-          "name": "acknowledgements_user_id_users_id_fk",
-          "tableFrom": "acknowledgements",
-          "tableTo": "users",
-          "columnsFrom": ["user_id"],
-          "columnsTo": ["id"],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "acknowledgements_entity_code_uq": {
-          "name": "acknowledgements_entity_code_uq",
-          "nullsNotDistinct": false,
-          "columns": ["tenant_id", "kind", "entity_id", "code"]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "acknowledgements_kind_check": {
-          "name": "acknowledgements_kind_check",
-          "value": "\"acknowledgements\".\"kind\" in ('class_warning')"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.compliance_items": {
-      "name": "compliance_items",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "item_key": {
-          "name": "item_key",
+        "object_key": {
+          "name": "object_key",
           "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "original_name": {
+          "name": "original_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mime": {
+          "name": "mime",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "size_bytes": {
+          "name": "size_bytes",
+          "type": "bigint",
           "primaryKey": false,
           "notNull": true
         },
@@ -2015,19 +2257,8 @@
           "name": "status",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
-        },
-        "data": {
-          "name": "data",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "completed_at": {
-          "name": "completed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
+          "notNull": true,
+          "default": "'pending'"
         },
         "created_at": {
           "name": "created_at",
@@ -2036,156 +2267,31 @@
           "notNull": true,
           "default": "now()"
         },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "compliance_items_tenant_id_tenants_id_fk": {
-          "name": "compliance_items_tenant_id_tenants_id_fk",
-          "tableFrom": "compliance_items",
-          "tableTo": "tenants",
-          "columnsFrom": ["tenant_id"],
-          "columnsTo": ["id"],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "compliance_items_tenant_key_uq": {
-          "name": "compliance_items_tenant_key_uq",
-          "nullsNotDistinct": false,
-          "columns": ["tenant_id", "item_key"]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "compliance_items_key_check": {
-          "name": "compliance_items_key_check",
-          "value": "\"compliance_items\".\"item_key\" in ('business_registration', 'registration_number', 'public_disclosure', 'school_declaration')"
-        },
-        "compliance_items_status_check": {
-          "name": "compliance_items_status_check",
-          "value": "\"compliance_items\".\"status\" in ('todo', 'done', 'not_applicable')"
-        },
-        "compliance_items_completed_check": {
-          "name": "compliance_items_completed_check",
-          "value": "(\"compliance_items\".\"status\" = 'done') = (\"compliance_items\".\"completed_at\" is not null)"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.legal_articles": {
-      "name": "legal_articles",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "slug": {
-          "name": "slug",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "title": {
-          "name": "title",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "summary": {
-          "name": "summary",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "body_markdown": {
-          "name": "body_markdown",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "sources": {
-          "name": "sources",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "version": {
-          "name": "version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 1
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'draft'"
-        },
-        "reviewed_by": {
-          "name": "reviewed_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "reviewer_role": {
-          "name": "reviewer_role",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "reviewed_on": {
-          "name": "reviewed_on",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "published_by": {
-          "name": "published_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "published_at": {
-          "name": "published_at",
+        "ready_at": {
+          "name": "ready_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
         }
       },
       "indexes": {
-        "legal_articles_published_idx": {
-          "name": "legal_articles_published_idx",
+        "files_entity_idx": {
+          "name": "files_entity_idx",
           "columns": [
             {
-              "expression": "published_at",
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "purpose",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "entity_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -2195,132 +2301,93 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "files_owner_idx": {
+          "name": "files_owner_idx",
+          "columns": [
+            {
+              "expression": "owner_user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "files_pending_idx": {
+          "name": "files_pending_idx",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"files\".\"status\" = 'pending'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "legal_articles_slug_uq": {
-          "name": "legal_articles_slug_uq",
-          "nullsNotDistinct": false,
-          "columns": ["slug"]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "legal_articles_status_check": {
-          "name": "legal_articles_status_check",
-          "value": "\"legal_articles\".\"status\" in ('draft', 'published')"
-        },
-        "legal_articles_reviewer_role_check": {
-          "name": "legal_articles_reviewer_role_check",
-          "value": "\"legal_articles\".\"reviewer_role\" is null or \"legal_articles\".\"reviewer_role\" in ('lawyer', 'accountant')"
-        },
-        "legal_articles_published_check": {
-          "name": "legal_articles_published_check",
-          "value": "\"legal_articles\".\"status\" <> 'published' or (\"legal_articles\".\"reviewed_by\" is not null and \"legal_articles\".\"reviewer_role\" is not null and \"legal_articles\".\"reviewed_on\" is not null and \"legal_articles\".\"published_at\" is not null)"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.tax_threshold_alerts": {
-      "name": "tax_threshold_alerts",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "fiscal_year": {
-          "name": "fiscal_year",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "milestone": {
-          "name": "milestone",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "payment_id": {
-          "name": "payment_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "cumulative_amount": {
-          "name": "cumulative_amount",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "triggered_at": {
-          "name": "triggered_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "dismissed_at": {
-          "name": "dismissed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
       "foreignKeys": {
-        "tax_threshold_alerts_tenant_id_tenants_id_fk": {
-          "name": "tax_threshold_alerts_tenant_id_tenants_id_fk",
-          "tableFrom": "tax_threshold_alerts",
+        "files_tenant_id_tenants_id_fk": {
+          "name": "files_tenant_id_tenants_id_fk",
+          "tableFrom": "files",
           "tableTo": "tenants",
           "columnsFrom": ["tenant_id"],
           "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "tax_threshold_alerts_tenant_payment_fk": {
-          "name": "tax_threshold_alerts_tenant_payment_fk",
-          "tableFrom": "tax_threshold_alerts",
-          "tableTo": "payments",
-          "columnsFrom": ["tenant_id", "payment_id"],
-          "columnsTo": ["tenant_id", "id"],
+        "files_owner_user_id_users_id_fk": {
+          "name": "files_owner_user_id_users_id_fk",
+          "tableFrom": "files",
+          "tableTo": "users",
+          "columnsFrom": ["owner_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
-        "tax_threshold_alerts_tenant_year_milestone_uq": {
-          "name": "tax_threshold_alerts_tenant_year_milestone_uq",
+        "files_tenant_id_id_uq": {
+          "name": "files_tenant_id_id_uq",
           "nullsNotDistinct": false,
-          "columns": ["tenant_id", "fiscal_year", "milestone"]
+          "columns": ["tenant_id", "id"]
+        },
+        "files_object_key_uq": {
+          "name": "files_object_key_uq",
+          "nullsNotDistinct": false,
+          "columns": ["bucket", "object_key"]
         }
       },
       "policies": {},
       "checkConstraints": {
-        "tax_threshold_alerts_milestone_check": {
-          "name": "tax_threshold_alerts_milestone_check",
-          "value": "\"tax_threshold_alerts\".\"milestone\" in ('400m', '800m')"
+        "files_purpose_check": {
+          "name": "files_purpose_check",
+          "value": "\"files\".\"purpose\" in ('receipt')"
         },
-        "tax_threshold_alerts_year_check": {
-          "name": "tax_threshold_alerts_year_check",
-          "value": "\"tax_threshold_alerts\".\"fiscal_year\" between 2020 and 2100"
+        "files_status_check": {
+          "name": "files_status_check",
+          "value": "\"files\".\"status\" in ('pending', 'ready')"
+        },
+        "files_ready_check": {
+          "name": "files_ready_check",
+          "value": "(\"files\".\"status\" = 'ready') = (\"files\".\"ready_at\" is not null)"
+        },
+        "files_size_check": {
+          "name": "files_size_check",
+          "value": "\"files\".\"size_bytes\" between 1 and 20000000"
+        },
+        "files_name_check": {
+          "name": "files_name_check",
+          "value": "char_length(\"files\".\"original_name\") between 1 and 255"
         }
       },
       "isRLSEnabled": false

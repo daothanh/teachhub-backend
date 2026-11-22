@@ -366,16 +366,16 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
     test: 'chéo tenant: B xác nhận lớp của A → 404, không ghi; phụ huynh 403; lớp lạ 404',
   },
   'POST /v1/family/invoices/{id}/payment-claims': {
-    notApplicable:
-      'hợp đồng S7-CT-01, thân hàm trả 501 tới task backend billing Sprint 8; test chéo tenant làm cùng task đó',
+    file: 'payment-claims.e2e-spec.ts',
+    test: 'không báo được: con người khác, tenant khác, nháp, không tồn tại → 404; hủy/đã thu đủ → 409 INVOICE_NOT_PAYABLE; không có khóa → 422',
   },
   'GET /v1/invoices/{id}/payment-claims': {
-    notApplicable:
-      'hợp đồng S7-CT-01, thân hàm trả 501 tới task backend billing Sprint 8; test chéo tenant làm cùng task đó',
+    file: 'payment-claims.e2e-spec.ts',
+    test: 'chéo tenant / vai trò: giáo viên tenant khác 404 ở list và resolve; id lạ 404; claim không đổi',
   },
   'POST /v1/payment-claims/{id}/resolve': {
-    notApplicable:
-      'hợp đồng S7-CT-01, thân hàm trả 501 tới task backend billing Sprint 8; test chéo tenant làm cùng task đó',
+    file: 'payment-claims.e2e-spec.ts',
+    test: 'chéo tenant / vai trò: giáo viên tenant khác 404 ở list và resolve; id lạ 404; claim không đổi',
   },
   'POST /v1/exports': {
     notApplicable:
@@ -386,16 +386,16 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
       'hợp đồng S7-CT-01, thân hàm trả 501 tới task backend reports Sprint 8; test chéo tenant làm cùng task đó',
   },
   'POST /v1/files/upload-urls': {
-    notApplicable:
-      'hợp đồng S7-CT-01, thân hàm trả 501 tới task backend files Sprint 8; test chéo tenant làm cùng task đó',
+    file: 'files.e2e-spec.ts',
+    test: 'quyền thực thể: hóa đơn con người khác / tenant khác / nháp / không tồn tại / giáo viên xin → cùng 404; chưa đồng ý điều khoản → 403',
   },
   'POST /v1/files/{id}/complete': {
-    notApplicable:
-      'hợp đồng S7-CT-01, thân hàm trả 501 tới task backend files Sprint 8; test chéo tenant làm cùng task đó',
+    file: 'files.e2e-spec.ts',
+    test: 'luồng đủ: xin URL → PUT thẳng lên kho S3 → complete → tải về đúng nội dung; khóa không đoán được, tên gốc không vào khóa',
   },
   'GET /v1/files/{id}/download-url': {
-    notApplicable:
-      'hợp đồng S7-CT-01, thân hàm trả 501 tới task backend files Sprint 8; test chéo tenant làm cùng task đó',
+    file: 'files.e2e-spec.ts',
+    test: 'download-url: tệp pending, phụ huynh khác, tenant khác, học sinh/không token đều không xem được',
   },
   'GET /v1/compliance/checklist': {
     file: 'compliance.e2e-spec.ts',

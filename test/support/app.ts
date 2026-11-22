@@ -18,7 +18,10 @@ export interface TestApp {
 }
 
 /** PostgreSQL + Redis (Testcontainers) và app api đã init, như các e2e khác. */
-export async function startTestApp(): Promise<TestApp> {
+export async function startTestApp(
+  /** Biến `S3_*` thật (vd. `startTestS3().env`) thay cho giá trị giả khi test cần kho S3. */
+  s3Env: Record<string, string> = {},
+): Promise<TestApp> {
   const [db, redis] = await Promise.all([
     startTestDb(),
     new RedisContainer('redis:7-alpine').start(),
@@ -32,6 +35,7 @@ export async function startTestApp(): Promise<TestApp> {
     S3_ACCESS_KEY_ID: 'x',
     S3_SECRET_ACCESS_KEY: 'x',
     S3_BUCKET_PRIVATE: 'x',
+    ...s3Env,
   });
   const worker = new pg.Pool({ connectionString: db.url('teachhub_worker') });
   const { createApp } = await import('../../apps/api/src/app.js');

@@ -26,6 +26,10 @@ import {
   TaxThresholdJob,
 } from '@teachhub/modules/compliance';
 import {
+  JOB_PURGE_PENDING_FILES,
+  PurgePendingFilesJob,
+} from '@teachhub/modules/files';
+import {
   JOB_PURGE_STALE_DEVICES,
   PurgeStaleDevicesJob,
 } from '@teachhub/modules/notifications';
@@ -58,6 +62,7 @@ export class CronProcessor
     private readonly purgeDevices: PurgeStaleDevicesJob,
     private readonly lifecycle: SubscriptionLifecycleJob,
     private readonly taxThreshold: TaxThresholdJob,
+    private readonly purgeFiles: PurgePendingFilesJob,
     private readonly auditPartitions: EnsureAuditPartitionsJob,
   ) {
     super();
@@ -113,6 +118,11 @@ export class CronProcessor
       { pattern: '45 1 * * *', tz: TZ },
       { name: JOB_PURGE_STALE_DEVICES, opts },
     );
+    await this.queue.upsertJobScheduler(
+      JOB_PURGE_PENDING_FILES,
+      { pattern: '0 4 * * *', tz: TZ },
+      { name: JOB_PURGE_PENDING_FILES, opts },
+    );
     // Hằng ngày, idempotent: phân vùng tháng sau luôn có sẵn trước mốc đầu tháng (UTC).
     await this.queue.upsertJobScheduler(
       JOB_ENSURE_AUDIT_PARTITIONS,
@@ -147,6 +157,8 @@ export class CronProcessor
         return this.purge.run();
       case JOB_PURGE_STALE_DEVICES:
         return this.purgeDevices.run();
+      case JOB_PURGE_PENDING_FILES:
+        return this.purgeFiles.run();
       case JOB_ENSURE_AUDIT_PARTITIONS:
         return this.auditPartitions.run(new Date());
       default:

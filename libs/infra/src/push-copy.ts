@@ -13,6 +13,8 @@ export type PushType =
   | 'payment_recorded'
   | 'payment_reminder'
   | 'billing_ready'
+  | 'payment_claim_created'
+  | 'payment_claim_rejected'
   | 'subscription_expiring'
   | 'subscription_activated'
   | 'tax_threshold_alert'
@@ -53,6 +55,16 @@ export const PUSH_COPY: Record<PushType, PushCopy> = {
   billing_ready: {
     title: 'Học phí đã sẵn sàng',
     body: `Bảng học phí kỳ này đã sẵn sàng để bạn xem lại. ${OPEN}`,
+    channelId: 'billing',
+  },
+  payment_claim_created: {
+    title: 'Phụ huynh báo đã chuyển khoản',
+    body: `Có phụ huynh vừa báo đã chuyển khoản học phí, cần bạn xác nhận. ${OPEN}`,
+    channelId: 'billing',
+  },
+  payment_claim_rejected: {
+    title: 'Chưa nhận được học phí',
+    body: `Giáo viên chưa nhận được khoản chuyển khoản bạn đã báo. ${OPEN}`,
     channelId: 'billing',
   },
   subscription_expiring: {

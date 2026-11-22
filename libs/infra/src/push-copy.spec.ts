@@ -10,6 +10,8 @@ const SENT_TYPES = [
   'invoice_issued',
   'payment_recorded',
   'payment_reminder',
+  'payment_claim_created',
+  'payment_claim_rejected',
   'schedule_changed',
   'subscription_expiring',
   'subscription_activated',

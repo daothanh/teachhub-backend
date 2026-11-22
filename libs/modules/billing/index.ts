@@ -3,6 +3,7 @@ export * from './domain/vietqr.js';
 export * from './domain/invoice-issue.js';
 export * from './domain/payment.js';
 export * from './domain/dunning.js';
+export * from './domain/payment-claim.js';
 export * from './billing.module.js';
 export {
   feeAmountSchema,
