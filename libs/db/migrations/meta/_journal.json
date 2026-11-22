@@ -246,6 +246,13 @@
       "when": 1795279409771,
       "tag": "0034_student_status_history",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1795312102147,
+      "tag": "0035_compliance",
+      "breakpoints": true
     }
   ]
 }

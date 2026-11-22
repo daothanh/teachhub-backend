@@ -20,6 +20,10 @@ import {
   JOB_BILLING_RECONCILE,
 } from '@teachhub/modules/billing';
 import {
+  JOB_COMPLIANCE_TAX_THRESHOLD,
+  TaxThresholdJob,
+} from '@teachhub/modules/compliance';
+import {
   JOB_PURGE_STALE_DEVICES,
   PurgeStaleDevicesJob,
 } from '@teachhub/modules/notifications';
@@ -51,6 +55,7 @@ export class CronProcessor
     private readonly purge: PurgeIdempotencyKeysJob,
     private readonly purgeDevices: PurgeStaleDevicesJob,
     private readonly lifecycle: SubscriptionLifecycleJob,
+    private readonly taxThreshold: TaxThresholdJob,
   ) {
     super();
   }
@@ -89,6 +94,12 @@ export class CronProcessor
       { pattern: '0 6 * * *', tz: TZ },
       { name: JOB_SUBSCRIPTION_LIFECYCLE, opts },
     );
+    // 08:00: trong khung giờ yên lặng của push (07:00 đến 21:30).
+    await this.queue.upsertJobScheduler(
+      JOB_COMPLIANCE_TAX_THRESHOLD,
+      { pattern: '0 8 * * *', tz: TZ },
+      { name: JOB_COMPLIANCE_TAX_THRESHOLD, opts },
+    );
     await this.queue.upsertJobScheduler(
       JOB_PURGE_IDEMPOTENCY,
       { pattern: '30 1 * * *', tz: TZ },
@@ -121,6 +132,8 @@ export class CronProcessor
       case JOB_SUBSCRIPTION_LIFECYCLE:
         // Giờ chạy thật: lần BullMQ thử lại vẫn chốt theo "bây giờ", không theo mốc lập lịch.
         return this.lifecycle.run(new Date());
+      case JOB_COMPLIANCE_TAX_THRESHOLD:
+        return this.taxThreshold.run();
       case JOB_PURGE_IDEMPOTENCY:
         return this.purge.run();
       case JOB_PURGE_STALE_DEVICES:

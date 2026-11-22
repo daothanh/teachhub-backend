@@ -2,6 +2,7 @@ import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Injectable, Logger } from '@nestjs/common';
 import type { Job } from 'bullmq';
 import { captureJobFailure } from '@teachhub/core';
+import { TAX_THRESHOLD_ALERT } from '@teachhub/modules/compliance';
 import {
   BILLING_DRAFTS_READY,
   INVOICE_ISSUED,
@@ -14,6 +15,7 @@ import {
   PaymentRecordedNotifier,
   PaymentReminderNotifier,
   SubscriptionNotifier,
+  TaxThresholdNotifier,
 } from '@teachhub/modules/notifications';
 import {
   SCHEDULE_CHANGED,
@@ -33,7 +35,7 @@ interface ScheduleChangedJob {
 
 /**
  * Consumer duy nhất của hàng đợi `events` (một hàng đợi chỉ nên có một processor), phân loại theo tên sự kiện:
- * `billing_drafts_ready` (S5-BE-05) → thông báo + push giáo viên; `invoice_issued` (S5-BE-07) → thông báo + push + email phụ huynh; `payment_recorded` (S6-BE-02) → biên nhận push + email phụ huynh; `payment_reminder` (S6-BE-04) → nhắc nợ push + email phụ huynh; `subscription_expiring` (nhắc gia hạn) và `subscription_activated` (Pro kích hoạt) → thông báo + push chủ tenant; `schedule_changed` (S4-BE-07) → chỉ ghi log.
+ * `billing_drafts_ready` (S5-BE-05) → thông báo + push giáo viên; `invoice_issued` (S5-BE-07) → thông báo + push + email phụ huynh; `payment_recorded` (S6-BE-02) → biên nhận push + email phụ huynh; `payment_reminder` (S6-BE-04) → nhắc nợ push + email phụ huynh; `subscription_expiring` (nhắc gia hạn) và `subscription_activated` (Pro kích hoạt) → thông báo + push chủ tenant; `tax_threshold_alert` (S8, US-9.5) → thông báo + push chủ tenant; `schedule_changed` (S4-BE-07) → chỉ ghi log.
  * shortcut (schedule_changed): chưa tạo thông báo cho phụ huynh. Loại `schedule_changed` chưa có trong oneOf notification
  * của hợp đồng (Owner chưa chốt), nên chưa tạo dòng `notifications` và chưa gửi push. Khi chốt: lấy phụ huynh có
  * `guardians.user_id` của học viên đang học lớp `payload.classId`, tạo thông báo idempotent theo `eventId` như báo vắng.
@@ -49,6 +51,7 @@ export class EventsProcessor extends WorkerHost {
     private readonly paymentRecorded: PaymentRecordedNotifier,
     private readonly paymentReminder: PaymentReminderNotifier,
     private readonly subscription: SubscriptionNotifier,
+    private readonly taxThreshold: TaxThresholdNotifier,
   ) {
     super();
   }
@@ -70,6 +73,8 @@ export class EventsProcessor extends WorkerHost {
       return this.subscription.handleExpiring(job.data);
     if (job.name === SUBSCRIPTION_ACTIVATED)
       return this.subscription.handleActivated(job.data);
+    if (job.name === TAX_THRESHOLD_ALERT)
+      return this.taxThreshold.handle(job.data);
     // Loại khác chưa có consumer: ném lỗi để job giữ lại ở hàng `failed`, không bị nuốt im lặng.
     if (job.name !== SCHEDULE_CHANGED) {
       return Promise.reject(new Error(`chưa có xử lý cho sự kiện ${job.name}`));

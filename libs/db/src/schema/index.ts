@@ -10,3 +10,4 @@ export * from './notifications.js';
 export * from './billing.js';
 export * from './invites.js';
 export * from './subscription.js';
+export * from './compliance.js';

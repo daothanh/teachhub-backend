@@ -362,8 +362,8 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
     test: 'webhook: sự kiện của tenant A không đổi gói của tenant B',
   },
   'POST /v1/classes/{id}/warning-acknowledgements': {
-    notApplicable:
-      'hợp đồng S7-CT-01, thân hàm trả 501 tới task backend classes Sprint 8; test chéo tenant làm cùng task đó',
+    file: 'compliance.e2e-spec.ts',
+    test: 'chéo tenant: B xác nhận lớp của A → 404, không ghi; phụ huynh 403; lớp lạ 404',
   },
   'POST /v1/family/invoices/{id}/payment-claims': {
     notApplicable:
@@ -398,56 +398,56 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
       'hợp đồng S7-CT-01, thân hàm trả 501 tới task backend files Sprint 8; test chéo tenant làm cùng task đó',
   },
   'GET /v1/compliance/checklist': {
-    notApplicable:
-      'hợp đồng S7-CT-01, thân hàm trả 501 tới task backend compliance Sprint 8; test chéo tenant làm cùng task đó',
+    file: 'compliance.e2e-spec.ts',
+    test: 'chéo tenant: checklist của A không lộ sang B và PATCH của B không đổi A',
   },
   'PATCH /v1/compliance/checklist/{itemKey}': {
-    notApplicable:
-      'hợp đồng S7-CT-01, thân hàm trả 501 tới task backend compliance Sprint 8; test chéo tenant làm cùng task đó',
+    file: 'compliance.e2e-spec.ts',
+    test: 'chéo tenant: checklist của A không lộ sang B và PATCH của B không đổi A',
   },
   'GET /v1/compliance/form02': {
     notApplicable:
-      'hợp đồng S7-CT-01, thân hàm trả 501 tới task backend compliance Sprint 8; test chéo tenant làm cùng task đó',
+      'hợp đồng S7-CT-01, thân hàm còn 501 (chờ luật sư/kế toán chốt Mẫu 02/03 và nghĩa vụ theo ngưỡng, xem contracts/CHANGELOG.md Sprint 8); test chéo tenant làm khi có thân hàm',
   },
   'POST /v1/compliance/form02/publish': {
     notApplicable:
-      'hợp đồng S7-CT-01, thân hàm trả 501 tới task backend compliance Sprint 8; test chéo tenant làm cùng task đó',
+      'hợp đồng S7-CT-01, thân hàm còn 501 (chờ luật sư/kế toán chốt Mẫu 02/03 và nghĩa vụ theo ngưỡng, xem contracts/CHANGELOG.md Sprint 8); test chéo tenant làm khi có thân hàm',
   },
   'GET /v1/compliance/school-declaration': {
     notApplicable:
-      'hợp đồng S7-CT-01, thân hàm trả 501 tới task backend compliance Sprint 8; test chéo tenant làm cùng task đó',
+      'hợp đồng S7-CT-01, thân hàm còn 501 (chờ luật sư/kế toán chốt Mẫu 02/03 và nghĩa vụ theo ngưỡng, xem contracts/CHANGELOG.md Sprint 8); test chéo tenant làm khi có thân hàm',
   },
   'PUT /v1/compliance/school-declaration': {
     notApplicable:
-      'hợp đồng S7-CT-01, thân hàm trả 501 tới task backend compliance Sprint 8; test chéo tenant làm cùng task đó',
+      'hợp đồng S7-CT-01, thân hàm còn 501 (chờ luật sư/kế toán chốt Mẫu 02/03 và nghĩa vụ theo ngưỡng, xem contracts/CHANGELOG.md Sprint 8); test chéo tenant làm khi có thân hàm',
   },
   'GET /v1/compliance/form03': {
     notApplicable:
-      'hợp đồng S7-CT-01, thân hàm trả 501 tới task backend compliance Sprint 8; test chéo tenant làm cùng task đó',
+      'hợp đồng S7-CT-01, thân hàm còn 501 (chờ luật sư/kế toán chốt Mẫu 02/03 và nghĩa vụ theo ngưỡng, xem contracts/CHANGELOG.md Sprint 8); test chéo tenant làm khi có thân hàm',
   },
   'POST /v1/compliance/form03/pdf': {
     notApplicable:
-      'hợp đồng S7-CT-01, thân hàm trả 501 tới task backend compliance Sprint 8; test chéo tenant làm cùng task đó',
+      'hợp đồng S7-CT-01, thân hàm còn 501 (chờ luật sư/kế toán chốt Mẫu 02/03 và nghĩa vụ theo ngưỡng, xem contracts/CHANGELOG.md Sprint 8); test chéo tenant làm khi có thân hàm',
   },
   'GET /v1/compliance/revenue-book': {
-    notApplicable:
-      'hợp đồng S7-CT-01, thân hàm trả 501 tới task backend compliance Sprint 8; test chéo tenant làm cùng task đó',
+    file: 'compliance.e2e-spec.ts',
+    test: 'chéo tenant: sổ doanh thu của A không lộ sang B',
   },
   'POST /v1/compliance/revenue-book/export': {
     notApplicable:
-      'hợp đồng S7-CT-01, thân hàm trả 501 tới task backend compliance Sprint 8; test chéo tenant làm cùng task đó',
+      'hợp đồng S7-CT-01, thân hàm còn 501 (chờ luật sư/kế toán chốt Mẫu 02/03 và nghĩa vụ theo ngưỡng, xem contracts/CHANGELOG.md Sprint 8); test chéo tenant làm khi có thân hàm',
   },
   'POST /v1/compliance/tax-alerts/{id}/dismiss': {
-    notApplicable:
-      'hợp đồng S7-CT-01, thân hàm trả 501 tới task backend compliance Sprint 8; test chéo tenant làm cùng task đó',
+    file: 'compliance.e2e-spec.ts',
+    test: 'đóng cảnh báo: 204, gọi lại vẫn 204, không sinh lại; tenant khác và id lạ → 404',
   },
   'GET /v1/legal-articles': {
-    notApplicable:
-      'hợp đồng S7-CT-01, thân hàm trả 501 tới task backend compliance Sprint 8; test chéo tenant làm cùng task đó',
+    file: 'compliance.e2e-spec.ts',
+    test: 'chỉ bài đã phát hành và đã duyệt lộ ra; nháp → 404; kèm dòng không thay tư vấn pháp lý; checklist trỏ tới bài',
   },
   'GET /v1/legal-articles/{slug}': {
-    notApplicable:
-      'hợp đồng S7-CT-01, thân hàm trả 501 tới task backend compliance Sprint 8; test chéo tenant làm cùng task đó',
+    file: 'compliance.e2e-spec.ts',
+    test: 'chỉ bài đã phát hành và đã duyệt lộ ra; nháp → 404; kèm dòng không thay tư vấn pháp lý; checklist trỏ tới bài',
   },
   'GET /v1/public/disclosures/{slug}': {
     notApplicable:

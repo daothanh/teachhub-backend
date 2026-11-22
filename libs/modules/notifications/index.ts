@@ -10,3 +10,4 @@ export * from './application/invoice-issued-notifier.service.js';
 export * from './application/payment-recorded-notifier.service.js';
 export * from './application/payment-reminder-notifier.service.js';
 export * from './application/subscription-notifier.service.js';
+export * from './application/tax-threshold-notifier.service.js';

@@ -15,6 +15,7 @@ export type PushType =
   | 'billing_ready'
   | 'subscription_expiring'
   | 'subscription_activated'
+  | 'tax_threshold_alert'
   | 'schedule_changed';
 
 const OPEN = 'Mở DayHoc để xem.';
@@ -62,6 +63,11 @@ export const PUSH_COPY: Record<PushType, PushCopy> = {
   subscription_activated: {
     title: 'Gói Pro đã kích hoạt',
     body: `Gói Pro của bạn đã được kích hoạt. ${OPEN}`,
+    channelId: 'general',
+  },
+  tax_threshold_alert: {
+    title: 'Nhắc theo dõi doanh thu năm',
+    body: `Doanh thu năm của bạn đã tới mốc cần theo dõi. ${OPEN}`,
     channelId: 'general',
   },
   schedule_changed: {
