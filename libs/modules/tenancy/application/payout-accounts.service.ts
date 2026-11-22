@@ -40,7 +40,7 @@ const toDto = (r: Row): PayoutAccount => ({
 });
 
 /**
- * Tài khoản nhận tiền của tenant (S5-BE-02). Lọc `tenant_id` tường minh, RLS (`payout_accounts_staff_all`) là lớp thứ hai;
+ * Tài khoản nhận tiền của tenant (S5-BE-02). Lọc `tenant_id` tường minh, RLS (`payout_accounts_tenant_owner_write`) là lớp thứ hai;
  * id của tenant khác → không thấy dòng → NOT_FOUND. Số tài khoản đầy đủ không trả ra ngoài.
  * Mọi thay đổi ghi `audit_logs` (writeAudit) với số tài khoản đã che.
  */
