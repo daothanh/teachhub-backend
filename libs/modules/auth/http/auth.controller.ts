@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Post, Req } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import {
   ApiBearerAuth,
@@ -8,6 +8,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { sql } from 'drizzle-orm';
+import type { FastifyRequest } from 'fastify';
 import {
   ApiErrors,
   AppException,
@@ -61,17 +62,18 @@ export class AuthController {
   @ApiOperation({
     summary: 'Gửi mã OTP 6 số tới email (US-0.1)',
     description:
-      'Mã sống 5 phút. Giới hạn 60 giây/lần và 5 lần/giờ mỗi email → 429 kèm `details.retryAfterSec` và header `Retry-After`.',
+      'Mã sống 5 phút. Giới hạn 60 giây/lần và 5 lần/giờ mỗi email → 429 kèm `details.retryAfterSec` và header `Retry-After`. IP đang bị khóa với email này (sai mã 5 lần) → 429 `RATE_LIMITED`; IP khác vẫn gửi được.',
   })
   @ApiNoContentResponse({
     description: 'Đã gửi (kể cả email chưa có tài khoản)',
   })
   @ApiErrors('VALIDATION_FAILED', 'RATE_LIMITED')
   async sendOtp(
+    @Req() req: FastifyRequest,
     @Body({ schema: otpSendRequestSchema }) body: OtpSendRequest,
   ): Promise<void> {
     const email = body.email.toLowerCase();
-    const code = await this.otp.issue(email, body.purpose);
+    const code = await this.otp.issue(email, req.ip, body.purpose);
     const what =
       body.purpose === 'delete_account'
         ? 'xác nhận xóa tài khoản'
@@ -93,15 +95,16 @@ export class AuthController {
     summary:
       'Đăng nhập bằng email OTP; email chưa có tài khoản = đăng ký (US-0.1 AC1)',
     description:
-      'Sai 5 lần → khóa 15 phút: 429 `OTP_LOCKED` kèm `details.retryAfterSec` (AC3).',
+      'Sai 5 lần từ cùng một IP (IPv6 gộp theo /64) → khóa IP đó với email này 15 phút: 429 `OTP_LOCKED` kèm `details.retryAfterSec` (AC3); IP khác không bị khóa. Mọi IP cộng lại đoán quá 20 lần cho một mã → mã bị hủy, trả 401 `OTP_INVALID`, phải gửi mã mới.',
   })
   @ApiOkResponse({ standardSchema: loginResponseSchema })
   @ApiErrors('VALIDATION_FAILED', 'OTP_INVALID', 'OTP_LOCKED', 'RATE_LIMITED')
   async login(
+    @Req() req: FastifyRequest,
     @Body({ schema: loginRequestSchema }) body: LoginRequest,
   ): Promise<LoginResponse> {
     const email = body.email.toLowerCase();
-    await this.otp.verify(email, body.code);
+    await this.otp.verify(email, body.code, req.ip);
     return this.signIn('email', email, email, null, true);
   }
 

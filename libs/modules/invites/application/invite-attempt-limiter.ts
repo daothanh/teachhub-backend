@@ -1,10 +1,9 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
 import type { Redis } from 'ioredis';
-import { AppException } from '@teachhub/core';
+import { AppException, ipBucket } from '@teachhub/core';
 import { TxService } from '@teachhub/db';
 import { REDIS } from '@teachhub/infra';
-import { ipBucket } from '../domain/ip-bucket.js';
 
 export type AttemptScope = 'accept' | 'preview';
 
