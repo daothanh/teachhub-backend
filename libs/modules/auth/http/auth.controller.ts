@@ -95,7 +95,7 @@ export class AuthController {
     summary:
       'Đăng nhập bằng email OTP; email chưa có tài khoản = đăng ký (US-0.1 AC1)',
     description:
-      'Sai 5 lần từ cùng một IP (IPv6 gộp theo /64) → khóa IP đó với email này 15 phút: 429 `OTP_LOCKED` kèm `details.retryAfterSec` (AC3); IP khác không bị khóa. Mọi IP cộng lại đoán quá 20 lần cho một mã → mã bị hủy, trả 401 `OTP_INVALID`, phải gửi mã mới.',
+      'Sai 5 lần từ cùng một IP (IPv6 gộp theo /64) → khóa IP đó với email này 15 phút: 429 `OTP_LOCKED` kèm `details.retryAfterSec` (AC3); IP khác không bị khóa. Mọi IP cộng lại sai quá 20 lần trong 1 giờ cho một email (không đặt lại khi gửi mã mới; nhập đúng thì đặt lại) → mã bị hủy và mọi lượt nhập trả 401 `OTP_INVALID` tới hết giờ đó.',
   })
   @ApiOkResponse({ standardSchema: loginResponseSchema })
   @ApiErrors('VALIDATION_FAILED', 'OTP_INVALID', 'OTP_LOCKED', 'RATE_LIMITED')
