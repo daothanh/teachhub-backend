@@ -2,6 +2,7 @@ import * as Sentry from '@sentry/nestjs';
 import type { Event } from '@sentry/nestjs';
 import { z } from 'zod';
 import { sentryEnvShape } from './config.js';
+import { loggable } from './global-exception.filter.js';
 
 // Header giữ lại (allowlist): mọi header khác (authorization, cookie, x-admin-secret, idempotency-key,
 // x-revenuecat-*…) bị bỏ, kể cả header sau này mới thêm.
@@ -73,7 +74,8 @@ export function captureJobFailure(
   Sentry.withScope((scope) => {
     scope.setTag('job', job?.name ?? 'unknown');
     scope.setTag('queue', job?.queueName ?? 'unknown');
-    Sentry.captureException(err);
+    // Lỗi truy vấn mang SQL + params (họ tên, SĐT…): dựng lại như log trước khi gửi ra ngoài.
+    Sentry.captureException(loggable(err));
   });
 }
 
