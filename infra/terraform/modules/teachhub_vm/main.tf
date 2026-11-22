@@ -83,10 +83,15 @@ resource "hcloud_server" "this" {
   firewall_ids = [hcloud_firewall.this.id]
   labels       = { env = var.env_label, app = "teachhub" }
 
-  # Khai `network_id` (không `subnet_id`): state chỉ lưu network_id, khai subnet_id làm plan luôn đòi gỡ/gắn lại mạng.
   network {
     network_id = hcloud_network.this.id
     ip         = var.server_ip
+  }
+
+  # Provider hcloud 1.70 đọc lại block network (alias_ips, mac_address, subnet_id) khác khai báo → plan luôn đòi
+  # gỡ/gắn lại mạng (#200 chưa hết). Mạng chỉ gắn lúc tạo máy; đổi mạng/IP có chủ đích thì `-replace` máy.
+  lifecycle {
+    ignore_changes = [network]
   }
 
   # Subnet phải có trước khi gắn máy.

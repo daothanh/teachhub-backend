@@ -1,11 +1,15 @@
 name: image
 
-# PR: build + quét Trivy (không push). Merge main: build, quét, push GHCR — CD dev (S0-OPS-02). Tag `v*`: thêm tag image `v<semver>` — CD staging (S3-OPS-01).
+# Không chạy trên PR (tiết kiệm phút Actions; Dockerfile hiếm đổi). Merge main: build, quét, push GHCR — CD dev (S0-OPS-02). Tag `v*`: thêm tag image `v<semver>` — CD staging (S3-OPS-01).
 on:
-  pull_request:
   push:
     branches: [main]
     tags: ['v*']
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'infra/**'
+  workflow_dispatch:
 
 concurrency:
   group: image-${{ github.ref }}
