@@ -9276,7 +9276,7 @@
     },
     "/v1/files/upload-urls": {
       "post": {
-        "description": "Kiểm quyền với `entityId` theo `purpose`, MIME và kích thước theo bảng giới hạn của `purpose` rồi cấp URL PUT 10 phút; tệp không đi qua API. MIME ngoài danh sách → 422 `FILE_TYPE_NOT_ALLOWED`; quá trần → 422 `FILE_TOO_LARGE`; `entityId` không thấy hoặc không có quyền → 404 `NOT_FOUND`. Gọi lại cùng `Idempotency-Key` trả lại cùng `fileId` và URL. Giới hạn 30 lần/phút/user.",
+        "description": "Kiểm quyền với `entityId` theo `purpose`, MIME và kích thước theo bảng giới hạn của `purpose` rồi cấp URL PUT 10 phút; tệp không đi qua API. MIME ngoài danh sách → 422 `FILE_TYPE_NOT_ALLOWED`; quá trần → 422 `FILE_TOO_LARGE`; `entityId` không thấy hoặc không có quyền → 404 `NOT_FOUND`. Gọi lại cùng `Idempotency-Key` trả lại cùng `fileId` và URL. Chưa đồng ý điều khoản → 403 `CONSENT_REQUIRED`. Giới hạn 30 lần/phút/user. URL ký cả `Content-Type` và số byte đã khai (`Content-Length`): client gửi khác loại hoặc nhiều/ít byte hơn thì kho S3 từ chối chữ ký (403 từ kho, không qua API), nên URL không dùng để đẩy tệp lớn hơn khai báo.",
         "operationId": "files_createUploadUrl",
         "parameters": [
           {
@@ -9385,7 +9385,7 @@
     },
     "/v1/files/{id}/complete": {
       "post": {
-        "description": "Server HEAD kho S3: không có đối tượng → 409 `CONFLICT_STALE` (client PUT lại bằng URL còn hạn hoặc xin URL mới); kích thước hoặc content-type lệch với khai báo → 422 `FILE_TOO_LARGE` hoặc `FILE_TYPE_NOT_ALLOWED` và xóa đối tượng. Chỉ người đã xin URL gọi được (người khác → 404). Gọi lại trên tệp đã `ready` vẫn 200 với bản ghi hiện tại.",
+        "description": "Server HEAD kho S3: không có đối tượng → 409 `CONFLICT_STALE` (client PUT lại bằng URL còn hạn hoặc xin URL mới); nhiều byte hơn khai báo hoặc quá trần → 422 `FILE_TOO_LARGE`, content-type lệch → 422 `FILE_TYPE_NOT_ALLOWED`, ít byte hơn khai báo → 422 `VALIDATION_FAILED` ở `sizeBytes`; cả ba xóa đối tượng (tệp vẫn `pending`, client xin URL mới). Chỉ người đã xin URL gọi được (người khác → 404). Gọi lại trên tệp đã `ready` vẫn 200 với bản ghi hiện tại.",
         "operationId": "files_complete",
         "parameters": [
           {
@@ -17362,7 +17362,7 @@
             "description": "Còn lời nhắc nào sẽ gửi không; `false` thì `disabledReason` khác null"
           },
           "disabledReason": {
-            "description": "`tenant_disabled` = tenant tắt nhắc, `student_disabled` = học viên tắt nhắc, `paid` = hóa đơn đã thu đủ, `void` = hóa đơn hủy",
+            "description": "`tenant_disabled` = tenant tắt nhắc, `student_disabled` = học viên tắt nhắc, `paid` = hóa đơn đã thu đủ hoặc đang chờ giáo viên xác nhận lần báo chuyển khoản (`pending_confirmation`, mốc nhắc tạm dừng và lập lại khi bị từ chối), `void` = hóa đơn hủy",
             "type": [
               "string",
               "null"
@@ -18117,7 +18117,7 @@
             "type": "string",
             "format": "uuid",
             "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-            "description": "Tệp biên lai: `purpose = receipt`, `entityId` = hóa đơn này, `status = ready`, do chính user này tải lên (US-7.7 AC1 \"đính ảnh\" bắt buộc). Sai điều kiện nào → 422 `VALIDATION_FAILED` ở `receiptFileId`"
+            "description": "Tệp biên lai: `purpose = receipt`, `entityId` = hóa đơn này, `status = ready`, do chính user này tải lên (US-7.7 AC1 \"đính ảnh\" bắt buộc). Mỗi biên lai chỉ dùng cho một lần báo (bị từ chối thì tải biên lai mới). Sai điều kiện nào → 422 `VALIDATION_FAILED` ở `receiptFileId`"
           },
           "amount": {
             "description": "VND phụ huynh nói đã chuyển; bỏ trống = `remainingAmount` của hóa đơn. Chỉ để giáo viên đối chiếu, giáo viên quyết số tiền ghi thu khi xác nhận",

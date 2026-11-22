@@ -6,6 +6,8 @@ import { EventsProcessor } from './events.processor.js';
 vi.mock('@teachhub/modules/billing', () => ({
   BILLING_DRAFTS_READY: 'billing_drafts_ready',
   INVOICE_ISSUED: 'invoice_issued',
+  PAYMENT_CLAIM_CREATED: 'payment_claim_created',
+  PAYMENT_CLAIM_REJECTED: 'payment_claim_rejected',
   PAYMENT_RECORDED: 'payment_recorded',
   PAYMENT_REMINDER: 'payment_reminder',
 }));
@@ -19,6 +21,7 @@ vi.mock('@teachhub/modules/schedule', () => ({
 vi.mock('@teachhub/modules/notifications', () => ({
   BillingReadyNotifier: class {},
   InvoiceIssuedNotifier: class {},
+  PaymentClaimNotifier: class {},
   PaymentRecordedNotifier: class {},
   PaymentReminderNotifier: class {},
   SubscriptionNotifier: class {},
@@ -34,7 +37,11 @@ describe('EventsProcessor: phân loại sự kiện outbox', () => {
     const reminder = vi.fn().mockResolvedValue(undefined);
     const expiring = vi.fn().mockResolvedValue(undefined);
     const activated = vi.fn().mockResolvedValue(undefined);
+    const claimCreated = vi.fn().mockResolvedValue(undefined);
+    const claimRejected = vi.fn().mockResolvedValue(undefined);
     return {
+      claimCreated,
+      claimRejected,
       handle,
       issued,
       paid,
@@ -47,6 +54,7 @@ describe('EventsProcessor: phân loại sự kiện outbox', () => {
         { handle: paid } as never,
         { handle: reminder } as never,
         { handleExpiring: expiring, handleActivated: activated } as never,
+        { handleCreated: claimCreated, handleRejected: claimRejected } as never,
       ),
     };
   };
@@ -92,6 +100,17 @@ describe('EventsProcessor: phân loại sự kiện outbox', () => {
     await p.process(job('subscription_activated', data));
     expect(activated).toHaveBeenCalledExactlyOnceWith(data);
     expect(reminder).not.toHaveBeenCalled();
+  });
+
+  it('payment_claim_created / payment_claim_rejected → PaymentClaimNotifier tương ứng, không đụng notifier khác', async () => {
+    const { p, claimCreated, claimRejected, paid } = make();
+    const data = { eventId: 'e', tenantId: 't', payload: {} };
+    await p.process(job('payment_claim_created', data));
+    expect(claimCreated).toHaveBeenCalledExactlyOnceWith(data);
+    expect(claimRejected).not.toHaveBeenCalled();
+    await p.process(job('payment_claim_rejected', data));
+    expect(claimRejected).toHaveBeenCalledExactlyOnceWith(data);
+    expect(paid).not.toHaveBeenCalled();
   });
 
   it('schedule_changed → chỉ ghi log, không gọi notifier', async () => {

@@ -141,13 +141,15 @@ export class DunningJob {
       const reason =
         f.status === 'void'
           ? 'void'
-          : !isDunnable(inv)
-            ? 'settled'
-            : !enabled
-              ? 'tenant_disabled'
-              : f.student_off
-                ? 'student_disabled'
-                : null;
+          : f.status === 'pending_confirmation'
+            ? 'claim_pending'
+            : !isDunnable(inv)
+              ? 'settled'
+              : !enabled
+                ? 'tenant_disabled'
+                : f.student_off
+                  ? 'student_disabled'
+                  : null;
       if (reason) {
         await cancel(ids, reason);
         continue;

@@ -136,7 +136,7 @@ export const invoiceDunningSchema = z
       .nullable()
       .meta({
         description:
-          '`tenant_disabled` = tenant tắt nhắc, `student_disabled` = học viên tắt nhắc, `paid` = hóa đơn đã thu đủ, `void` = hóa đơn hủy',
+          '`tenant_disabled` = tenant tắt nhắc, `student_disabled` = học viên tắt nhắc, `paid` = hóa đơn đã thu đủ hoặc đang chờ giáo viên xác nhận lần báo chuyển khoản (`pending_confirmation`, mốc nhắc tạm dừng và lập lại khi bị từ chối), `void` = hóa đơn hủy',
       }),
     steps: z.array(dunningStepSchema).meta({
       description:

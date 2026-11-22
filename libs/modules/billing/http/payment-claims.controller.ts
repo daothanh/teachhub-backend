@@ -1,4 +1,13 @@
-import { Body, Controller, Get, HttpCode, Param, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Req,
+  Res,
+} from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import {
   ApiBearerAuth,
@@ -7,9 +16,18 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { ApiErrors, ApiIdempotencyKey, AppException } from '@teachhub/core';
+import {
+  ApiErrors,
+  ApiIdempotencyKey,
+  Ctx,
+  type RequestContext,
+} from '@teachhub/core';
+import { TxService } from '@teachhub/db';
+import { Idempotency } from '@teachhub/infra';
 import { RequiresRole } from '@teachhub/modules/identity';
+import { PaymentClaimsService } from '../application/payment-claims.service.js';
 import {
   type CreatePaymentClaimRequest,
   createPaymentClaimRequestSchema,
@@ -25,12 +43,18 @@ import {
 
 const idParam = z.uuid();
 
-// Hợp đồng Sprint 8 (S7-CT-01), thân hàm 501 tới task backend `billing`. US-7.7 (P1).
+// Hợp đồng Sprint 8 (S7-CT-01); thân hàm S8-BE-claims. US-7.7 (P1).
 @ApiTags('billing')
 @ApiBearerAuth('bearer')
 @ApiErrors('UNAUTHENTICATED', 'TOKEN_EXPIRED', 'FORBIDDEN')
 @Controller()
 export class PaymentClaimsController {
+  constructor(
+    private readonly tx: TxService,
+    private readonly idem: Idempotency,
+    private readonly claims: PaymentClaimsService,
+  ) {}
+
   @Post('family/invoices/:id/payment-claims')
   @RequiresRole('parent')
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
@@ -52,11 +76,17 @@ export class PaymentClaimsController {
     'RATE_LIMITED',
   )
   create(
-    @Param('id', { schema: idParam }) _id: string,
+    @Ctx() ctx: RequestContext,
+    @Req() req: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @Param('id', { schema: idParam }) id: string,
     @Body({ schema: createPaymentClaimRequestSchema })
-    _body: CreatePaymentClaimRequest,
-  ): PaymentClaim {
-    throw new AppException('NOT_IMPLEMENTED');
+    body: CreatePaymentClaimRequest,
+  ): Promise<PaymentClaim> {
+    return this.idem.run(req, reply, ctx, async (t) => ({
+      status: 201,
+      body: await this.claims.create(t, ctx.userId!, id, body),
+    }));
   }
 
   @Get('invoices/:id/payment-claims')
@@ -68,8 +98,11 @@ export class PaymentClaimsController {
   })
   @ApiOkResponse({ standardSchema: paymentClaimListSchema })
   @ApiErrors('VALIDATION_FAILED', 'NOT_FOUND')
-  list(@Param('id', { schema: idParam }) _id: string): PaymentClaimList {
-    throw new AppException('NOT_IMPLEMENTED');
+  list(
+    @Ctx() ctx: RequestContext,
+    @Param('id', { schema: idParam }) id: string,
+  ): Promise<PaymentClaimList> {
+    return this.tx.run(ctx, (t) => this.claims.list(t, ctx.tenantId!, id));
   }
 
   @Post('payment-claims/:id/resolve')
@@ -86,10 +119,21 @@ export class PaymentClaimsController {
   @ApiIdempotencyKey()
   @ApiErrors('VALIDATION_FAILED', 'NOT_FOUND', 'CONFLICT_STALE', 'RATE_LIMITED')
   resolve(
-    @Param('id', { schema: idParam }) _id: string,
+    @Ctx() ctx: RequestContext,
+    @Req() req: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @Param('id', { schema: idParam }) id: string,
     @Body({ schema: resolvePaymentClaimRequestSchema })
-    _body: ResolvePaymentClaimRequest,
-  ): ResolvePaymentClaimResult {
-    throw new AppException('NOT_IMPLEMENTED');
+    body: ResolvePaymentClaimRequest,
+  ): Promise<ResolvePaymentClaimResult> {
+    return this.idem.run(req, reply, ctx, async (t) => ({
+      status: 200,
+      body: await this.claims.resolve(
+        t,
+        { tenantId: ctx.tenantId!, userId: ctx.userId! },
+        id,
+        body,
+      ),
+    }));
   }
 }
