@@ -9,6 +9,8 @@ export interface RevenueCatEventInput {
   expiration_at_ms?: number | null | undefined;
   event_timestamp_ms?: number | undefined;
   original_transaction_id?: string | undefined;
+  /** Lý do của `CANCELLATION`; `CUSTOMER_SUPPORT` = hoàn tiền, mất quyền ngay. */
+  cancel_reason?: string | undefined;
 }
 
 export interface CurrentSubscription {
@@ -46,7 +48,8 @@ export type IgnoreReason =
   | 'would_shorten'
   | 'ref_mismatch'
   | 'not_current_source'
-  | 'record_only';
+  | 'record_only'
+  | 'transfer';
 
 export type Decision =
   | { kind: 'ignore'; reason: IgnoreReason }
@@ -78,8 +81,10 @@ const ACTIVATING = new Set([
   'UNCANCELLATION',
   'NON_RENEWING_PURCHASE',
 ]);
-// Chỉ ghi sự kiện: gói giữ tới hết kỳ, `EXPIRATION` mới hạ gói.
+// Chỉ ghi sự kiện: gói giữ tới hết kỳ, `EXPIRATION` mới hạ gói (trừ CANCELLATION hoàn tiền, xem `REFUND_REASON`).
 const RECORD_ONLY = new Set(['CANCELLATION', 'BILLING_ISSUE']);
+// RevenueCat gửi CANCELLATION với lý do này khi hoàn tiền: người dùng mất quyền ngay, không chờ EXPIRATION.
+const REFUND_REASON = 'CUSTOMER_SUPPORT';
 const STORES = { APP_STORE: 'app_store', PLAY_STORE: 'play_store' } as const;
 
 export function decideRevenueCatEvent(
@@ -94,9 +99,13 @@ export function decideRevenueCatEvent(
   if (e.environment === 'SANDBOX' && ctx.ignoreSandbox)
     return ignore('sandbox');
   if (e.type === 'TEST') return ignore('test');
-  if (RECORD_ONLY.has(e.type)) return ignore('record_only');
+  // TRANSFER chuyển quyền giữa app_user_id (= tenant): không tự chuyển gói giữa tenant, cần xử lý tay.
+  if (e.type === 'TRANSFER') return ignore('transfer');
+  const refund = e.type === 'CANCELLATION' && e.cancel_reason === REFUND_REASON;
+  if (RECORD_ONLY.has(e.type) && !refund) return ignore('record_only');
+  const revoking = e.type === 'EXPIRATION' || refund;
   const activating = ACTIVATING.has(e.type);
-  if (!activating && e.type !== 'EXPIRATION') return ignore('type');
+  if (!activating && !revoking) return ignore('type');
 
   const source = STORES[e.store as keyof typeof STORES];
   if (!source) return ignore('store');
@@ -111,7 +120,7 @@ export function decideRevenueCatEvent(
   if (cur.lastAppliedAt && at.getTime() < cur.lastAppliedAt.getTime())
     return ignore('stale');
 
-  if (e.type === 'EXPIRATION') {
+  if (revoking) {
     // Chỉ hạ gói khi gói hiện tại đang trả phí bằng đúng kho này; sự kiện hết hạn của kho khác/đã thay bằng nguồn khác không đụng.
     if (cur.status !== 'active' || cur.source !== source)
       return ignore('not_current_source');
@@ -128,8 +137,11 @@ export function decideRevenueCatEvent(
       planCode: 'free',
       status: 'expired',
       source,
+      // Hoàn tiền cắt quyền ngay: `expiration_at_ms` của CANCELLATION có thể vẫn là cuối kỳ cũ.
       currentPeriodEnd:
-        e.expiration_at_ms != null ? new Date(e.expiration_at_ms) : ctx.now,
+        !refund && e.expiration_at_ms != null
+          ? new Date(e.expiration_at_ms)
+          : ctx.now,
       externalRef: cur.externalRef ?? e.product_id,
     };
   }
