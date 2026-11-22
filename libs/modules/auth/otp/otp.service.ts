@@ -145,7 +145,8 @@ export class OtpService {
       this.hash(email, code, purpose),
     );
     if (consumed === 1) {
-      await this.redis.del(attemptKey);
+      // Chủ email đã chứng minh có mã: xóa cả bộ đếm theo giờ, lượt sai của người khác không còn tính lên họ.
+      await this.redis.del(attemptKey, codeFailKey);
       return;
     }
     if (attempt >= OTP.maxFails) return lockNow();
