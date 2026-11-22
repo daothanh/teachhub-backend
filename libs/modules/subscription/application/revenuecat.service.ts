@@ -28,6 +28,7 @@ const WARN_REASONS = new Set([
   'expiry_too_far',
   'would_shorten',
   'ref_mismatch',
+  'transfer',
 ]);
 
 type Begin =
@@ -94,6 +95,7 @@ export class RevenueCatService {
       environment: e.environment ?? null,
       expiration_at_ms: e.expiration_at_ms ?? null,
       event_timestamp_ms: e.event_timestamp_ms ?? null,
+      cancel_reason: e.cancel_reason ?? null,
     };
     const now = new Date();
     const nonRenewingDays = new Map<string, number>();

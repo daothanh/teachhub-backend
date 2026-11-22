@@ -23,6 +23,13 @@ const emptyToUndefined = (v: unknown) => (v === '' ? undefined : v);
 
 const isLocalOrTest = (v: string | undefined) => v === 'local' || v === 'test';
 
+/** Timeout Postgres (ms) có mặc định; sai kiểu hoặc ≤ 0 (= tắt timeout) → không khởi động. */
+const dbTimeoutMs = (def: number) =>
+  z.preprocess(
+    emptyToUndefined,
+    z.coerce.number().int().min(1).max(3_600_000).default(def),
+  );
+
 /** Sentry (S0-OPS-03): chuỗi rỗng = tắt. Đọc cả trước khi Nest dựng (instrument.ts), nên tách riêng để dùng lại. */
 export const sentryEnvShape = {
   SENTRY_DSN: z.preprocess(emptyToUndefined, z.url().optional()),
@@ -50,6 +57,16 @@ export const envSchema = z
     DATABASE_URL: z.url(),
     /** Vai trò teachhub_worker (BYPASSRLS, Mục 4.5 R3) — chỉ `worker` cần. */
     WORKER_DATABASE_URL: z.url().optional(),
+    /** Timeout CSDL của `api` (request ngắn): một câu lệnh, chờ khóa, giao dịch bỏ ngỏ, mở kết nối. */
+    DB_STATEMENT_TIMEOUT_MS: dbTimeoutMs(15_000),
+    DB_LOCK_TIMEOUT_MS: dbTimeoutMs(5_000),
+    DB_IDLE_IN_TX_TIMEOUT_MS: dbTimeoutMs(30_000),
+    DB_CONNECT_TIMEOUT_MS: dbTimeoutMs(5_000),
+    /** Như trên cho `worker`: job chốt kỳ/đối soát/dọn dẹp chạy lâu hơn request nên rộng hơn. */
+    WORKER_DB_STATEMENT_TIMEOUT_MS: dbTimeoutMs(300_000),
+    WORKER_DB_LOCK_TIMEOUT_MS: dbTimeoutMs(30_000),
+    WORKER_DB_IDLE_IN_TX_TIMEOUT_MS: dbTimeoutMs(120_000),
+    WORKER_DB_CONNECT_TIMEOUT_MS: dbTimeoutMs(10_000),
     REDIS_URL: z.url(),
     /** Kho S3 (Mục 2.8): MinIO ở local/dev, R2 ở staging/production — chỉ khác giá trị. Bỏ trống = AWS S3. */
     S3_ENDPOINT: z.url().optional(),

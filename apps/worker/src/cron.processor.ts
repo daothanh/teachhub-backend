@@ -8,6 +8,8 @@ import { Injectable, type OnApplicationBootstrap } from '@nestjs/common';
 import type { Job, Queue } from 'bullmq';
 import { captureJobFailure } from '@teachhub/core';
 import {
+  EnsureAuditPartitionsJob,
+  JOB_ENSURE_AUDIT_PARTITIONS,
   JOB_PURGE_IDEMPOTENCY,
   PurgeIdempotencyKeysJob,
 } from '@teachhub/infra';
@@ -56,6 +58,7 @@ export class CronProcessor
     private readonly purgeDevices: PurgeStaleDevicesJob,
     private readonly lifecycle: SubscriptionLifecycleJob,
     private readonly taxThreshold: TaxThresholdJob,
+    private readonly auditPartitions: EnsureAuditPartitionsJob,
   ) {
     super();
   }
@@ -110,6 +113,12 @@ export class CronProcessor
       { pattern: '45 1 * * *', tz: TZ },
       { name: JOB_PURGE_STALE_DEVICES, opts },
     );
+    // Hằng ngày, idempotent: phân vùng tháng sau luôn có sẵn trước mốc đầu tháng (UTC).
+    await this.queue.upsertJobScheduler(
+      JOB_ENSURE_AUDIT_PARTITIONS,
+      { pattern: '15 1 * * *', tz: TZ },
+      { name: JOB_ENSURE_AUDIT_PARTITIONS, opts },
+    );
   }
 
   @OnWorkerEvent('failed')
@@ -138,6 +147,8 @@ export class CronProcessor
         return this.purge.run();
       case JOB_PURGE_STALE_DEVICES:
         return this.purgeDevices.run();
+      case JOB_ENSURE_AUDIT_PARTITIONS:
+        return this.auditPartitions.run(new Date());
       default:
         throw new Error(`Job không biết: ${job.name}`);
     }

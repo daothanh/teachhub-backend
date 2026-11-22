@@ -67,7 +67,7 @@ describe('xóa tài khoản: DELETE /v1/me', () => {
     const email = await emailOf(a.userId);
     const token = await t.tokenFor(a.userId);
 
-    const loginCode = await otp.issue(email, 'login');
+    const loginCode = await otp.issue(email, '127.0.0.1', 'login');
     const wrongPurpose = await del(token, loginCode);
     expect([wrongPurpose.statusCode, wrongPurpose.json().code]).toEqual([
       401,
@@ -76,7 +76,7 @@ describe('xóa tài khoản: DELETE /v1/me', () => {
     // Mã đăng nhập vẫn dùng được cho đăng nhập (lần xóa sai mục đích không tiêu mã).
     expect((await login(email, loginCode)).statusCode).toBe(200);
 
-    const deleteCode = await otp.issue(email, 'delete_account');
+    const deleteCode = await otp.issue(email, '127.0.0.1', 'delete_account');
     const asLogin = await login(email, deleteCode);
     expect([asLogin.statusCode, asLogin.json().code]).toEqual([
       401,
@@ -126,7 +126,7 @@ describe('xóa tài khoản: DELETE /v1/me', () => {
     const email = await emailOf(a.userId);
     // Đăng nhập thật để có identity + refresh token.
     const session = (
-      await login(email, await otp.issue(email, 'login'))
+      await login(email, await otp.issue(email, '127.0.0.1', 'login'))
     ).json();
     expect(session.user.id).toBe(a.userId);
     const token = session.access_token as string;
@@ -168,7 +168,7 @@ describe('xóa tài khoản: DELETE /v1/me', () => {
       [randomUUID(), a.userId],
     );
 
-    const code = await otp.issue(email, 'delete_account');
+    const code = await otp.issue(email, '127.0.0.1', 'delete_account');
     const blocked = await del(token, code);
     expect([blocked.statusCode, blocked.json().code]).toEqual([
       409,
@@ -265,7 +265,9 @@ describe('xóa tài khoản: DELETE /v1/me', () => {
 
     // Đăng nhập lại bằng email cũ → tài khoản mới, không thấy dữ liệu cũ.
     await resetCooldown(email);
-    const again = (await login(email, await otp.issue(email, 'login'))).json();
+    const again = (
+      await login(email, await otp.issue(email, '127.0.0.1', 'login'))
+    ).json();
     expect(again.user.id).not.toBe(a.userId);
     const mine = await t.app.inject({
       method: 'GET',
@@ -314,7 +316,10 @@ describe('xóa tài khoản: DELETE /v1/me', () => {
     );
 
     const token = await t.tokenFor(parent);
-    const res = await del(token, await otp.issue(email, 'delete_account'));
+    const res = await del(
+      token,
+      await otp.issue(email, '127.0.0.1', 'delete_account'),
+    );
     expect(res.statusCode, res.body).toBe(204);
 
     expect(
@@ -353,7 +358,8 @@ describe('xóa tài khoản: DELETE /v1/me', () => {
     ]);
     const token = await t.tokenFor(parent);
     expect(
-      (await del(token, await otp.issue(email, 'delete_account'))).statusCode,
+      (await del(token, await otp.issue(email, '127.0.0.1', 'delete_account')))
+        .statusCode,
     ).toBe(204);
 
     const roles = await t.app.inject({
@@ -448,7 +454,7 @@ describe('xóa tài khoản: DELETE /v1/me', () => {
       `update memberships set role = 'teacher' where user_id = $1`,
       [solo.userId],
     );
-    const code = await otp.issue(soloEmail, 'delete_account');
+    const code = await otp.issue(soloEmail, '127.0.0.1', 'delete_account');
     const blocked = await del(soloToken, code);
     expect([blocked.statusCode, blocked.json().details]).toEqual([
       409,
@@ -470,7 +476,7 @@ describe('xóa tài khoản: DELETE /v1/me', () => {
     const u = await seedTenant(t.worker);
     const email = await emailOf(u.userId);
     const session = (
-      await login(email, await otp.issue(email, 'login'))
+      await login(email, await otp.issue(email, '127.0.0.1', 'login'))
     ).json();
     // Giả lập token sống sót: đánh dấu xóa thẳng ở CSDL, không qua delete_account.
     await t.worker.query(`update users set deleted_at = now() where id = $1`, [

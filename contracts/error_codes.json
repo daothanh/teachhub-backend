@@ -24,7 +24,7 @@
   "INVOICE_IMMUTABLE": { "http": 409, "message": "Hóa đơn đã phát hành, không sửa được. Hãy hủy rồi tạo hóa đơn thay thế." },
   "INVOICE_NOT_PAYABLE": { "http": 409, "message": "Hóa đơn này không ghi thanh toán được (chưa phát hành, đã hủy hoặc đã thu đủ)." },
   "IDEMPOTENCY_IN_PROGRESS": { "http": 409, "message": "Yêu cầu đang được xử lý." },
-  "SESSION_HAS_ATTENDANCE": { "http": 409, "message": "Buổi học đã điểm danh, hãy sửa điểm danh trước khi hủy buổi." },
+  "SESSION_HAS_ATTENDANCE": { "http": 409, "message": "Buổi học đã điểm danh, hãy sửa điểm danh trước khi hủy hoặc dời buổi." },
   "INVITE_INVALID": { "http": 410, "message": "Lời mời không dùng được. Hãy nhắn giáo viên xin link mới." },
   "RATE_LIMITED": { "http": 429, "message": "Bạn thao tác quá nhanh, vui lòng thử lại sau." },
   "INVITE_CODE_LOCKED": { "http": 429, "message": "Bạn nhập sai mã mời quá nhiều lần, vui lòng thử lại sau." },

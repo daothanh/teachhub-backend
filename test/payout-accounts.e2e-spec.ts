@@ -32,7 +32,7 @@ describe('[money][tenant-isolation] payout accounts API', () => {
       `otp:hour:${createHash('sha256').update(email).digest('hex')}`,
       `otp:cooldown${purpose === 'login' ? '' : `:${purpose}`}:${createHash('sha256').update(email).digest('hex')}`,
     );
-    return otp.issue(email, purpose);
+    return otp.issue(email, '127.0.0.1', purpose);
   };
   const call = (
     who: { token: string },

@@ -41,6 +41,10 @@ export class SessionChangesService {
     const { s, className, tz } = await this.load(tx, tenantId, id);
     if (s.status === 'cancelled') throw new AppException('SESSION_CANCELLED');
     if (s.status !== 'planned') throw new AppException('CONFLICT_STALE');
+    // Như hủy: buổi đã lưu điểm danh thì không dời giờ, giáo viên phải sửa điểm danh trước.
+    if (await this.hasAttendance(tx, tenantId, id)) {
+      throw new AppException('SESSION_HAS_ATTENDANCE');
+    }
     const startsAt = this.future(body.startsAt, now);
     const length = body.durationMin
       ? body.durationMin * 60_000

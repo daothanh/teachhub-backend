@@ -9,7 +9,7 @@ const STALE_CLAIM_MS = 2 * 60_000;
 
 /**
  * Gửi email của một thông báo, idempotent theo `(notification, channel)` (dùng chung cho các notifier tiền).
- * `true` = xong (đã gửi, hoặc người khác đang gửi); `false` = lỗi gửi, cần thử lại.
+ * `true` = xong (đã gửi); `false` = lỗi gửi hoặc lần trước còn dở (dòng `queued` chưa quá hạn), cần thử lại.
  */
 export async function deliverEmail(
   deps: { tx: TxService; mailer: Mailer; log: Logger },
@@ -23,15 +23,23 @@ export async function deliverEmail(
     const ins = await tx.execute(sql`
       insert into notification_deliveries (id, notification_id, channel)
       values (${uuidv7()}, ${notificationId}, 'email') on conflict do nothing returning id`);
-    if (ins.rows.length) return true;
+    if (ins.rows.length) return 'claimed';
     const re = await tx.execute(sql`
       update notification_deliveries set status = 'queued', error = null, created_at = now()
       where notification_id = ${notificationId} and channel = 'email'
         and (status = 'failed' or (status = 'queued' and created_at < now() - ${STALE_CLAIM_MS} * interval '1 millisecond'))
       returning id`);
-    return re.rows.length > 0;
+    if (re.rows.length) return 'claimed';
+    const cur = (
+      await tx.execute<{ status: string }>(
+        sql`select status from notification_deliveries where notification_id = ${notificationId} and channel = 'email'`,
+      )
+    ).rows[0];
+    return cur?.status === 'sent' ? 'done' : 'busy';
   });
-  if (!claimed) return true;
+  if (claimed === 'done') return true;
+  // 'busy': worker trước có thể đã chết giữa chừng; trả false để BullMQ thử lại thay vì coi như xong.
+  if (claimed === 'busy') return false;
   let error: string | null = null;
   try {
     await mailer.send({ to, subject, text });

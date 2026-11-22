@@ -597,6 +597,21 @@ describe('subscription: gói Free/Pro', () => {
       expect((await mkClass(X, 'L5')).statusCode).toBe(201);
     });
 
+    it('CANCELLATION hoàn tiền (cancel_reason CUSTOMER_SUPPORT) → expired ngay', async () => {
+      const X = await mk();
+      await hook(X, { event_timestamp_ms: Date.now() - 5000 });
+      const r = await hook(X, {
+        type: 'CANCELLATION',
+        cancel_reason: 'CUSTOMER_SUPPORT',
+        event_timestamp_ms: Date.now(),
+      });
+      expect(r.json()).toEqual({ status: 'processed' });
+      expect(await sub(X)).toMatchObject({
+        plan_code: 'free',
+        status: 'expired',
+      });
+    });
+
     it('EXPIRATION của kho khác với nguồn thu hiện tại không hạ gói chuyển khoản', async () => {
       const X = await mk();
       await q(
@@ -638,6 +653,7 @@ describe('subscription: gói Free/Pro', () => {
       );
       expect(Object.keys(ev.payload).sort()).toEqual([
         'app_user_id',
+        'cancel_reason',
         'environment',
         'event_timestamp_ms',
         'expiration_at_ms',

@@ -93,7 +93,7 @@ export class PayoutAccountsController {
       status: 201,
       body: await this.accounts.create(
         t,
-        { tenantId: ctx.tenantId!, userId: ctx.userId! },
+        { tenantId: ctx.tenantId!, userId: ctx.userId!, ip: req.ip },
         body,
       ),
     }));
@@ -127,7 +127,7 @@ export class PayoutAccountsController {
       status: 200,
       body: await this.accounts.update(
         t,
-        { tenantId: ctx.tenantId!, userId: ctx.userId! },
+        { tenantId: ctx.tenantId!, userId: ctx.userId!, ip: req.ip },
         id,
         body,
       ),
@@ -165,7 +165,7 @@ export class PayoutAccountsController {
       status: 204,
       body: await this.accounts.remove(
         t,
-        { tenantId: ctx.tenantId!, userId: ctx.userId! },
+        { tenantId: ctx.tenantId!, userId: ctx.userId!, ip: req.ip },
         id,
         body?.otpCode,
       ),

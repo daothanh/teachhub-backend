@@ -660,11 +660,23 @@ describe('billing: job billing.close + API kỳ thu, hóa đơn, điều chỉnh
         { ...body, adjustmentReason: '   ' },
         { amount: body.amount, description: body.description },
         { ...body, amount: 0 },
+        { ...body, kind: 'surcharge' },
       ])
         expect(
           (await call(A, 'POST', `/invoices/${draftAn}/adjustments`, bad))
             .statusCode,
         ).toBe(422);
+      // Phụ thu âm: lỗi gắn đúng trường amount.
+      const negSurcharge = await call(
+        A,
+        'POST',
+        `/invoices/${draftAn}/adjustments`,
+        { ...body, kind: 'surcharge' },
+      );
+      expect(negSurcharge.json()).toMatchObject({
+        code: 'VALIDATION_FAILED',
+        errors: { amount: expect.any(Array) },
+      });
       expect(
         (await call(A, 'POST', `/invoices/${draftAn}/adjustments`, body, null))
           .statusCode,
@@ -728,6 +740,7 @@ describe('billing: job billing.close + API kỳ thu, hóa đơn, điều chỉnh
         totalAmount: 2_000_000,
         clampedAmount: 0,
         adjustment: {
+          kind: 'manual_adjustment',
           amount: -200_000,
           description: 'Giảm buổi học thử',
           reason: 'Thỏa thuận với phụ huynh',
@@ -746,8 +759,21 @@ describe('billing: job billing.close + API kỳ thu, hóa đơn, điều chỉnh
         totalAmount: 0,
         clampedAmount: 500_000,
       });
-      // Đã có 2 dòng điều chỉnh; thêm tới 20 rồi dòng thứ 21 bị từ chối.
-      for (let i = 0; i < 18; i++)
+      // Phụ thu (US-7.8) ghi đúng kind, không lưu lý do ở dòng (chỉ ở audit) và tính vào trần 20 dòng.
+      const sur = await call(A, 'POST', `/invoices/${draftAn}/adjustments`, {
+        amount: 1000,
+        description: 'Tài liệu',
+        adjustmentReason: 'Phụ thu tài liệu',
+        kind: 'surcharge',
+      });
+      expect(sur.statusCode, sur.body).toBe(201);
+      expect(sur.json().lines.at(-1)).toMatchObject({
+        kind: 'surcharge',
+        amount: 1000,
+        adjustmentReason: null,
+      });
+      // Đã có 3 dòng điều chỉnh; thêm tới 20 rồi dòng thứ 21 bị từ chối.
+      for (let i = 0; i < 17; i++)
         expect(
           (
             await call(A, 'POST', `/invoices/${draftAn}/adjustments`, {

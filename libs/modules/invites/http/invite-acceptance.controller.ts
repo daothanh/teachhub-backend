@@ -119,7 +119,7 @@ export class InviteAcceptanceController {
     summary: 'Phụ huynh nhận lời mời bằng mã ngắn (US-0.12 AC2, AC5)',
     description:
       'Cần đăng nhập. Cùng kết quả và cùng quy tắc đồng ý như `accept` (403 `CONSENT_REQUIRED` kiểm trước mã). Mã ngắn chỉ sống 48 giờ kể từ lúc tạo (token ở link sống 7 ngày). ' +
-      '`@Throttle` chỉ là giới hạn thô 10 lần/phút theo IP. Khóa thật là bộ đếm riêng trong service: 5 lần nhập sai (410) trong 15 phút theo user → 429 `INVITE_CODE_LOCKED` kèm `details.retryAfterSec` và header `Retry-After`; cùng quy tắc đếm theo IP (IPv6 theo /64) và một bộ đếm toàn cục chặn dò phân tán. ' +
+      '`@Throttle` chỉ là giới hạn thô 10 lần/phút theo IP. Khóa thật là bộ đếm riêng trong service: 5 lần nhập sai (410) trong 15 phút theo user → 429 `INVITE_CODE_LOCKED` kèm `details.retryAfterSec` và header `Retry-After`; cùng quy tắc đếm theo IP (IPv6 theo /64). Bộ đếm toàn cục (500 lần sai/15 phút) chặn dò phân tán nhưng khi vượt trần chỉ chặn user hoặc IP đã nhập sai ít nhất một lần trong cửa sổ; người chưa sai lần nào vẫn được thử. ' +
       'Lỗi 422 do sai định dạng và phát lại phản hồi 410 đã lưu (cùng `Idempotency-Key`) không tính vào bộ đếm. ' +
       'Mã sai, hết hạn, đã dùng, bị thu hồi → CÙNG 410 `INVITE_INVALID`. Không gian mã 32^8 (2^40) cộng TTL 48 giờ và ba lớp bộ đếm đủ cho MVP; nếu TL muốn dư an toàn thì nâng lên 10 ký tự, chỉ cần đổi `pattern` của `code` và `shortCode`.',
   })
