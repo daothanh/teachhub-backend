@@ -1,16 +1,21 @@
 import { createHash, randomInt } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import type { Redis } from 'ioredis';
-import { AppException } from '@teachhub/core';
+import { AppException, ipBucket } from '@teachhub/core';
 import { REDIS } from '@teachhub/infra';
 
-/** US-0.1 AC3 và S1-BE-04: mã sống 5 phút; gửi 60 giây/lần, 5 lần/giờ; sai 5 lần → khóa 15 phút. */
+/**
+ * US-0.1 AC3 và S1-BE-04: mã sống 5 phút; gửi 60 giây/lần, 5 lần/giờ; sai 5 lần → khóa 15 phút.
+ * Đếm sai và khóa theo (email, IP; IPv6 gộp /64): người lạ khóa được IP của chính họ, không khóa được email người khác.
+ * `maxFailsPerCode`: trần lượt đoán mọi IP cộng lại cho một mã; chạm trần thì hủy mã (không khóa), chặn dò mã qua nhiều IP.
+ */
 export const OTP = {
   ttlSec: 300,
   cooldownSec: 60,
   perHour: 5,
   maxFails: 5,
   lockSec: 900,
+  maxFailsPerCode: 20,
 } as const;
 
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
@@ -27,17 +32,21 @@ export class OtpService {
   constructor(@Inject(REDIS) private readonly redis: Redis) {}
 
   /**
-   * `code` và `cooldown` tách theo mục đích (khóa `login` giữ nguyên dạng cũ); `hour`, `fail`, `lock` dùng chung theo email:
-   * giới hạn gửi 5 lần/giờ và khóa sai mã tính chung cho mọi mục đích.
+   * `code`, `cooldown`, `cfail` tách theo mục đích (khóa `login` giữ nguyên dạng cũ); `hour` dùng chung theo email: giới hạn
+   * gửi 5 lần/giờ tính chung cho mọi mục đích.
    */
   private key(
-    kind: 'code' | 'cooldown' | 'hour' | 'fail' | 'lock',
+    kind: 'code' | 'cooldown' | 'hour' | 'cfail',
     email: string,
     purpose: OtpPurpose = 'login',
   ) {
-    const scoped =
-      (kind === 'code' || kind === 'cooldown') && purpose !== 'login';
+    const scoped = kind !== 'hour' && purpose !== 'login';
     return `otp:${kind}${scoped ? `:${purpose}` : ''}:${sha256(email)}`;
+  }
+
+  /** `fail`, `lock` theo (email, IP bucket), dùng chung cho mọi mục đích; IP cũng băm, không để thô trong Redis. */
+  private ipKey(kind: 'fail' | 'lock', email: string, ip: string | undefined) {
+    return `otp:${kind}:${sha256(email)}:${sha256(ipBucket(ip))}`;
   }
 
   /** Băm có mục đích: dù khóa Redis bị đọc nhầm, mã `login` không khớp mã `delete_account`. */
@@ -53,10 +62,14 @@ export class OtpService {
     });
   }
 
-  /** Sinh và lưu mã mới (thay mã cũ); trả mã để gửi email. */
-  async issue(email: string, purpose: OtpPurpose = 'login'): Promise<string> {
-    // Đang khóa thì không cấp mã mới: mã mới không mở khóa, chỉ thêm đường cho request đoán mã đang chạy dở.
-    const lock = this.key('lock', email);
+  /** Sinh và lưu mã mới (thay mã cũ); trả mã để gửi email. `ip`: IP client (đã qua trustProxy). */
+  async issue(
+    email: string,
+    ip: string | undefined,
+    purpose: OtpPurpose = 'login',
+  ): Promise<string> {
+    // IP này đang bị khóa với email thì không cấp mã mới: mã mới không mở khóa, chỉ thêm đường cho request đoán mã đang chạy dở.
+    const lock = this.ipKey('lock', email, ip);
     if ((await this.redis.ttl(lock)) > 0) return this.rateLimited(lock);
     const cooldown = this.key('cooldown', email, purpose);
     if (!(await this.redis.set(cooldown, '1', 'EX', OTP.cooldownSec, 'NX'))) {
@@ -68,6 +81,8 @@ export class OtpService {
     if (sent > OTP.perHour) return this.rateLimited(hour);
 
     const code = randomInt(0, 1_000_000).toString().padStart(6, '0');
+    // Mã mới có trần lượt đoán mới; số mã mỗi giờ đã chặn ở trên nên tổng lượt đoán mỗi giờ vẫn có hạn.
+    await this.redis.del(this.key('cfail', email, purpose));
     await this.redis.set(
       this.key('code', email, purpose),
       this.hash(email, code, purpose),
@@ -78,15 +93,17 @@ export class OtpService {
   }
 
   /**
-   * Đúng → mã bị hủy (dùng một lần). Sai/hết hạn → OTP_INVALID; lần thứ 5 sai → khóa 15 phút, OTP_LOCKED.
-   * Đếm lượt TRƯỚC khi so (INCR nguyên tử): request đoán mã gửi song song cũng chỉ được so tối đa 5 lần.
+   * Đúng → mã bị hủy (dùng một lần). Sai/hết hạn → OTP_INVALID; lần thứ 5 sai từ cùng IP → khóa IP đó với email này
+   * 15 phút, OTP_LOCKED. Mọi IP cộng lại quá `maxFailsPerCode` lượt → hủy mã, OTP_INVALID (phải xin mã mới).
+   * Đếm lượt TRƯỚC khi so (INCR nguyên tử): request đoán mã gửi song song cũng không vượt được các trần trên.
    */
   async verify(
     email: string,
     code: string,
+    ip: string | undefined,
     purpose: OtpPurpose = 'login',
   ): Promise<void> {
-    const lock = this.key('lock', email);
+    const lock = this.ipKey('lock', email, ip);
     const ensureUnlocked = async () => {
       const locked = await this.redis.ttl(lock);
       if (locked > 0) {
@@ -100,17 +117,25 @@ export class OtpService {
       throw new AppException('OTP_INVALID');
     }
 
-    const attemptKey = this.key('fail', email);
+    const attemptKey = this.ipKey('fail', email, ip);
     const attempt = await this.redis.incr(attemptKey);
     await this.redis.expire(attemptKey, OTP.lockSec, 'NX');
     // Bộ đếm hết hạn cùng khóa (không xóa khi khóa): request đang chạy dở không được đếm lại từ đầu.
+    // Không hủy mã khi khóa: khóa chỉ chặn IP này, chủ email ở IP khác vẫn dùng được mã của mình.
     const lockNow = async () => {
       await this.redis.set(lock, '1', 'EX', OTP.lockSec);
-      await this.redis.del(codeKey);
       throw new AppException('OTP_LOCKED', { retryAfterSec: OTP.lockSec });
     };
     if (attempt > OTP.maxFails) return lockNow();
     await ensureUnlocked();
+
+    const codeFailKey = this.key('cfail', email, purpose);
+    const codeAttempt = await this.redis.incr(codeFailKey);
+    await this.redis.expire(codeFailKey, OTP.lockSec, 'NX');
+    if (codeAttempt > OTP.maxFailsPerCode) {
+      await this.redis.del(codeKey);
+      throw new AppException('OTP_INVALID');
+    }
 
     const consumed = await this.redis.eval(
       CONSUME_IF_MATCH,

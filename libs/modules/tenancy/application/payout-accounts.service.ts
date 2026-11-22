@@ -63,7 +63,7 @@ export class PayoutAccountsService {
 
   async create(
     tx: Tx,
-    ctx: { tenantId: string; userId: string },
+    ctx: { tenantId: string; userId: string; ip: string | undefined },
     body: CreatePayoutAccountRequest,
   ): Promise<PayoutAccount> {
     const existing = await this.lockAndLoad(tx, ctx.tenantId);
@@ -73,7 +73,7 @@ export class PayoutAccountsService {
       });
     }
     // Kiểm điều kiện chặn trước khi tiêu OTP: bị chặn thì mã còn dùng lại được.
-    await this.verifyOtp(tx, ctx.userId, body.otpCode);
+    await this.verifyOtp(tx, ctx, body.otpCode);
     const isPrimary = existing.length === 0 || body.isPrimary === true;
     if (isPrimary) await this.clearPrimary(tx, ctx.tenantId, existing);
     const [row] = await tx
@@ -96,7 +96,7 @@ export class PayoutAccountsService {
 
   async update(
     tx: Tx,
-    ctx: { tenantId: string; userId: string },
+    ctx: { tenantId: string; userId: string; ip: string | undefined },
     id: string,
     body: UpdatePayoutAccountRequest,
   ): Promise<PayoutAccount> {
@@ -120,7 +120,7 @@ export class PayoutAccountsService {
     // Đổi nơi nhận tiền (số, ngân hàng, hoặc chuyển cờ chính sang tài khoản này) cần OTP.
     if ('bankBin' in patch || 'accountNo' in patch || switching) {
       if (!body.otpCode) needOtp();
-      await this.verifyOtp(tx, ctx.userId, body.otpCode!);
+      await this.verifyOtp(tx, ctx, body.otpCode!);
     }
     if (switching) await this.clearPrimary(tx, ctx.tenantId, rows);
     const [row] = await tx
@@ -139,7 +139,7 @@ export class PayoutAccountsService {
 
   async remove(
     tx: Tx,
-    ctx: { tenantId: string; userId: string },
+    ctx: { tenantId: string; userId: string; ip: string | undefined },
     id: string,
     otpCode: string | undefined,
   ): Promise<void> {
@@ -151,7 +151,7 @@ export class PayoutAccountsService {
     // Xóa tài khoản chính khi còn tài khoản khác = chuyển nơi nhận tiền sang tài khoản kia: cần OTP.
     if (cur.isPrimary && next) {
       if (!otpCode) needOtp();
-      await this.verifyOtp(tx, ctx.userId, otpCode!);
+      await this.verifyOtp(tx, ctx, otpCode!);
     }
     await tx
       .delete(payoutAccounts)
@@ -230,13 +230,17 @@ export class PayoutAccountsService {
     });
   }
 
-  private async verifyOtp(tx: Tx, userId: string, code: string): Promise<void> {
+  private async verifyOtp(
+    tx: Tx,
+    ctx: { userId: string; ip: string | undefined },
+    code: string,
+  ): Promise<void> {
     const [u] = await tx
       .select({ email: users.email })
       .from(users)
-      .where(eq(users.id, userId));
+      .where(eq(users.id, ctx.userId));
     // Không có email thì không có hộp thư nhận OTP.
     if (!u?.email) throw new AppException('OTP_INVALID');
-    await this.otp.verify(u.email, code, 'payout_account');
+    await this.otp.verify(u.email, code, ctx.ip, 'payout_account');
   }
 }
