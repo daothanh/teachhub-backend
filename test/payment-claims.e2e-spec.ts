@@ -733,6 +733,88 @@ describe('payment_claims: báo đã chuyển khoản (US-7.7)', () => {
     expect(await reconcileMismatches()).toBe(0);
   });
 
+  it('kỳ sau phát hành khi hóa đơn còn chờ xác nhận: không kết chuyển; xác nhận thu được ở hóa đơn cũ; bị từ chối thì lần phát hành kế tiếp mới kết chuyển', async () => {
+    const D = await f.mkTeacher('Cô Dung');
+    const P4 = await f.mkParent(true, 'Phụ huynh Bốn');
+    const c4 = await f.child(D, P4, 'Đỗ An');
+    const c5 = await f.child(D, P4, 'Đỗ Bình');
+    await q(
+      `insert into payout_accounts (id, tenant_id, bank_bin, account_no, account_name, is_primary) values ($1, $2, '970436', '0011001234567', 'GV', true)`,
+      [randomUUID(), D.tenantId],
+    );
+    /** Nháp kỳ `month` của `c` có một dòng phát sinh 500.000 rồi phát hành qua API; trả hóa đơn sau phát hành. */
+    const issueNext = async (c: Child, month: string) => {
+      const [periodId, invoiceId] = [randomUUID(), randomUUID()];
+      await q(
+        `insert into billing_periods (id, tenant_id, period_month, close_date, due_date) values ($1, $2, $3, $3, ($3::date + 9))`,
+        [periodId, D.tenantId, month],
+      );
+      await q(
+        `insert into invoices (id, tenant_id, period_id, student_id, total_amount) values ($1, $2, $3, $4, 500000)`,
+        [invoiceId, D.tenantId, periodId, c.studentId],
+      );
+      await q(
+        `insert into invoice_lines (id, tenant_id, invoice_id, position, kind, description, amount) values ($1, $2, $3, 1, 'monthly', 'Học phí tháng', 500000)`,
+        [randomUUID(), D.tenantId, invoiceId],
+      );
+      const r = await f.call(
+        D.token,
+        'POST',
+        `/billing-periods/${periodId}/issue`,
+        { invoiceIds: [invoiceId] },
+      );
+      expect(r.statusCode, r.body).toBe(200);
+      expect(r.json().issuedCount).toBe(1);
+      const lines = await q(
+        `select kind, amount::int from invoice_lines where invoice_id = $1 order by position`,
+        [invoiceId],
+      );
+      return { ...(await inv(invoiceId)), lines };
+    };
+
+    // Xác nhận: kỳ 2 phát hành trước khi duyệt không lấy nợ kỳ 1; duyệt thu đủ ở kỳ 1.
+    const a = await setup(c4, P4);
+    const ca = (
+      await claim(P4, a.invoiceId, { receiptFileId: a.receiptFileId })
+    ).json() as Claim;
+    const n1 = await issueNext(c4, '2099-01-01');
+    expect(n1.lines.map((l: { kind: string }) => l.kind)).toEqual(['monthly']);
+    expect(Number(n1.total_amount)).toBe(500_000);
+    expect(Number((await inv(a.invoiceId)).carried_amount)).toBe(0);
+    const ok = await resolve(D, ca.id, { decision: 'confirm' });
+    expect(ok.statusCode, ok.body).toBe(200);
+    expect((ok.json() as Resolved).result).toMatchObject({
+      status: 'paid',
+      paidAmount: TOTAL,
+      remainingAmount: 0,
+    });
+
+    // Từ chối: hóa đơn về issued, kỳ phát hành kế tiếp kết chuyển đủ nợ (cùng nợ của kỳ 2 chưa thu).
+    const b = await setup(c5, P4);
+    const cb = (
+      await claim(P4, b.invoiceId, { receiptFileId: b.receiptFileId })
+    ).json() as Claim;
+    const n2 = await issueNext(c5, '2099-02-01');
+    expect(n2.lines.map((l: { kind: string }) => l.kind)).toEqual(['monthly']);
+    expect(
+      (
+        await resolve(D, cb.id, {
+          decision: 'reject',
+          reason: 'Chưa thấy tiền về',
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect((await inv(b.invoiceId)).status).toBe('issued');
+    const n3 = await issueNext(c5, '2099-03-01');
+    expect(n3.lines).toEqual([
+      { kind: 'monthly', amount: 500_000 },
+      { kind: 'carry_over', amount: TOTAL + 500_000 },
+    ]);
+    expect(Number(n3.total_amount)).toBe(1_000_000 + TOTAL);
+    expect(Number((await inv(b.invoiceId)).carried_amount)).toBe(TOTAL);
+    expect(await reconcileMismatches()).toBe(0);
+  });
+
   it('chéo tenant / vai trò: giáo viên tenant khác 404 ở list và resolve; id lạ 404; claim không đổi', async () => {
     const a = await setup(c1, P1);
     const c = (

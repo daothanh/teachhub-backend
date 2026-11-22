@@ -1,11 +1,24 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CARRY_OPEN_STATUSES,
   diffSessionCharges,
   formatVnd,
   planCarryOver,
   prevAdjustmentDescription,
 } from './carry-over.js';
 import { calculateInvoice } from './invoice-calculator.js';
+
+describe('CARRY_OPEN_STATUSES (US-7.6 × US-7.7)', () => {
+  it('hóa đơn chờ xác nhận báo chuyển khoản không bị kết chuyển; nháp, đã thu, hủy cũng không', () => {
+    expect(CARRY_OPEN_STATUSES).not.toContain('pending_confirmation');
+    for (const s of ['draft', 'paid', 'void'])
+      expect(CARRY_OPEN_STATUSES).not.toContain(s);
+  });
+
+  it('bị từ chối thì hóa đơn về issued/partially_paid và được kết chuyển ở lần phát hành sau', () => {
+    expect(CARRY_OPEN_STATUSES).toEqual(['issued', 'partially_paid']);
+  });
+});
 
 // Test vector US-7.6 AC1–AC4, US-3.3 AC4 (S6-BE-03). Mô hình: xem đầu carry-over.ts.
 describe('planCarryOver (US-7.6)', () => {
