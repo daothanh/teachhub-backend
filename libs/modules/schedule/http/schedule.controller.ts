@@ -111,7 +111,7 @@ export class ScheduleController {
   @ApiOperation({
     summary: 'Dời buổi học (US-2.2 AC1)',
     description:
-      'Chỉ buổi `planned`: buổi đã dạy → 409 `CONFLICT_STALE`, buổi đã hủy → 409 `SESSION_CANCELLED`. `startsAt` ở quá khứ → 422 `VALIDATION_FAILED`. ' +
+      'Chỉ buổi `planned`: buổi đã dạy → 409 `CONFLICT_STALE`, buổi đã hủy → 409 `SESSION_CANCELLED`, buổi đã có điểm danh → 409 `SESSION_HAS_ATTENDANCE` (sửa điểm danh trước). `startsAt` ở quá khứ → 422 `VALIDATION_FAILED`. ' +
       'Ghi `schedule_changed` vào outbox, phụ huynh của lớp nhận thông báo (loại `schedule_changed`, `change = rescheduled`) trong ≤ 1 phút. Buổi của tenant khác → 404.',
   })
   @ApiOkResponse({ standardSchema: sessionSchema })
@@ -121,6 +121,7 @@ export class ScheduleController {
     'NOT_FOUND',
     'CONFLICT_STALE',
     'SESSION_CANCELLED',
+    'SESSION_HAS_ATTENDANCE',
   )
   reschedule(
     @Ctx() ctx: RequestContext,

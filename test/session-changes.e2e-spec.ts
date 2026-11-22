@@ -196,7 +196,7 @@ describe('session changes: reschedule / cancel / makeup', () => {
     expect((await events(A)).length).toBe(before + 1);
   });
 
-  it('AC2: buổi đã có điểm danh (kể cả đã dạy) → 409 SESSION_HAS_ATTENDANCE, buổi giữ nguyên', async () => {
+  it('AC2: buổi đã có điểm danh (kể cả đã dạy) → hủy/dời 409 SESSION_HAS_ATTENDANCE, buổi giữ nguyên', async () => {
     const classId = await newClass(A);
     const [s1, s2] = await list(A, classId);
     const student = randomUUID();
@@ -215,6 +215,12 @@ describe('session changes: reschedule / cancel / makeup', () => {
       409,
       'SESSION_HAS_ATTENDANCE',
     ]);
+    // dời buổi planned đã có điểm danh cũng bị chặn, giờ giữ nguyên
+    const moved = await reschedule(A, s1!.id, { startsAt: at(6) });
+    expect([moved.statusCode, moved.json().code]).toEqual([
+      409,
+      'SESSION_HAS_ATTENDANCE',
+    ]);
     // buổi đã dạy chưa có dòng điểm danh cũng bị chặn
     await t.worker.query(
       `update sessions set status = 'taught' where id = $1`,
@@ -227,6 +233,7 @@ describe('session changes: reschedule / cancel / makeup', () => {
       id: s1!.id,
       status: 'planned',
       cancelReason: null,
+      startsAt: s1!.startsAt,
     });
     expect((await events(A)).length).toBe(before);
   });

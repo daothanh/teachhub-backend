@@ -2,6 +2,10 @@
 
 `contracts/openapi.json` sinh từ schema zod bằng `pnpm openapi:gen`; file này ghi endpoint thêm mới theo sprint. Chỉ thêm, không đổi endpoint cũ (CI chặn bằng `oasdiff`).
 
+## Dời buổi đã điểm danh (chỉ đổi hành vi server và mô tả, không đổi schema; `oasdiff` sạch)
+
+- `POST /sessions/{id}/reschedule`: buổi `planned` đã có điểm danh → 409 `SESSION_HAS_ATTENDANCE` (như hủy), buổi giữ nguyên, không ghi outbox. App sửa điểm danh trước rồi mới dời. Thông điệp mã lỗi trong `error_codes.json` nói cả "hủy hoặc dời".
+
 ## Billing: việc theo dõi sau S5 (issue #179, chỉ đổi hành vi server, không đổi schema hay endpoint; `oasdiff` sạch)
 
 - Trạng thái học viên khi chốt kỳ xét THEO KỲ từ lịch sử đổi trạng thái: bảng mới `student_status_history` (migration `0034_student_status_history`; trigger ghi một dòng mỗi lần `students.status` đổi thật, RLS như `students`). Trạng thái cuối kỳ = `to_status` của dòng cuối có ngày đổi (giờ tenant) ≤ cuối kỳ; không có dòng nào ≤ cuối kỳ thì `from_status` của dòng đầu; không có lịch sử (học viên đổi trước migration) thì trạng thái hiện tại. Học viên chuyển `left`/`paused` sau cuối kỳ M (giữa ngày 1 tháng M+1 và ngày chốt) vẫn bị tính kỳ M; `left` từ ngày L: chỉ tính buổi trước L (L = lần chuyển sang `left` gần nhất ≤ cuối kỳ); `paused`: chỉ buổi theo buổi đã dạy. Đổi nhiều lần (vd. active → paused 10/02 → active 05/03) xét đúng theo từng kỳ. Giới hạn: xét tại cuối kỳ, đổi rồi đổi lại ngay trong kỳ coi như không đổi.
