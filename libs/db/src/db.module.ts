@@ -13,6 +13,11 @@ import { DB, DB_POOL } from './tokens.js';
 import { TxService } from './tx.service.js';
 
 type UrlKey = 'DATABASE_URL' | 'WORKER_DATABASE_URL';
+type TimeoutKey =
+  | 'DB_STATEMENT_TIMEOUT_MS'
+  | 'DB_LOCK_TIMEOUT_MS'
+  | 'DB_IDLE_IN_TX_TIMEOUT_MS'
+  | 'DB_CONNECT_TIMEOUT_MS';
 
 @Module({})
 export class DbModule implements OnApplicationShutdown {
@@ -30,7 +35,20 @@ export class DbModule implements OnApplicationShutdown {
           useFactory: (config: ConfigService<Env, true>) => {
             const url = config.get(urlKey, { infer: true });
             if (!url) throw new Error(`Thiếu biến môi trường ${urlKey}`);
-            return new pg.Pool({ connectionString: url, max: 10 });
+            // Mỗi tiến trình một bộ timeout: worker đọc biến tiền tố WORKER_ (cùng backend.env với api).
+            const ms = (k: TimeoutKey) =>
+              config.get(
+                urlKey === 'WORKER_DATABASE_URL' ? `WORKER_${k}` : k,
+                { infer: true },
+              );
+            return new pg.Pool({
+              connectionString: url,
+              max: 10,
+              statement_timeout: ms('DB_STATEMENT_TIMEOUT_MS'),
+              lock_timeout: ms('DB_LOCK_TIMEOUT_MS'),
+              idle_in_transaction_session_timeout: ms('DB_IDLE_IN_TX_TIMEOUT_MS'),
+              connectionTimeoutMillis: ms('DB_CONNECT_TIMEOUT_MS'),
+            });
           },
         },
         {

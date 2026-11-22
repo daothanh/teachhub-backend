@@ -104,8 +104,34 @@ export class PurgeIdempotencyKeysJob {
   }
 }
 
+export const JOB_ENSURE_AUDIT_PARTITIONS = 'infra.ensure-audit-partitions';
+
+/**
+ * Tạo trước phân vùng `audit_logs` của tháng (UTC) chứa `now` và tháng kế tiếp; đã có thì bỏ qua (idempotent).
+ * Để `audit_insert` trong giao dịch người dùng không phải tạo phân vùng (khóa ACCESS EXCLUSIVE bảng cha) ngày đầu tháng.
+ */
+@Injectable()
+export class EnsureAuditPartitionsJob {
+  constructor(
+    private readonly tx: TxService,
+    private readonly runs: JobRuns,
+  ) {}
+
+  run(now: Date): Promise<number> {
+    return this.runs.track(JOB_ENSURE_AUDIT_PARTITIONS, async () => {
+      await this.tx.run({ userId: null }, (t) =>
+        t.execute(
+          sql`select app_private.ensure_audit_partition(${now.toISOString()}::timestamptz),
+                     app_private.ensure_audit_partition(${now.toISOString()}::timestamptz + interval '1 month')`,
+        ),
+      );
+      return 2;
+    });
+  }
+}
+
 @Module({
-  providers: [JobRuns, PurgeIdempotencyKeysJob],
-  exports: [JobRuns, PurgeIdempotencyKeysJob],
+  providers: [JobRuns, PurgeIdempotencyKeysJob, EnsureAuditPartitionsJob],
+  exports: [JobRuns, PurgeIdempotencyKeysJob, EnsureAuditPartitionsJob],
 })
 export class JobsModule {}

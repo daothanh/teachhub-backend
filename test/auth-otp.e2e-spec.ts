@@ -222,6 +222,32 @@ describe('email OTP: /v1/auth/otp/send, /v1/auth/login', () => {
     expect((await login(email, await lastCode(email))).statusCode).toBe(200);
   });
 
+  it('khóa theo IP: người lạ sai 5 lần chỉ khóa IP của họ, chủ email ở IP khác vẫn gửi mã và đăng nhập được', async () => {
+    const email = 'khoa.ip@example.com';
+    const from = (ip: string, url: string, payload: object) =>
+      app.inject({ method: 'POST', url, payload, remoteAddress: ip });
+    await from('198.51.100.9', '/v1/auth/otp/send', { email });
+    const code = await lastCode(email);
+    for (let i = 0; i < 5; i++)
+      await from('203.0.113.7', '/v1/auth/login', {
+        method: 'email_otp',
+        email,
+        code: wrong(code),
+      });
+    const blocked = await from('203.0.113.7', '/v1/auth/login', {
+      method: 'email_otp',
+      email,
+      code,
+    });
+    expect(blocked.json().code).toBe('OTP_LOCKED');
+    const owner = await from('198.51.100.9', '/v1/auth/login', {
+      method: 'email_otp',
+      email,
+      code,
+    });
+    expect(owner.statusCode).toBe(200);
+  });
+
   it('AC3: mã hết hạn → OTP_INVALID', async () => {
     const email = 'het.han@example.com';
     await send(email);

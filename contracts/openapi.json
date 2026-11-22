@@ -54,7 +54,7 @@
     },
     "/v1/auth/otp/send": {
       "post": {
-        "description": "Mã sống 5 phút. Giới hạn 60 giây/lần và 5 lần/giờ mỗi email → 429 kèm `details.retryAfterSec` và header `Retry-After`.",
+        "description": "Mã sống 5 phút. Giới hạn 60 giây/lần và 5 lần/giờ mỗi email → 429 kèm `details.retryAfterSec` và header `Retry-After`. IP đang bị khóa với email này (sai mã 5 lần) → 429 `RATE_LIMITED`; IP khác vẫn gửi được.",
         "operationId": "auth_sendOtp",
         "parameters": [],
         "requestBody": {
@@ -122,7 +122,7 @@
     },
     "/v1/auth/login": {
       "post": {
-        "description": "Sai 5 lần → khóa 15 phút: 429 `OTP_LOCKED` kèm `details.retryAfterSec` (AC3).",
+        "description": "Sai 5 lần từ cùng một IP (IPv6 gộp theo /64) → khóa IP đó với email này 15 phút: 429 `OTP_LOCKED` kèm `details.retryAfterSec` (AC3); IP khác không bị khóa. Mọi IP cộng lại đoán quá 20 lần cho một mã → mã bị hủy, trả 401 `OTP_INVALID`, phải gửi mã mới.",
         "operationId": "auth_login",
         "parameters": [],
         "requestBody": {
@@ -3734,7 +3734,7 @@
     },
     "/v1/sessions/{id}/reschedule": {
       "post": {
-        "description": "Chỉ buổi `planned`: buổi đã dạy → 409 `CONFLICT_STALE`, buổi đã hủy → 409 `SESSION_CANCELLED`. `startsAt` ở quá khứ → 422 `VALIDATION_FAILED`. Ghi `schedule_changed` vào outbox, phụ huynh của lớp nhận thông báo (loại `schedule_changed`, `change = rescheduled`) trong ≤ 1 phút. Buổi của tenant khác → 404.",
+        "description": "Chỉ buổi `planned`: buổi đã dạy → 409 `CONFLICT_STALE`, buổi đã hủy → 409 `SESSION_CANCELLED`, buổi đã có điểm danh → 409 `SESSION_HAS_ATTENDANCE` (sửa điểm danh trước). `startsAt` ở quá khứ → 422 `VALIDATION_FAILED`. Ghi `schedule_changed` vào outbox, phụ huynh của lớp nhận thông báo (loại `schedule_changed`, `change = rescheduled`) trong ≤ 1 phút. Buổi của tenant khác → 404.",
         "operationId": "schedule_reschedule",
         "parameters": [
           {
@@ -3810,7 +3810,7 @@
             }
           },
           "409": {
-            "description": "CONFLICT_STALE, SESSION_CANCELLED\n\nIDEMPOTENCY_IN_PROGRESS",
+            "description": "CONFLICT_STALE, SESSION_CANCELLED, SESSION_HAS_ATTENDANCE\n\nIDEMPOTENCY_IN_PROGRESS",
             "content": {
               "application/json": {
                 "schema": {
@@ -6082,7 +6082,7 @@
     },
     "/v1/invites/redeem-code": {
       "post": {
-        "description": "Cần đăng nhập. Cùng kết quả và cùng quy tắc đồng ý như `accept` (403 `CONSENT_REQUIRED` kiểm trước mã). Mã ngắn chỉ sống 48 giờ kể từ lúc tạo (token ở link sống 7 ngày). `@Throttle` chỉ là giới hạn thô 10 lần/phút theo IP. Khóa thật là bộ đếm riêng trong service: 5 lần nhập sai (410) trong 15 phút theo user → 429 `INVITE_CODE_LOCKED` kèm `details.retryAfterSec` và header `Retry-After`; cùng quy tắc đếm theo IP (IPv6 theo /64) và một bộ đếm toàn cục chặn dò phân tán. Lỗi 422 do sai định dạng và phát lại phản hồi 410 đã lưu (cùng `Idempotency-Key`) không tính vào bộ đếm. Mã sai, hết hạn, đã dùng, bị thu hồi → CÙNG 410 `INVITE_INVALID`. Không gian mã 32^8 (2^40) cộng TTL 48 giờ và ba lớp bộ đếm đủ cho MVP; nếu TL muốn dư an toàn thì nâng lên 10 ký tự, chỉ cần đổi `pattern` của `code` và `shortCode`.",
+        "description": "Cần đăng nhập. Cùng kết quả và cùng quy tắc đồng ý như `accept` (403 `CONSENT_REQUIRED` kiểm trước mã). Mã ngắn chỉ sống 48 giờ kể từ lúc tạo (token ở link sống 7 ngày). `@Throttle` chỉ là giới hạn thô 10 lần/phút theo IP. Khóa thật là bộ đếm riêng trong service: 5 lần nhập sai (410) trong 15 phút theo user → 429 `INVITE_CODE_LOCKED` kèm `details.retryAfterSec` và header `Retry-After`; cùng quy tắc đếm theo IP (IPv6 theo /64). Bộ đếm toàn cục (500 lần sai/15 phút) chặn dò phân tán nhưng khi vượt trần chỉ chặn user hoặc IP đã nhập sai ít nhất một lần trong cửa sổ; người chưa sai lần nào vẫn được thử. Lỗi 422 do sai định dạng và phát lại phản hồi 410 đã lưu (cùng `Idempotency-Key`) không tính vào bộ đếm. Mã sai, hết hạn, đã dùng, bị thu hồi → CÙNG 410 `INVITE_INVALID`. Không gian mã 32^8 (2^40) cộng TTL 48 giờ và ba lớp bộ đếm đủ cho MVP; nếu TL muốn dư an toàn thì nâng lên 10 ký tự, chỉ cần đổi `pattern` của `code` và `shortCode`.",
         "operationId": "inviteAcceptance_redeemCode",
         "parameters": [
           {
@@ -6727,7 +6727,7 @@
     },
     "/v1/invoices/{id}/adjustments": {
       "post": {
-        "description": "Chỉ khi hóa đơn còn `draft`; đã phát hành hay hủy → 409 `INVOICE_IMMUTABLE`. Thêm dòng `manual_adjustment` (hoặc `surcharge` khi `kind = surcharge`, US-7.8) có `amount` ≠ 0 (âm giảm, dương phụ thu), bắt buộc `adjustmentReason`, ghi nhật ký kiểm toán; trả hóa đơn đã tính lại. Mỗi hóa đơn tối đa 20 dòng điều chỉnh, vượt → 422 `VALIDATION_FAILED`. Giới hạn 20 lần/phút/user (429 `RATE_LIMITED`). Tổng `totalAmount` không âm: điều chỉnh làm tổng < 0 thì `totalAmount = 0` và `clampedAmount` là phần âm bị cắt (chuyển kỳ khi có US-7.6). Chưa có endpoint xóa dòng điều chỉnh: nhập sai thì thêm dòng ngược dấu.",
+        "description": "Chỉ khi hóa đơn còn `draft`; đã phát hành hay hủy → 409 `INVOICE_IMMUTABLE`. Thêm dòng `manual_adjustment` (hoặc `surcharge` khi `kind = surcharge`, US-7.8) có `amount` ≠ 0 (âm giảm, dương phụ thu), bắt buộc `adjustmentReason`, ghi nhật ký kiểm toán; trả hóa đơn đã tính lại. Mỗi hóa đơn tối đa 20 dòng điều chỉnh (tính cả `surcharge`), vượt → 422 `VALIDATION_FAILED`. Dòng `surcharge` không lưu `adjustmentReason` (null), lý do chỉ ghi ở nhật ký kiểm toán. Giới hạn 20 lần/phút/user (429 `RATE_LIMITED`). Tổng `totalAmount` không âm: điều chỉnh làm tổng < 0 thì `totalAmount = 0` và `clampedAmount` là phần âm bị cắt (chuyển kỳ khi có US-7.6). Chưa có endpoint xóa dòng điều chỉnh: nhập sai thì thêm dòng ngược dấu.",
         "operationId": "billing_adjust",
         "parameters": [
           {
@@ -19298,7 +19298,7 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 60,
-            "description": "Loại sự kiện RevenueCat. Cập nhật gói: `INITIAL_PURCHASE`, `RENEWAL`, `PRODUCT_CHANGE`, `UNCANCELLATION`, `NON_RENEWING_PURCHASE` → `active`; `EXPIRATION` → `expired`; `CANCELLATION`, `BILLING_ISSUE` chỉ ghi sự kiện, gói giữ tới hết kỳ. Loại khác và `TEST` → `ignored`",
+            "description": "Loại sự kiện RevenueCat. Cập nhật gói: `INITIAL_PURCHASE`, `RENEWAL`, `PRODUCT_CHANGE`, `UNCANCELLATION`, `NON_RENEWING_PURCHASE` → `active`; `EXPIRATION` và `CANCELLATION` có `cancel_reason = CUSTOMER_SUPPORT` (hoàn tiền) → `expired` ngay; `CANCELLATION` khác, `BILLING_ISSUE` chỉ ghi sự kiện, gói giữ tới hết kỳ. `TRANSFER`, loại khác và `TEST` → `ignored`",
             "example": "INITIAL_PURCHASE"
           },
           "app_user_id": {
@@ -19343,6 +19343,12 @@
             "type": "integer",
             "minimum": -9007199254740991,
             "maximum": 9007199254740991
+          },
+          "cancel_reason": {
+            "description": "Lý do của `CANCELLATION`. `CUSTOMER_SUPPORT` = đã hoàn tiền → hạ gói ngay (cùng kiểm tra như `EXPIRATION`); lý do khác chỉ ghi sự kiện",
+            "example": "UNSUBSCRIBE",
+            "type": "string",
+            "maxLength": 40
           }
         },
         "required": [

@@ -202,7 +202,7 @@ export const revenueCatEventSchema = z
     }),
     type: z.string().min(1).max(60).meta({
       description:
-        'Loại sự kiện RevenueCat. Cập nhật gói: `INITIAL_PURCHASE`, `RENEWAL`, `PRODUCT_CHANGE`, `UNCANCELLATION`, `NON_RENEWING_PURCHASE` → `active`; `EXPIRATION` → `expired`; `CANCELLATION`, `BILLING_ISSUE` chỉ ghi sự kiện, gói giữ tới hết kỳ. Loại khác và `TEST` → `ignored`',
+        'Loại sự kiện RevenueCat. Cập nhật gói: `INITIAL_PURCHASE`, `RENEWAL`, `PRODUCT_CHANGE`, `UNCANCELLATION`, `NON_RENEWING_PURCHASE` → `active`; `EXPIRATION` và `CANCELLATION` có `cancel_reason = CUSTOMER_SUPPORT` (hoàn tiền) → `expired` ngay; `CANCELLATION` khác, `BILLING_ISSUE` chỉ ghi sự kiện, gói giữ tới hết kỳ. `TRANSFER`, loại khác và `TEST` → `ignored`',
       example: 'INITIAL_PURCHASE',
     }),
     app_user_id: z.string().min(1).max(200).meta({
@@ -228,6 +228,11 @@ export const revenueCatEventSchema = z
     event_timestamp_ms: z.int().optional().meta({
       description:
         'Mili giây epoch; sự kiện cũ hơn sự kiện đã xử lý của cùng tenant không ghi đè gói (`ignored`), vì RevenueCat có thể giao sai thứ tự',
+    }),
+    cancel_reason: z.string().max(40).optional().meta({
+      description:
+        'Lý do của `CANCELLATION`. `CUSTOMER_SUPPORT` = đã hoàn tiền → hạ gói ngay (cùng kiểm tra như `EXPIRATION`); lý do khác chỉ ghi sự kiện',
+      example: 'UNSUBSCRIBE',
     }),
   })
   .loose()

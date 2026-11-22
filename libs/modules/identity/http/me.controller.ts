@@ -247,7 +247,7 @@ export class MeController {
       }
 
       // OTP đã tiêu ở Redis: giao dịch DB rollback sau đó thì người dùng phải xin mã mới.
-      await this.otp.verify(u.email, body.otp, 'delete_account');
+      await this.otp.verify(u.email, body.otp, req.ip, 'delete_account');
       // Khóa idempotency cũ giữ phản hồi (có thể chứa dữ liệu cá nhân); khóa của chính lệnh này được ghi sau.
       await t.delete(idempotencyKeys).where(eq(idempotencyKeys.userId, userId));
       // Khóa giữ từ lần kiểm trên (cùng giao dịch) nên điều kiện không đổi giữa hai lần gọi.

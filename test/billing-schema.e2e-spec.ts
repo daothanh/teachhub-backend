@@ -8,7 +8,7 @@ import {
   expectInsertRejected,
   expectRowIsolated,
 } from './support/isolation.js';
-import { seedTenant, type SeededTenant } from './support/seed.js';
+import { seedMember, seedTenant, type SeededTenant } from './support/seed.js';
 
 // S5-BE-01 + S5-BE-04: học phí lớp, payout_accounts, kỳ thu, hóa đơn: RLS chéo tenant, phụ huynh, trigger bất biến, unique.
 describe('billing schema: RLS, ràng buộc, bất biến hóa đơn', () => {
@@ -96,6 +96,56 @@ describe('billing schema: RLS, ràng buộc, bất biến hóa đơn', () => {
   afterAll(async () => {
     await Promise.all([worker?.end(), appPool?.end()]);
     await db?.container.stop();
+  });
+
+  it('0035: nhân sự khác chủ (teacher) chỉ đọc bảng tiền, không ghi được', async () => {
+    const teacher = await seedMember(worker, A.tenantId, 'teacher');
+    const n = async (q: ReturnType<typeof sql>) =>
+      tx.run({ userId: teacher }, async (t) => (await t.execute(q)).rowCount);
+    for (const [table, id] of [
+      ['billing_periods', ids.periodA],
+      ['invoices', ids.draftY],
+      ['payout_accounts', ids.payoutA],
+    ] as const)
+      expect(
+        await n(sql`select 1 from ${sql.identifier(table)} where id = ${id}`),
+        table,
+      ).toBe(1);
+    expect(
+      await n(
+        sql`select 1 from invoice_lines where invoice_id = ${ids.draftX}`,
+      ),
+    ).toBe(1);
+    await expectInsertRejected(
+      tx,
+      teacher,
+      sql`insert into billing_periods (id, tenant_id, period_month, close_date, due_date)
+        values (${randomUUID()}, ${A.tenantId}, '2027-03-01', '2027-03-31', '2027-04-10')`,
+    );
+    await expectInsertRejected(tx, teacher, invoice(randomUUID(), ids.stuX));
+    await expectInsertRejected(tx, teacher, line(ids.draftX, 9));
+    await expectInsertRejected(
+      tx,
+      teacher,
+      sql`insert into payout_accounts (id, tenant_id, bank_bin, account_no, account_name)
+        values (${randomUUID()}, ${A.tenantId}, '970436', '1111111111', 'GV')`,
+    );
+    expect(
+      await n(
+        sql`update invoices set total_amount = total_amount where id = ${ids.draftY}`,
+      ),
+    ).toBe(0);
+    expect(
+      await n(
+        sql`update billing_periods set due_date = due_date where id = ${ids.periodA}`,
+      ),
+    ).toBe(0);
+    expect(
+      await n(sql`delete from payout_accounts where id = ${ids.payoutA}`),
+    ).toBe(0);
+    expect(
+      await n(sql`delete from invoice_lines where invoice_id = ${ids.draftX}`),
+    ).toBe(0);
   });
 
   it('AC-1: lớp cũ không học phí; CHECK cặp fee_type/fee_amount, trần và enum', async () => {

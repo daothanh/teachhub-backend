@@ -695,13 +695,18 @@ describe('payments: ghi và hủy thanh toán', () => {
         connectionString: t.db.url('teachhub_worker'),
       });
       const tx = new TxService(drizzle(pool, { schema, casing: 'snake_case' }));
-      const pushed: { copy: { title: string }; data: Record<string, string> }[] = [];
+      const pushed: {
+        copy: { title: string };
+        data: Record<string, string>;
+      }[] = [];
       const mails: { to: string; subject: string; text: string }[] = [];
       const notifier = new PaymentRecordedNotifier(
         tx,
         new AbsenceNotifier(tx, {
           enabled: true,
-          send: (ms: { copy: { title: string }; data: Record<string, string> }[]) => {
+          send: (
+            ms: { copy: { title: string }; data: Record<string, string> }[],
+          ) => {
             pushed.push(...ms);
             return Promise.resolve(
               ms.map(() => ({ ok: true as const, messageId: 'm' })),
@@ -793,11 +798,11 @@ describe('payments: ghi và hủy thanh toán', () => {
       await notifier.handle(jobs[0]);
       expect(mails).toHaveLength(2);
       expect(pushed).toHaveLength(1);
-      // `queued` còn mới: người khác đang gửi, không gửi trùng.
+      // `queued` còn mới: người khác có thể đang gửi; không gửi trùng, ném để BullMQ thử lại sau.
       await q(
         `update notification_deliveries set status = 'queued', created_at = now() where channel = 'email'`,
       );
-      await notifier.handle(jobs[0]);
+      await expect(notifier.handle(jobs[0])).rejects.toThrow();
       expect(mails).toHaveLength(2);
 
       // S6: phụ huynh đã gỡ liên kết (guardian đã xóa) hoặc con đã nghỉ không nhận thông báo/email.

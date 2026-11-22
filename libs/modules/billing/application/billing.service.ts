@@ -206,9 +206,11 @@ export class BillingService {
           eq(invoiceLines.invoiceId, id),
         ),
       );
+    // Trần 20 dòng tính chung điều chỉnh tay và phụ thu: cả hai đều thêm qua route này.
     if (
-      lines.filter((l) => l.kind === 'manual_adjustment').length >=
-      MAX_ADJUSTMENTS
+      lines.filter(
+        (l) => l.kind === 'manual_adjustment' || l.kind === 'surcharge',
+      ).length >= MAX_ADJUSTMENTS
     ) {
       throw new AppException('VALIDATION_FAILED', undefined, {
         amount: [`Tối đa ${MAX_ADJUSTMENTS} dòng điều chỉnh cho mỗi hóa đơn.`],
@@ -219,11 +221,13 @@ export class BillingService {
       tenantId: actor.tenantId,
       invoiceId: id,
       position: Math.max(0, ...lines.map((l) => l.position)) + 1,
-      kind: 'manual_adjustment',
+      kind: body.kind,
       description: body.description,
       amount: body.amount,
       charged: true,
-      adjustmentReason: body.adjustmentReason,
+      // CHECK `invoice_lines_adjustment_reason_check`: lý do chỉ lưu ở dòng `manual_adjustment`; phụ thu giữ lý do trong audit_logs.
+      adjustmentReason:
+        body.kind === 'manual_adjustment' ? body.adjustmentReason : null,
     });
     // Hai dòng xem trước (điều chỉnh kỳ trước, chuyển kỳ) làm mới theo số liệu hiện tại; tổng = max(0, Σ dòng), cùng công thức job/GET/issue.
     const [period] = await tx
@@ -263,6 +267,7 @@ export class BillingService {
           totalAmount,
           clampedAmount,
           adjustment: {
+            kind: body.kind,
             amount: body.amount,
             description: body.description,
             reason: body.adjustmentReason,

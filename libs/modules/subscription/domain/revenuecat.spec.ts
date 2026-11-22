@@ -127,8 +127,11 @@ describe('decideRevenueCatEvent', () => {
     });
     expect(decideRevenueCatEvent(ev({ type: 'TRANSFER' }), free, ctx)).toEqual({
       kind: 'ignore',
-      reason: 'type',
+      reason: 'transfer',
     });
+    expect(
+      decideRevenueCatEvent(ev({ type: 'SUBSCRIPTION_PAUSED' }), free, ctx),
+    ).toEqual({ kind: 'ignore', reason: 'type' });
     expect(decideRevenueCatEvent(ev({ store: 'STRIPE' }), free, ctx)).toEqual({
       kind: 'ignore',
       reason: 'store',
@@ -146,8 +149,62 @@ describe('decideRevenueCatEvent', () => {
       decideRevenueCatEvent(ev({ type: 'CANCELLATION' }), cur, ctx),
     ).toEqual({ kind: 'ignore', reason: 'record_only' });
     expect(
+      decideRevenueCatEvent(
+        ev({ type: 'CANCELLATION', cancel_reason: 'UNSUBSCRIBE' }),
+        cur,
+        ctx,
+      ),
+    ).toEqual({ kind: 'ignore', reason: 'record_only' });
+    expect(
       decideRevenueCatEvent(ev({ type: 'BILLING_ISSUE' }), cur, ctx),
     ).toEqual({ kind: 'ignore', reason: 'record_only' });
+  });
+  it('CANCELLATION hoàn tiền (CUSTOMER_SUPPORT) hạ gói ngay, giữ các kiểm tra của EXPIRATION', () => {
+    const cur: CurrentSubscription = {
+      status: 'active',
+      source: 'app_store',
+      lastAppliedAt: null,
+      currentPeriodEnd: new Date(now.getTime() + 100 * day),
+      externalRef: 'pro_yearly#tx1',
+    };
+    const refund = (o: Partial<RevenueCatEventInput> = {}) =>
+      ev({ type: 'CANCELLATION', cancel_reason: 'CUSTOMER_SUPPORT', ...o });
+    expect(decideRevenueCatEvent(refund(), cur, ctx)).toEqual({
+      kind: 'apply',
+      planCode: 'free',
+      status: 'expired',
+      source: 'app_store',
+      // expiration_at_ms vẫn là cuối kỳ cũ nhưng quyền mất ngay.
+      currentPeriodEnd: now,
+      externalRef: 'pro_yearly#tx1',
+    });
+    expect(
+      decideRevenueCatEvent(refund({ store: 'PLAY_STORE' }), cur, ctx),
+    ).toEqual({ kind: 'ignore', reason: 'not_current_source' });
+    expect(
+      decideRevenueCatEvent(
+        refund({ original_transaction_id: 'tx2' }),
+        cur,
+        ctx,
+      ),
+    ).toEqual({ kind: 'ignore', reason: 'ref_mismatch' });
+    expect(
+      decideRevenueCatEvent(refund({ product_id: 'khac' }), cur, ctx),
+    ).toEqual({ kind: 'ignore', reason: 'product' });
+    expect(
+      decideRevenueCatEvent(
+        refund({ event_timestamp_ms: now.getTime() - day }),
+        { ...cur, lastAppliedAt: now },
+        ctx,
+      ),
+    ).toEqual({ kind: 'ignore', reason: 'stale' });
+    expect(
+      decideRevenueCatEvent(
+        refund({ event_timestamp_ms: undefined }),
+        cur,
+        ctx,
+      ),
+    ).toEqual({ kind: 'ignore', reason: 'no_timestamp' });
   });
   it('EXPIRATION hạ về expired/free chỉ khi đang active bằng đúng kho đó', () => {
     const cur: CurrentSubscription = {

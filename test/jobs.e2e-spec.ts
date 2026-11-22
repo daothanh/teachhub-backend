@@ -3,6 +3,7 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
 import type { GenerateSessionsJob } from '../libs/modules/schedule/application/generate-sessions.job.js';
 import type {
+  EnsureAuditPartitionsJob,
   JobRuns,
   PurgeIdempotencyKeysJob,
 } from '../libs/infra/src/job-runs.js';
@@ -17,6 +18,7 @@ describe('job nền của worker', () => {
   let pool: pg.Pool;
   let generate: GenerateSessionsJob;
   let purge: PurgeIdempotencyKeysJob;
+  let auditPartitions: EnsureAuditPartitionsJob;
   let runs: JobRuns;
 
   const q = async (sql: string, params: unknown[] = []) =>
@@ -51,7 +53,7 @@ describe('job nền của worker', () => {
     // Import sau khi startTestApp đặt biến môi trường (CoreModule kiểm env lúc nạp).
     const schema = await import('../libs/db/src/schema/index.js');
     const { TxService } = await import('../libs/db/src/tx.service.js');
-    const { JobRuns, PurgeIdempotencyKeysJob } =
+    const { EnsureAuditPartitionsJob, JobRuns, PurgeIdempotencyKeysJob } =
       await import('../libs/infra/src/job-runs.js');
     const { GenerateSessionsJob } =
       await import('../libs/modules/schedule/application/generate-sessions.job.js');
@@ -62,6 +64,7 @@ describe('job nền của worker', () => {
     runs = new JobRuns(tx);
     generate = new GenerateSessionsJob(tx, new ScheduleService(), runs);
     purge = new PurgeIdempotencyKeysJob(tx, runs);
+    auditPartitions = new EnsureAuditPartitionsJob(tx, runs);
   }, 180_000);
   afterAll(async () => {
     await pool?.end();
@@ -215,6 +218,28 @@ describe('job nền của worker', () => {
         )
       )[0].n,
     ).toBe(0);
+  });
+
+  it('tạo trước phân vùng audit_logs tháng này và tháng sau bằng role worker; chạy lại không lỗi', async () => {
+    const parts = () =>
+      q(
+        `select relname from pg_class where relname in ('audit_logs_y2031m08', 'audit_logs_y2031m09') order by relname`,
+      );
+    expect(await parts()).toEqual([]);
+    const now = new Date('2031-08-31T20:00:00Z'); // 03:00 ngày 1/9 giờ VN, vẫn là tháng 8 theo UTC
+    expect(await auditPartitions.run(now)).toBe(2);
+    expect(await auditPartitions.run(now)).toBe(2);
+    expect((await parts()).map((r) => r.relname)).toEqual([
+      'audit_logs_y2031m08',
+      'audit_logs_y2031m09',
+    ]);
+    expect(
+      (
+        await q(
+          `select status from job_runs where job = 'infra.ensure-audit-partitions' order by started_at desc limit 1`,
+        )
+      )[0].status,
+    ).toBe('succeeded');
   });
 
   it('job_runs còn running quá 1 giờ bị đóng thành failed ở lần chạy sau', async () => {
