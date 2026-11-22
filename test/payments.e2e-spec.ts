@@ -793,11 +793,11 @@ describe('payments: ghi và hủy thanh toán', () => {
       await notifier.handle(jobs[0]);
       expect(mails).toHaveLength(2);
       expect(pushed).toHaveLength(1);
-      // `queued` còn mới: người khác đang gửi, không gửi trùng.
+      // `queued` còn mới: người khác có thể đang gửi; không gửi trùng, ném để BullMQ thử lại sau.
       await q(
         `update notification_deliveries set status = 'queued', created_at = now() where channel = 'email'`,
       );
-      await notifier.handle(jobs[0]);
+      await expect(notifier.handle(jobs[0])).rejects.toThrow();
       expect(mails).toHaveLength(2);
 
       // S6: phụ huynh đã gỡ liên kết (guardian đã xóa) hoặc con đã nghỉ không nhận thông báo/email.

@@ -675,7 +675,7 @@ describe('billing: job billing.close + API kỳ thu, hóa đơn, điều chỉnh
       );
       expect(negSurcharge.json()).toMatchObject({
         code: 'VALIDATION_FAILED',
-        details: { amount: expect.any(Array) },
+        errors: { amount: expect.any(Array) },
       });
       expect(
         (await call(A, 'POST', `/invoices/${draftAn}/adjustments`, body, null))

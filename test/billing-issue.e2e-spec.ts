@@ -574,7 +574,7 @@ describe('billing: phát hành và hủy hóa đơn', () => {
       expect(st.pushed).toBe(1);
     });
 
-    it('M1: dòng email queued bỏ dở quá 2 phút được nhận lại và gửi đúng 1 lần; queued còn mới thì không đụng', async () => {
+    it('M1: dòng email queued bỏ dở quá 2 phút được nhận lại và gửi đúng 1 lần; queued còn mới thì không gửi, thử lại sau', async () => {
       const w = await world();
       st.mailFail = true;
       await expect(notifier.handle(w.job)).rejects.toThrow();
@@ -585,8 +585,9 @@ describe('billing: phát hành và hủy hóa đơn', () => {
            where channel = 'email' and notification_id in (select id from notifications where recipient_user_id = $1)`,
           [w.parent, age],
         );
+      // Queued còn mới (lần trước có thể còn đang gửi): không gửi trùng, ném để BullMQ thử lại sau.
       await setQueued('10 seconds');
-      await notifier.handle(w.job);
+      await expect(notifier.handle(w.job)).rejects.toThrow();
       expect(st.mails).toBe(0);
       await setQueued('5 minutes');
       await notifier.handle(w.job);
