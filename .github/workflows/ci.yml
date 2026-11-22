@@ -1,9 +1,13 @@
 name: ci
 
+# Chỉ chạy trên PR (main chỉ nhận squash từ PR đã xanh); bỏ qua PR chỉ đổi tài liệu/hạ tầng — tiết kiệm phút Actions.
 on:
   pull_request:
-  push:
-    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'infra/**'
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -15,20 +19,27 @@ permissions:
 # Mỗi job là một check riêng trên PR (DoD Sprint 0 #5): lint, unit (gồm openapi.json khớp mã),
 # migrate, rls, e2e, build, openapi-breaking.
 jobs:
-  lint:
+  # lint + typecheck + unit + build + hợp đồng: chung một lần cài đặt (mỗi job tính phút làm tròn lên).
+  check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: ./.github/actions/setup
       - run: pnpm lint
       - run: pnpm typecheck
-
-  unit:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup
       - run: pnpm test
+      - run: pnpm build
+      # Chặn thay đổi phá vỡ hợp đồng so với nhánh đích (Mục 5.1). Lệch mã ↔ openapi.json đã bắt ở `pnpm test`.
+      - name: Hợp đồng của nhánh đích
+        if: github.event_name == 'pull_request'
+        run: |
+          git show "origin/${{ github.base_ref }}:contracts/openapi.json" > base.json 2>/dev/null \
+            || echo '{"openapi":"3.1.0","info":{"title":"","version":""},"paths":{}}' > base.json
+      - name: oasdiff breaking
+        if: github.event_name == 'pull_request'
+        run: docker run --rm -v "$PWD:/w" tufin/oasdiff:v1.38.0 breaking /w/base.json /w/contracts/openapi.json --fail-on ERR
 
   # Migration thật bằng scripts/migrate.mjs + vai trò teachhub_owner, đúng lệnh của image khi deploy (ADR-TH-BE-001).
   migrate:
@@ -65,14 +76,7 @@ jobs:
           node scripts/migrate.mjs
           node scripts/migrate.mjs
 
-  # R1 (§4.5): bảng public thiếu enable/force RLS → đỏ.
-  rls:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup
-      - run: pnpm vitest run --config ./vitest.config.e2e.ts test/rls-coverage.e2e-spec.ts
-
+  # Gồm cả test/rls-coverage.e2e-spec.ts (R1 §4.5: bảng public thiếu enable/force RLS → đỏ).
   e2e:
     runs-on: ubuntu-latest
     steps:
@@ -80,25 +84,3 @@ jobs:
       - uses: ./.github/actions/setup
       # Testcontainers (PostgreSQL 17, Redis 7, MinIO) dùng Docker sẵn có trên runner.
       - run: pnpm test:e2e
-
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup
-      - run: pnpm build
-
-  # Chặn thay đổi phá vỡ hợp đồng so với nhánh đích (Mục 5.1). Lệch mã ↔ openapi.json đã bắt ở job unit.
-  openapi-breaking:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Hợp đồng của nhánh đích
-        run: |
-          git show "origin/${{ github.base_ref }}:contracts/openapi.json" > base.json 2>/dev/null \
-            || echo '{"openapi":"3.1.0","info":{"title":"","version":""},"paths":{}}' > base.json
-      - name: oasdiff breaking
-        run: docker run --rm -v "$PWD:/w" tufin/oasdiff:v1.38.0 breaking /w/base.json /w/contracts/openapi.json --fail-on ERR
