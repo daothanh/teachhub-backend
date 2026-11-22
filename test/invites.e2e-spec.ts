@@ -768,6 +768,25 @@ describe('lời mời phụ huynh và đồng ý điều khoản', () => {
       expect(m.rows[0].status).toBe('revoked');
     });
 
+    it('0035: tài khoản đã xóa (đua với DELETE /me, token còn hạn) → 401, lời mời không bị đốt, không tạo membership', async () => {
+      const s = await student(A, 1);
+      const inv = await invite(A, s.id, s.guardians[0]!.id);
+      const p = await mkParent();
+      await t.worker.query(
+        `update users set deleted_at = now() where id = $1`,
+        [p.userId],
+      );
+      const r = await accept(p, inv.token, undefined, '198.51.100.71');
+      expect(r.statusCode).toBe(401);
+      expect(r.json().code).toBe('UNAUTHENTICATED');
+      expect((await row(inv.id)).status).toBe('pending');
+      const m = await t.worker.query(
+        `select count(*)::int n from memberships where user_id = $1`,
+        [p.userId],
+      );
+      expect(m.rows[0].n).toBe(0);
+    });
+
     it('cùng user nhận hai lời mời song song: không 500, cả hai thành công với một membership', async () => {
       const s = await student(A, 2);
       const [i1, i2] = [

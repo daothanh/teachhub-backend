@@ -146,6 +146,13 @@ export class InviteAcceptanceService {
           counted = true;
           if (input.idempotencyKey) await this.limiter.markFailure(marker);
         }
+        // redeem_invite ném 42501 khi tài khoản đã xóa (đua với DELETE /me): trả 401 như JwtAuthGuard, không 500.
+        const pg = ((e as { cause?: unknown } | null)?.cause ?? e) as {
+          code?: string;
+        } | null;
+        if (pg?.code === '42501') {
+          throw new AppException('UNAUTHENTICATED');
+        }
         throw e;
       }
     } finally {
