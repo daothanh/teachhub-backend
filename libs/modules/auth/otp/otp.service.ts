@@ -7,7 +7,9 @@ import { REDIS } from '@teachhub/infra';
 /**
  * US-0.1 AC3 và S1-BE-04: mã sống 5 phút; gửi 60 giây/lần, 5 lần/giờ; sai 5 lần → khóa 15 phút.
  * Đếm sai và khóa theo (email, IP; IPv6 gộp /64): người lạ khóa được IP của chính họ, không khóa được email người khác.
- * `maxFailsPerCode`: trần lượt đoán mọi IP cộng lại cho một mã; chạm trần thì hủy mã (không khóa), chặn dò mã qua nhiều IP.
+ * `maxFailsPerHour`: trần lượt sai mọi IP cộng lại cho một email trong 1 giờ, KHÔNG đặt lại khi cấp mã mới; chạm trần thì
+ * hủy mã và từ chối so tới hết cửa sổ, nên dò mã qua nhiều IP vẫn chỉ được ngần ấy lượt mỗi giờ. Đổi lại: người lạ có
+ * nhiều IP vẫn chặn được đăng nhập OTP của một email tới hết giờ (còn Google/Apple).
  */
 export const OTP = {
   ttlSec: 300,
@@ -15,7 +17,7 @@ export const OTP = {
   perHour: 5,
   maxFails: 5,
   lockSec: 900,
-  maxFailsPerCode: 20,
+  maxFailsPerHour: 20,
 } as const;
 
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
@@ -81,8 +83,6 @@ export class OtpService {
     if (sent > OTP.perHour) return this.rateLimited(hour);
 
     const code = randomInt(0, 1_000_000).toString().padStart(6, '0');
-    // Mã mới có trần lượt đoán mới; số mã mỗi giờ đã chặn ở trên nên tổng lượt đoán mỗi giờ vẫn có hạn.
-    await this.redis.del(this.key('cfail', email, purpose));
     await this.redis.set(
       this.key('code', email, purpose),
       this.hash(email, code, purpose),
@@ -94,7 +94,7 @@ export class OtpService {
 
   /**
    * Đúng → mã bị hủy (dùng một lần). Sai/hết hạn → OTP_INVALID; lần thứ 5 sai từ cùng IP → khóa IP đó với email này
-   * 15 phút, OTP_LOCKED. Mọi IP cộng lại quá `maxFailsPerCode` lượt → hủy mã, OTP_INVALID (phải xin mã mới).
+   * 15 phút, OTP_LOCKED. Mọi IP cộng lại quá `maxFailsPerHour` lượt sai trong giờ → hủy mã, OTP_INVALID tới hết cửa sổ.
    * Đếm lượt TRƯỚC khi so (INCR nguyên tử): request đoán mã gửi song song cũng không vượt được các trần trên.
    */
   async verify(
@@ -129,10 +129,11 @@ export class OtpService {
     if (attempt > OTP.maxFails) return lockNow();
     await ensureUnlocked();
 
+    // Bộ đếm theo email sống 1 giờ kể từ lượt sai đầu, không xóa khi cấp mã mới (xin mã mới không mở thêm lượt đoán).
     const codeFailKey = this.key('cfail', email, purpose);
     const codeAttempt = await this.redis.incr(codeFailKey);
-    await this.redis.expire(codeFailKey, OTP.lockSec, 'NX');
-    if (codeAttempt > OTP.maxFailsPerCode) {
+    await this.redis.expire(codeFailKey, 3600, 'NX');
+    if (codeAttempt > OTP.maxFailsPerHour) {
       await this.redis.del(codeKey);
       throw new AppException('OTP_INVALID');
     }
