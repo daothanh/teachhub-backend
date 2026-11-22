@@ -7,6 +7,7 @@ import { BillingService } from './application/billing.service.js';
 import { BillingController } from './http/billing.controller.js';
 import { DunningController } from './http/dunning.controller.js';
 import { FamilyInvoicesController } from './http/family-invoices.controller.js';
+import { PaymentClaimsController } from './http/payment-claims.controller.js';
 import { PaymentsController } from './http/payments.controller.js';
 import { ReceivablesController } from './http/receivables.controller.js';
 
@@ -17,6 +18,7 @@ import { ReceivablesController } from './http/receivables.controller.js';
     PaymentsController,
     DunningController,
     ReceivablesController,
+    PaymentClaimsController,
   ],
   providers: [
     BillingService,

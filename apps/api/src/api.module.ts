@@ -18,7 +18,9 @@ import { AttendanceModule } from '@teachhub/modules/attendance';
 import { AuthModule } from '@teachhub/modules/auth';
 import { BillingModule } from '@teachhub/modules/billing';
 import { ClassesModule } from '@teachhub/modules/classes';
+import { ComplianceModule } from '@teachhub/modules/compliance';
 import { FamilyModule } from '@teachhub/modules/family';
+import { FilesModule } from '@teachhub/modules/files';
 import { IdentityModule } from '@teachhub/modules/identity';
 import { InvitesModule } from '@teachhub/modules/invites';
 import { NotificationsModule } from '@teachhub/modules/notifications';
@@ -53,6 +55,8 @@ import { HealthController } from './health/health.controller.js';
     BillingModule,
     ReportsModule,
     SubscriptionModule,
+    FilesModule,
+    ComplianceModule,
   ],
   controllers: [AppConfigController, HealthController],
   providers: [

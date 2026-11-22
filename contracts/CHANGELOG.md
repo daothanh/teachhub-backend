@@ -431,3 +431,54 @@ Gia cố admin sau review bảo mật (migration `0032_bank_transfer_ref_unique`
 - **`x-admin-user-id` phải là UUID** (không phải → 401). Audit: ngoài `confirmed_by` trong `after_data` của `bank_transfer_orders` (đã kiểm bằng e2e), hàm confirm ghi thêm một dòng `audit_logs` `entity = bank_transfer_order_confirm` có `confirmed_by`, `request_id`, `ip` (IP sau `trustProxy`), `bank_transaction_ref`, `amount`.
 - **Mã giao dịch duy nhất**: unique một phần `bank_transfer_orders(bank_transaction_ref) where not null`; mã đã dùng cho đơn khác → 409 `BANK_TRANSACTION_REF_USED` (kể cả khi hai đơn đua nhau: bắt `unique_violation`, đơn vẫn `pending`).
 - **Không chồng lên kỳ của store**: tenant đang `active` từ `app_store`/`play_store` còn hạn → 409 `SUBSCRIPTION_STORE_MANAGED` (không cộng nối, không đổi `source`, không outbox). Dùng thử, chuyển khoản, hoặc kỳ store đã hết hạn thì xác nhận như cũ (cộng nối nếu còn hạn). Thay quyết định trước đó "đổi `source` thành `bank_transfer`" cho kỳ store.
+
+## Sprint 8 "Tuân thủ, tệp và báo tin chuyển khoản" (S7-CT-01)
+
+Thân hàm trả 501 `NOT_IMPLEMENTED` tới khi làm task backend tương ứng; schema đã validate thật. 23 endpoint mới, `oasdiff breaking` sạch. Soạn theo ủy quyền của Owner (tự quyết phạm vi theo Spec §11.1, User Stories, PRD, phần "Để Sprint 8" của Sprint 7); các quyết định ghi bên dưới.
+
+| Endpoint | Story | Ưu tiên | Pro (402 `FEATURE_REQUIRES_PRO`) |
+| --- | --- | --- | --- |
+| `GET /v1/compliance/checklist`, `PATCH /v1/compliance/checklist/{itemKey}` | US-9.1 | P0 | không |
+| `GET /v1/compliance/form02` | US-9.2 AC1, AC4 | P0 | không (xem trước, `featureEnabled`) |
+| `POST /v1/compliance/form02/publish` | US-9.2 AC2, AC3 | P0 | có, `compliance.form02` |
+| `GET /v1/public/disclosures/{slug}` (công khai, không JWT) | US-9.2 AC2 | P0 | không |
+| `GET /v1/compliance/school-declaration`, `PUT /v1/compliance/school-declaration` (GET bổ sung ngoài Spec) | US-9.4 AC1, AC3 | P0 | không |
+| `GET /v1/compliance/form03` (bổ sung ngoài Spec) | US-9.4 AC2, AC3 | P0 | không (xem trước, `featureEnabled`) |
+| `POST /v1/compliance/form03/pdf` | US-9.4 AC2 | P0 | có, `compliance.form03` |
+| `GET /v1/compliance/revenue-book` | US-9.5 AC1 đến AC4 | P0 | không |
+| `POST /v1/compliance/revenue-book/export` | US-9.5 AC4 | P0 | có, `revenue.export` |
+| `POST /v1/compliance/tax-alerts/{id}/dismiss` (bổ sung ngoài Spec) | US-9.5 AC3 | P0 | không |
+| `GET /v1/legal-articles`, `GET /v1/legal-articles/{slug}` | US-9.6 AC1, AC3 | P0 | không |
+| `POST /v1/classes/{id}/warning-acknowledgements` (bổ sung ngoài Spec) | US-9.3 AC3 | P0 | không |
+| `POST /v1/files/upload-urls`, `POST /v1/files/{id}/complete`, `GET /v1/files/{id}/download-url` | US-7.7 (nền cho US-4.1, 4.2, 6.3) | P1 | không |
+| `POST /v1/family/invoices/{id}/payment-claims`, `POST /v1/payment-claims/{id}/resolve`, `GET /v1/invoices/{id}/payment-claims` (GET bổ sung ngoài Spec) | US-7.7 | P1 | không |
+| `POST /v1/exports`, `GET /v1/exports/{id}` | US-8.6 | P1 | `POST` có, `reports.export` |
+
+Mã lỗi mới: `FILE_TOO_LARGE`, `FILE_TYPE_NOT_ALLOWED` (422, Spec §5.6). Không có endpoint nào sửa response/request đã phát hành.
+
+Quyết định phạm vi:
+
+- **Vào Sprint 8**: toàn bộ E9 (US-9.1 đến 9.6, đều P0) để T13 chạy trọn; `files` + US-7.7 (Sprint 7 đã hẹn); US-8.6 vì sổ doanh thu cần worker xuất tệp và `files`, dùng chung một "việc xuất" (`ExportJob`) cho `POST /exports`, `POST /compliance/revenue-book/export` và `POST /compliance/form03/pdf`, hỏi trạng thái bằng `GET /exports/{id}`.
+- **Dời sang Sprint 9** (cùng lý do: một sprint không chứa nổi thêm hai miền lớn và mini-app học sinh S01):
+  - `assignments` (US-4.1, 4.2, 4.3 P0; US-4.4 P1) và `grades` (US-5.1, 5.2 P0; US-5.3, 5.4 P1): khoảng 12 endpoint, kèm mini-app student S01, phụ thuộc `files` (làm trước ở Sprint 8) và vai trò `student`; thêm `purpose` `assignment` và `submission` vào `FilePurpose` (thêm giá trị vào request không phá hợp đồng).
+  - Nhập học viên Excel/CSV (US-1.5 P0, `/imports/students*`): cần `files` (`purpose = import`) + worker kiểm từng dòng; làm cùng cảnh báo trùng trường chính khóa theo dòng (US-9.4 AC1), vì cảnh báo khi `POST /students` cần đổi 409 của endpoint đó (hiện đã dùng cho `STUDENT_POSSIBLE_DUPLICATE`, phải thêm `oneOf`) nên gộp một lần.
+  - Bản tin tuần/tháng (US-6.4 P1), tin nhắn chung cả lớp (US-6.3 P1), chuyên cần (US-8.4), danh sách nguy cơ nghỉ (US-8.5): P1, phụ thuộc cảnh báo vắng US-3.6, cảnh báo điểm US-5.4 và `grades` chưa có.
+- **Loại thông báo mới** (`payment_claim_created`, `payment_claim_rejected`, `tax_threshold_alert`, bài quy định đổi US-9.6 AC2): chưa khai vào `oneOf` của `Notification`, cùng nhóm ngoại lệ `oasdiff` đã chốt ở Sprint 7 ("làm ở PR riêng trước khi nộp store"). Trong lúc chờ app đọc trạng thái trực tiếp: `alerts` của `GET /compliance/revenue-book`, `status` của `PaymentClaim`.
+
+Quyết định thiết kế:
+
+- **Pro theo thao tác, không theo màn**: xem trước Mẫu 02 và Mẫu 03 mở cho mọi gói (có `featureEnabled`) để client làm mờ và mời nâng cấp (US-9.2 AC4); công khai, PDF Mẫu 03, xuất sổ doanh thu, xuất báo cáo là Pro. `@RequiresFeature` đặt trên đúng bốn route: `POST /compliance/form02/publish` (`compliance.form02`), `POST /compliance/form03/pdf` (`compliance.form03`), `POST /compliance/revenue-book/export` (`revenue.export`), `POST /exports` (`reports.export`). `GET /exports/{id}` không kiểm gói. Checklist, khai trường, sổ doanh thu và ngưỡng thuế, thư viện quy định: mọi gói (US-9.1 AC4, US-9.5 AC4).
+- **Cảnh báo ngưỡng thuế** (US-9.5 AC3): mốc `400m` và `800m`, một cảnh báo cho mỗi (tenant, năm, mốc) (`tax_threshold_alerts` unique); sinh khi ghi thanh toán làm lũy kế vượt mốc, không sinh lại khi hủy rồi thu lại. `taxAlerts` ở phản hồi `POST /invoices/{id}/payments` (ví dụ Spec §5.4) KHÔNG thêm vào `PaymentResult`; app đọc `alerts` của `revenue-book`. Nghĩa vụ ở mỗi ngưỡng do bài thư viện giải thích (`legalArticleSlug`), nội dung kế toán duyệt; hợp đồng không ghi số liệu thuế.
+- **`slug` công khai Mẫu 02** sinh một lần, cố định kể cả khi tắt/bật lại (US-9.2 AC2). Trang công khai chỉ có thông tin Mẫu 02, không có dữ liệu học viên/phụ huynh, slug lạ hoặc đã tắt đều 404 như nhau. Chưa có lớp hoặc còn trường thiếu thì không công khai được (422).
+- **Mẫu 03**: cột chính xác của biểu mẫu do PDF quy định **[Cần luật sư chốt mẫu]**; hợp đồng chỉ chốt dữ liệu điền sẵn (học viên có trường + lớp chính khóa trùng khai báo, so khớp không dấu, không phân biệt hoa thường).
+- **US-9.3** cảnh báo lớp tiểu học vẫn không chặn như hợp đồng Sprint 3 (`ClassCreated.warnings`); chỉ thêm bước ghi xác nhận (`POST /classes/{id}/warning-acknowledgements`, bảng `acknowledgements`) thay vì `409 WARNING_ACK_REQUIRED` của Spec, để khỏi đổi hành vi `POST /classes` đã phát hành. Mã cảnh báo: `TT29_PRIMARY_ACADEMIC`.
+- **`files`**: tệp không đi qua API, URL PUT/GET 10 phút, MIME và trần kích thước theo `purpose` (`receipt`: ảnh JPEG/PNG/HEIC ≤ 10 MB). Sprint 8 chỉ có `purpose = receipt`. Tenant của tệp lấy từ thực thể (hóa đơn), không từ vai trò đang mở của người gọi. Quyền xem biên lai: phụ huynh đã tải lên và giáo viên của tenant sở hữu hóa đơn; còn lại 404.
+- **`payment_claims`**: một lần báo `pending` mỗi hóa đơn (báo thêm → 409 `CONFLICT_STALE`); hóa đơn sang `pending_confirmation` (đã có sẵn trong enum), hủy nhắc nợ chưa gửi (lập lại khi từ chối, US-7.7 AC1, AC3). `confirm` xử lý đúng như `POST /invoices/{id}/payments` với `bank_transfer` và trả `PaymentResult`. Số tiền phụ huynh khai chỉ để đối chiếu, giáo viên quyết số ghi thu.
+- **`ExportJob`**: bất đồng bộ (`202`), hỏi lại `GET /exports/{id}`; tệp lên bucket private, link tải theo Spec §2.7 (72 giờ, giữ 7 ngày). CSV UTF-8 BOM, tiền là số, ngày dd/mm/yyyy (US-8.6 AC2).
+
+Điểm còn mở:
+
+- **Bảng mới cho task backend** (chưa có migration): `files`, `payment_claims` (Spec §4.4); `compliance_items`, `school_declarations`, `public_disclosures`, `tax_threshold_alerts`, `acknowledgements`, `exports`, và `legal_articles` (Spec §4.4; `/admin/legal-articles` còn 501 nên bảng chưa có, task `compliance` làm cùng task admin). `revenue_ledger.fiscal_year` đã có từ Sprint 6 (migration 0026). Migration nằm ngoài task hợp đồng.
+- Nội dung tiêu đề/mô tả bốn mục checklist và các bài thư viện quy định do admin soạn và duyệt (US-9.6 AC3): `legalArticleSlug` null cho tới khi có bài phát hành.
+- Cần chốt với luật sư: Mẫu 02/03 theo Thông tư 29 (trường bắt buộc, thời hạn công khai) và nghĩa vụ ứng với ngưỡng 500 triệu và 1 tỷ.
+- Worker: job sinh PDF Mẫu 02 (bucket `public`), job xuất tệp, job dọn tệp `pending` quá 24 giờ (Spec §3.6c) thuộc task backend/worker, chưa có trong hợp đồng này vì không có API.

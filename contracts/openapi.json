@@ -2726,6 +2726,108 @@
         ]
       }
     },
+    "/v1/classes/{id}/warning-acknowledgements": {
+      "post": {
+        "description": "Lớp đã được tạo kèm `warnings` (không chặn); lời gọi này ghi xác nhận vào nhật ký (`acknowledgements`, `kind = class_warning`, `entity_id` = lớp, người xác nhận). Gọi lại cùng `code` vẫn 204 (không ghi trùng). `code` không nằm trong `warnings` hiện có của lớp → 422 `VALIDATION_FAILED`. Lớp của tenant khác → 404 `NOT_FOUND`.",
+        "operationId": "classes_acknowledgeWarning",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID, giữ nguyên khi thử lại hoặc phát lại từ outbox",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcknowledgeClassWarningRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "IDEMPOTENCY_IN_PROGRESS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED\n\nIDEMPOTENCY_KEY_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Xác nhận \"Tôi đã hiểu, vẫn tạo\" cảnh báo TT29 của lớp (US-9.3 AC3)",
+        "tags": [
+          "classes"
+        ]
+      }
+    },
     "/v1/enrollments/{id}/fee-override": {
       "put": {
         "description": "Thay toàn bộ mức riêng của một ghi danh; thứ tự áp dụng học sinh > lớp > mặc định (US-1.3 AC1). Mức riêng chỉ áp dụng từ kỳ chưa chốt tiếp theo, hóa đơn đã phát hành không đổi. Có mức riêng (kể cả chỉ miễn giảm) thì `GET /classes/{id}/roster` trả `feeOverride` khác null để hiện nhãn \"Giá riêng\" (US-1.3 AC2). Miễn giảm 100% → hóa đơn 0 đ không được gửi và không nhắc nợ (AC3). Tối đa 5 khoản `discounts`, mỗi khoản có `description`; `installments` chỉ hợp lệ với lớp trọn khóa (vượt → 422). Giới hạn 20 lần/phút/IP (429 `RATE_LIMITED`). `feeAmount` đòi lớp đã có học phí, nếu không → 422 `VALIDATION_FAILED`. Ghi danh đã rời lớp (`leftOn`) → 409 `CONFLICT_STALE`; ghi danh của tenant khác → 404.",
@@ -8047,6 +8149,323 @@
         ]
       }
     },
+    "/v1/family/invoices/{id}/payment-claims": {
+      "post": {
+        "description": "Tệp biên lai tải trước bằng `POST /files/upload-urls` (`purpose = receipt`, `entityId` = hóa đơn) và `complete`. Một giao dịch: ghi `payment_claims` (`pending`), hóa đơn `issued`/`partially_paid` → `pending_confirmation`, hủy các lời nhắc nợ chưa gửi (tạm dừng, US-7.7 AC1; chạy lại khi bị từ chối) và đưa vào outbox sự kiện `payment_claim_created` để giáo viên nhận push. Hóa đơn của học viên chưa liên kết, của tenant khác, nháp hoặc không tồn tại → 404 `NOT_FOUND`. Hóa đơn đã hủy, đã thu đủ hoặc chưa phát hành → 409 `INVOICE_NOT_PAYABLE`. Đã có lần báo `pending` → 409 `CONFLICT_STALE` (không tạo trùng; chờ giáo viên xử lý). Chưa đồng ý điều khoản → 403 `CONSENT_REQUIRED`. Học sinh (`student`) gọi → 403 như mọi API học phí. Giới hạn 10 lần/phút/user.",
+        "operationId": "paymentClaims_create",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID, giữ nguyên khi thử lại hoặc phát lại từ outbox",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePaymentClaimRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentClaim"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "CONSENT_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "INVOICE_NOT_PAYABLE, CONFLICT_STALE\n\nIDEMPOTENCY_IN_PROGRESS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED\n\nIDEMPOTENCY_KEY_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Phụ huynh báo đã chuyển khoản kèm ảnh biên lai (P03, US-7.7 AC1)",
+        "tags": [
+          "billing"
+        ]
+      }
+    },
+    "/v1/invoices/{id}/payment-claims": {
+      "get": {
+        "description": "Bổ sung ngoài bảng Spec §5.4: giáo viên cần xem biên lai và `claim.id` để xử lý. Hóa đơn của tenant khác hoặc không tồn tại → 404 `NOT_FOUND`.",
+        "operationId": "paymentClaims_list",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentClaimList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Các lần phụ huynh báo đã chuyển khoản của một hóa đơn (US-7.7)",
+        "tags": [
+          "billing"
+        ]
+      }
+    },
+    "/v1/payment-claims/{id}/resolve": {
+      "post": {
+        "description": "`confirm`: xử lý như US-7.4 với hình thức chuyển khoản (thanh toán `bank_transfer`, dòng `revenue_ledger`, hủy nhắc nợ nếu thu đủ), lần báo `confirmed`. `reject`: lần báo `rejected` kèm `reason`, hóa đơn trở về `issued` hoặc `partially_paid` theo tổng thanh toán, nhắc nợ lập lại theo lịch (US-7.5), phụ huynh nhận thông báo. Lần báo không còn `pending` (đã xử lý, hoặc hóa đơn đã hủy) → 409 `CONFLICT_STALE`; gọi lại cùng `Idempotency-Key` trả đúng kết quả cũ. Lần báo của tenant khác hoặc không tồn tại → 404 `NOT_FOUND`. Giới hạn 20 lần/phút/user.",
+        "operationId": "paymentClaims_resolve",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID, giữ nguyên khi thử lại hoặc phát lại từ outbox",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolvePaymentClaimRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResolvePaymentClaimResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CONFLICT_STALE\n\nIDEMPOTENCY_IN_PROGRESS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED\n\nIDEMPOTENCY_KEY_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Giáo viên xác nhận hoặc \"Chưa nhận được\" (US-7.7 AC2, AC3)",
+        "tags": [
+          "billing"
+        ]
+      }
+    },
     "/v1/reports/month-overview": {
       "get": {
         "description": "Bốn ô số của màn T12. Đổi tháng chỉ đổi `billedAmount` và `collectedAmount`; `outstandingAmount` và `activeStudentCount` là giá trị hiện tại. Cập nhật ngay khi ghi hoặc hủy thanh toán (US-7.4 AC3 \"báo cáo cập nhật\"): đọc thẳng từ sổ, không có bảng tổng hợp trễ.",
@@ -8348,6 +8767,194 @@
           }
         ],
         "summary": "Doanh thu đã thu 12 tháng gần nhất (T12, US-8.2 AC1)",
+        "tags": [
+          "reports"
+        ]
+      }
+    },
+    "/v1/exports": {
+      "post": {
+        "description": "Chỉ gói Pro (khóa `reports.export`): gói Miễn phí → 402 `FEATURE_REQUIRES_PRO` kèm `details.feature`. Tạo việc cho worker (BullMQ) rồi trả ngay `queued`; client hỏi `GET /exports/{id}`. Tệp lên bucket private, tiền là số nguyên đồng, ngày dd/mm/yyyy, Σ khớp con số trên màn hình (US-8.6 AC2: cùng truy vấn với `GET /reports/*` và `GET /receivables`). Thiếu `fromMonth`/`toMonth` với `revenue`/`payments`, `toMonth` trước `fromMonth` hoặc quá 24 tháng → 422 `VALIDATION_FAILED`. Giới hạn 10 lần/phút/user.",
+        "operationId": "exports_create",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID, giữ nguyên khi thử lại hoặc phát lại từ outbox",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateExportRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportJob"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "FEATURE_REQUIRES_PRO",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "IDEMPOTENCY_IN_PROGRESS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED\n\nIDEMPOTENCY_KEY_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Xuất doanh thu, khoản thu hoặc công nợ ra Excel/CSV (US-8.6)",
+        "tags": [
+          "reports"
+        ]
+      }
+    },
+    "/v1/exports/{id}": {
+      "get": {
+        "description": "Dùng chung cho `POST /exports`, `POST /compliance/revenue-book/export` và `POST /compliance/form03/pdf`. Không kiểm gói: tenant đã xuất lúc còn Pro vẫn lấy lại link trong hạn lưu tệp. Việc của tenant khác hoặc không tồn tại → 404 `NOT_FOUND`.",
+        "operationId": "exports_get",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportJob"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Trạng thái việc xuất và link tải (US-8.6, US-9.4, US-9.5)",
         "tags": [
           "reports"
         ]
@@ -8664,6 +9271,1385 @@
         "summary": "Webhook RevenueCat cập nhật gói Pro (US-0.8 AC2)",
         "tags": [
           "webhooks"
+        ]
+      }
+    },
+    "/v1/files/upload-urls": {
+      "post": {
+        "description": "Kiểm quyền với `entityId` theo `purpose`, MIME và kích thước theo bảng giới hạn của `purpose` rồi cấp URL PUT 10 phút; tệp không đi qua API. MIME ngoài danh sách → 422 `FILE_TYPE_NOT_ALLOWED`; quá trần → 422 `FILE_TOO_LARGE`; `entityId` không thấy hoặc không có quyền → 404 `NOT_FOUND`. Gọi lại cùng `Idempotency-Key` trả lại cùng `fileId` và URL. Giới hạn 30 lần/phút/user.",
+        "operationId": "files_createUploadUrl",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID, giữ nguyên khi thử lại hoặc phát lại từ outbox",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadUrlRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadUrl"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN, CONSENT_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "IDEMPOTENCY_IN_PROGRESS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED, FILE_TOO_LARGE, FILE_TYPE_NOT_ALLOWED\n\nIDEMPOTENCY_KEY_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Xin URL tải tệp lên kho S3 (US-7.7, Spec §3.6c)",
+        "tags": [
+          "files"
+        ]
+      }
+    },
+    "/v1/files/{id}/complete": {
+      "post": {
+        "description": "Server HEAD kho S3: không có đối tượng → 409 `CONFLICT_STALE` (client PUT lại bằng URL còn hạn hoặc xin URL mới); kích thước hoặc content-type lệch với khai báo → 422 `FILE_TOO_LARGE` hoặc `FILE_TYPE_NOT_ALLOWED` và xóa đối tượng. Chỉ người đã xin URL gọi được (người khác → 404). Gọi lại trên tệp đã `ready` vẫn 200 với bản ghi hiện tại.",
+        "operationId": "files_complete",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileRecord"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN, CONSENT_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CONFLICT_STALE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED, FILE_TOO_LARGE, FILE_TYPE_NOT_ALLOWED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Xác nhận đã tải xong, tệp sẵn sàng (US-7.7)",
+        "tags": [
+          "files"
+        ]
+      }
+    },
+    "/v1/files/{id}/download-url": {
+      "get": {
+        "description": "URL presigned GET hết hạn sau 10 phút. Quyền theo `purpose` và thực thể: `receipt` do phụ huynh đã tải lên hoặc giáo viên của tenant sở hữu hóa đơn xem; mọi trường hợp khác (kể cả tệp `pending`) → 404 `NOT_FOUND`, không lộ tệp có tồn tại.",
+        "operationId": "files_downloadUrl",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileDownloadUrl"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN, CONSENT_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Lấy URL tải tệp (US-7.7)",
+        "tags": [
+          "files"
+        ]
+      }
+    },
+    "/v1/compliance/checklist": {
+      "get": {
+        "description": "Bốn mục theo US-9.1 AC1, kèm % hoàn thành và mục tiếp theo. Tenant mới trả đủ mục ở `todo`; `school_declaration` là `not_applicable` khi đã khai \"Không\". Mọi gói dùng đủ (US-9.1 AC4). Đủ mọi mục `done` thì ghi sự kiện `compliance_item_completed` mỗi mục (Spec §8).",
+        "operationId": "compliance_checklist",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComplianceChecklist"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Checklist tuân thủ Thông tư 29 (T13, US-9.1)",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/v1/compliance/checklist/{itemKey}": {
+      "patch": {
+        "description": "Mục do hệ thống suy ra (`auto = true`: `public_disclosure`, `school_declaration`) → 422 `VALIDATION_FAILED` ở `itemKey`. `registration_number` đặt `done` phải có `data.registrationNo`. Trả checklist mới.",
+        "operationId": "compliance_updateItem",
+        "parameters": [
+          {
+            "name": "itemKey",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "$ref": "#/components/schemas/ComplianceItemKey"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID, giữ nguyên khi thử lại hoặc phát lại từ outbox",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateChecklistItemRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComplianceChecklist"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "IDEMPOTENCY_IN_PROGRESS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED\n\nIDEMPOTENCY_KEY_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Đánh dấu hoặc bỏ đánh dấu một mục checklist (US-9.1 AC3)",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/v1/compliance/form02": {
+      "get": {
+        "description": "Điền từ lớp `active` (môn, khối, lịch, địa điểm, học phí, người dạy) và chỉ rõ trường còn thiếu theo lớp. Gói Miễn phí vẫn nhận dữ liệu với `featureEnabled = false` để client làm mờ và mời nâng cấp (US-9.2 AC4).",
+        "operationId": "compliance_form02",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Form02"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Bảng công khai Mẫu 02 tự điền (T13, US-9.2 AC1, AC4)",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/v1/compliance/form02/publish": {
+      "post": {
+        "description": "Chỉ gói Pro (khóa `compliance.form02`): Miễn phí → 402 `FEATURE_REQUIRES_PRO`. Bật công khai: chụp `snapshot` vào `public_disclosures`, sinh `slug` cố định ở lần đầu, đặt `public_disclosure` của checklist `done`, cho worker sinh PDF A4 lên bucket `public`. Dữ liệu lớp đổi sau đó thì snapshot và `updatedAt` tự cập nhật (US-9.2 AC3). Chưa có lớp `active` hoặc còn trường thiếu → 422 `VALIDATION_FAILED` (`errors.rows`: danh sách thiếu). Tắt: `GET /public/disclosures/{slug}` trả 404, checklist về `todo`. Trả Mẫu 02 mới (`pdfStatus` có thể còn `processing`).",
+        "operationId": "compliance_publishForm02",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID, giữ nguyên khi thử lại hoặc phát lại từ outbox",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishForm02Request"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Form02"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "FEATURE_REQUIRES_PRO",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "IDEMPOTENCY_IN_PROGRESS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED\n\nIDEMPOTENCY_KEY_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Bật hoặc tắt công khai Mẫu 02 (US-9.2 AC2, AC3)",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/v1/compliance/school-declaration": {
+      "get": {
+        "description": "Bổ sung ngoài bảng Spec §5.4: màn khai báo cần đọc lại giá trị đã khai. Chưa khai trả `teachesAtSchool = null`.",
+        "operationId": "compliance_schoolDeclaration",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchoolDeclaration"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Khai báo trường chính khóa đang dạy (US-9.4)",
+        "tags": [
+          "compliance"
+        ]
+      },
+      "put": {
+        "description": "Thay toàn bộ khai báo, gọi lại cùng nội dung cho cùng kết quả. `teachesAtSchool = true` bắt buộc `schoolName` và ít nhất một lớp (thiếu → 422 `VALIDATION_FAILED`); `false` xóa tên và lớp, ẩn Mẫu 03. Cập nhật `tenants.teaches_at_school` và mục `school_declaration` của checklist. Miễn phí dùng đủ. Cảnh báo trùng khi thêm học viên (US-9.4 AC1) làm ở Sprint 9 cùng nhập Excel.",
+        "operationId": "compliance_putSchoolDeclaration",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID, giữ nguyên khi thử lại hoặc phát lại từ outbox",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutSchoolDeclarationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchoolDeclaration"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "IDEMPOTENCY_IN_PROGRESS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED\n\nIDEMPOTENCY_KEY_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Khai trường và lớp chính khóa, hoặc khai \"Không\" (US-9.4 AC1, AC3)",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/v1/compliance/form03": {
+      "get": {
+        "description": "Bổ sung ngoài bảng Spec §5.4: xem trước trước khi xuất PDF. Gói Miễn phí nhận dữ liệu với `featureEnabled = false`. Chưa khai hoặc khai \"Không\": `applicable = false`, `rows` rỗng (US-9.4 AC3).",
+        "operationId": "compliance_form03",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Form03"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Biểu mẫu báo cáo Mẫu 03 điền sẵn (T13, US-9.4 AC2)",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/v1/compliance/form03/pdf": {
+      "post": {
+        "description": "Chỉ gói Pro (khóa `compliance.form03`): Miễn phí → 402 `FEATURE_REQUIRES_PRO`. Chưa khai hoặc khai \"Không\" → 422 `VALIDATION_FAILED` ở `teachesAtSchool`. Worker sinh PDF A4 lên bucket private; hỏi `GET /exports/{id}` lấy link tải. Giới hạn 10 lần/phút/user.",
+        "operationId": "compliance_form03Pdf",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID, giữ nguyên khi thử lại hoặc phát lại từ outbox",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportJob"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "FEATURE_REQUIRES_PRO",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "IDEMPOTENCY_IN_PROGRESS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED\n\nIDEMPOTENCY_KEY_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Xuất PDF báo cáo Mẫu 03 (US-9.4 AC2)",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/v1/compliance/revenue-book": {
+      "get": {
+        "description": "Đọc thẳng từ `revenue_ledger` nên khớp từng đồng với báo cáo T12 (cùng sổ, `fiscal_year` theo múi giờ tenant). `thresholds` hai ngưỡng 500 triệu và 1 tỷ kèm thanh tiến độ; `alerts` các cảnh báo 80% (400 triệu, 800 triệu) đã phát sinh: sinh một lần cho mỗi mốc khi thanh toán được ghi làm lũy kế vượt mốc, không sinh lại khi hủy rồi thu lại (unique `(tenant, năm, mốc)`). Mọi gói xem được (US-9.5 AC4). `entries` phân trang offset. Push/thông báo hộp thư cho cảnh báo (loại `tax_threshold_alert`) chờ PR `oneOf` của `Notification` (xem CHANGELOG); tới đó app đọc `alerts` của endpoint này.",
+        "operationId": "compliance_revenueBook",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": 1,
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000
+            }
+          },
+          {
+            "name": "pageSize",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": 20,
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "year",
+            "required": false,
+            "in": "query",
+            "description": "Năm dương lịch theo múi giờ tenant; bỏ trống = năm hiện tại",
+            "schema": {
+              "description": "Năm dương lịch theo múi giờ tenant; bỏ trống = năm hiện tại",
+              "example": 2026,
+              "type": "integer",
+              "minimum": 2020,
+              "maximum": 2100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevenueBook"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Sổ doanh thu, lũy kế và ngưỡng thuế của năm (T13, US-9.5)",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/v1/compliance/revenue-book/export": {
+      "post": {
+        "description": "Chỉ gói Pro (khóa `revenue.export`): Miễn phí → 402 `FEATURE_REQUIRES_PRO` (xem và theo dõi ngưỡng vẫn mở, US-9.5 AC4). Việc xuất bất đồng bộ như `POST /exports`; Σ tệp bằng `cumulativeAmount`. Giới hạn 10 lần/phút/user.",
+        "operationId": "compliance_exportRevenueBook",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID, giữ nguyên khi thử lại hoặc phát lại từ outbox",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExportRevenueBookRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportJob"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "FEATURE_REQUIRES_PRO",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "IDEMPOTENCY_IN_PROGRESS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED\n\nIDEMPOTENCY_KEY_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Xuất sổ doanh thu ra Excel/CSV/PDF (US-9.5 AC4)",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/v1/compliance/tax-alerts/{id}/dismiss": {
+      "post": {
+        "description": "Đặt `dismissedAt`; gọi lại trên cảnh báo đã đóng vẫn 204. Không xóa cảnh báo và không cho sinh lại. Cảnh báo của tenant khác hoặc không tồn tại → 404 `NOT_FOUND`.",
+        "operationId": "compliance_dismissTaxAlert",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Đóng một cảnh báo ngưỡng thuế (US-9.5 AC3)",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/v1/public/disclosures/{slug}": {
+      "get": {
+        "description": "Không cần đăng nhập. Chỉ trả khi `is_published`; slug không có hoặc đã tắt công khai → cùng 404 `NOT_FOUND` (không lộ slug có tồn tại). Đọc `snapshot` nên khớp ngày cập nhật hiện trên trang; không chứa dữ liệu học viên hay phụ huynh. Có thể cache ngắn ở Cloudflare (`Cache-Control: public, max-age=60`). Giới hạn 120 lần/phút/IP.",
+        "operationId": "publicDisclosure_get",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9-]{3,80}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicDisclosure"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Dữ liệu trang công khai Mẫu 02 (CK, US-9.2 AC2, AC3)",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/v1/legal-articles": {
+      "get": {
+        "description": "Chỉ bài `published` (bản nháp và bài chưa có người duyệt không bao giờ lộ, US-9.6 AC3), mới cập nhật trước. Mỗi bài có tóm tắt, nội dung, trích dẫn văn bản gốc, ngày cập nhật và dòng \"Công cụ hỗ trợ, không thay tư vấn pháp lý\". Thông báo \"bài đổi\" cho mọi giáo viên (US-9.6 AC2) chờ PR `oneOf` của `Notification` (xem CHANGELOG).",
+        "operationId": "legalArticles_list",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": 1,
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000
+            }
+          },
+          {
+            "name": "pageSize",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": 20,
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "q",
+            "required": false,
+            "in": "query",
+            "description": "Tìm trong tiêu đề và tóm tắt, không dấu",
+            "schema": {
+              "description": "Tìm trong tiêu đề và tóm tắt, không dấu",
+              "type": "string",
+              "maxLength": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegalArticleViewPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Danh sách bài quy định đã phát hành (US-9.6 AC1)",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/v1/legal-articles/{slug}": {
+      "get": {
+        "description": "Dùng cho liên kết từ checklist (`legalArticleSlug`), cảnh báo lớp tiểu học và cảnh báo ngưỡng thuế. Bài nháp hoặc không tồn tại → 404 `NOT_FOUND`.",
+        "operationId": "legalArticles_get",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9-]{3,80}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegalArticleView"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Một bài quy định đã phát hành (US-9.6 AC1)",
+        "tags": [
+          "compliance"
         ]
       }
     }
@@ -10231,6 +12217,24 @@
           "classId": "019b2c3f-5e01-7c20-9b01-000000000001",
           "studentId": "019b2c4f-0001-7b30-8c01-000000000001",
           "joinedOn": "2026-12-14"
+        }
+      },
+      "AcknowledgeClassWarningRequest": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "TT29_PRIMARY_ACADEMIC"
+            ],
+            "description": "`TT29_PRIMARY_ACADEMIC` = lớp khối 1 đến 5 với môn văn hóa (US-9.3 AC1), trùng `warnings[].code` của `ClassCreated`. Môn nghệ thuật, thể thao, kỹ năng sống không có cảnh báo (US-9.3 AC2)"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "example": {
+          "code": "TT29_PRIMARY_ACADEMIC"
         }
       },
       "PutFeeOverrideRequest": {
@@ -16106,6 +18110,277 @@
         ],
         "description": "`unpaid_carried` = phần chưa thu của hóa đơn kỳ trước chuyển kỳ sau (ghi nợ), `overpayment` = trả thừa (ghi có), `prev_adjustment` = chênh lệch do sửa điểm danh sau phát hành (nợ hoặc có), `applied_to_invoice` = khoản đã đưa vào dòng `carry_over` của hóa đơn kỳ sau (bút toán đối ứng), `payment_void` = đảo do hủy thanh toán. Client coi giá trị lạ như dòng thường"
       },
+      "CreatePaymentClaimRequest": {
+        "type": "object",
+        "properties": {
+          "receiptFileId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "Tệp biên lai: `purpose = receipt`, `entityId` = hóa đơn này, `status = ready`, do chính user này tải lên (US-7.7 AC1 \"đính ảnh\" bắt buộc). Sai điều kiện nào → 422 `VALIDATION_FAILED` ở `receiptFileId`"
+          },
+          "amount": {
+            "description": "VND phụ huynh nói đã chuyển; bỏ trống = `remainingAmount` của hóa đơn. Chỉ để giáo viên đối chiếu, giáo viên quyết số tiền ghi thu khi xác nhận",
+            "example": 1400000,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100000000000
+          },
+          "note": {
+            "description": "Lời nhắn, vd. \"Chuyển lúc 9h sáng, ngân hàng ACB\"",
+            "type": "string",
+            "maxLength": 300
+          }
+        },
+        "required": [
+          "receiptFileId"
+        ],
+        "example": {
+          "receiptFileId": "019c0b30-0001-7b30-8c01-000000000001",
+          "amount": 1400000
+        }
+      },
+      "PaymentClaim": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "invoiceId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PaymentClaimStatus"
+          },
+          "amount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "VND phụ huynh khai (hoặc `remainingAmount` lúc báo)"
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "receiptFileId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "Giáo viên xem ảnh bằng `GET /files/{receiptFileId}/download-url` (URL 10 phút)"
+          },
+          "claimedBy": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name"
+            ],
+            "additionalProperties": false,
+            "description": "Phụ huynh báo"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "resolvedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "resolvedBy": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name"
+            ],
+            "additionalProperties": false
+          },
+          "rejectReason": {
+            "description": "Lý do giáo viên ghi khi `rejected`; null với trạng thái khác",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "paymentId": {
+            "description": "Thanh toán sinh ra khi `confirmed`; null với trạng thái khác",
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          }
+        },
+        "required": [
+          "id",
+          "invoiceId",
+          "status",
+          "amount",
+          "note",
+          "receiptFileId",
+          "claimedBy",
+          "createdAt",
+          "resolvedAt",
+          "resolvedBy",
+          "rejectReason",
+          "paymentId"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "id": "019c0c40-0001-7b30-8c01-000000000001",
+          "invoiceId": "019c0a10-0001-7b30-8c01-000000000001",
+          "status": "pending",
+          "amount": 1400000,
+          "note": null,
+          "receiptFileId": "019c0b30-0001-7b30-8c01-000000000001",
+          "claimedBy": {
+            "id": "019b2c00-0001-7b30-8c01-000000000009",
+            "name": "Nguyễn Văn Hải"
+          },
+          "createdAt": "2027-01-05T09:12:00+07:00",
+          "resolvedAt": null,
+          "resolvedBy": null,
+          "rejectReason": null,
+          "paymentId": null
+        }
+      },
+      "PaymentClaimStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "confirmed",
+          "rejected"
+        ],
+        "description": "`pending` = chờ giáo viên (hóa đơn `pending_confirmation`); `confirmed` = giáo viên xác nhận, đã sinh thanh toán `bank_transfer`; `rejected` = giáo viên bấm \"Chưa nhận được\", hóa đơn về trạng thái trước đó và nhắc nợ chạy lại. Client coi giá trị lạ như `pending`"
+      },
+      "PaymentClaimList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PaymentClaim"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "additionalProperties": false,
+        "description": "Mọi lần báo của hóa đơn, mới trước, gồm đã xác nhận và bị từ chối. Không phân trang: một hóa đơn có ít lần báo"
+      },
+      "ResolvePaymentClaimRequest": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "decision": {
+                "type": "string",
+                "enum": [
+                  "confirm"
+                ]
+              },
+              "amount": {
+                "description": "VND ghi thu; bỏ trống = `amount` của lần báo. Xử lý như `POST /invoices/{id}/payments` với `method = bank_transfer` (US-7.4: thu một phần, trả thừa vào sổ học viên)",
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100000000000
+              },
+              "paidOn": {
+                "description": "Ngày thu; bỏ trống = hôm nay theo múi giờ tenant. Cùng ràng buộc với `RecordPaymentRequest.paidOn`",
+                "type": "string",
+                "format": "date",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+              }
+            },
+            "required": [
+              "decision"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "decision": {
+                "type": "string",
+                "enum": [
+                  "reject"
+                ]
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 300,
+                "description": "Bắt buộc; gửi kèm thông báo cho phụ huynh"
+              }
+            },
+            "required": [
+              "decision",
+              "reason"
+            ]
+          }
+        ],
+        "example": {
+          "decision": "confirm",
+          "amount": 1400000
+        }
+      },
+      "ResolvePaymentClaimResult": {
+        "type": "object",
+        "properties": {
+          "claim": {
+            "$ref": "#/components/schemas/PaymentClaim"
+          },
+          "result": {
+            "description": "Kết quả ghi thu như `POST /invoices/{id}/payments` khi `confirm`; null khi `reject`",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PaymentResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "claim",
+          "result"
+        ],
+        "additionalProperties": false
+      },
       "MonthOverview": {
         "type": "object",
         "properties": {
@@ -16420,6 +18695,192 @@
             }
           ]
         }
+      },
+      "CreateExportRequest": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "revenue",
+              "payments",
+              "receivables"
+            ],
+            "description": "Loại báo cáo (US-8.6 AC1). Sổ doanh thu xuất bằng `POST /compliance/revenue-book/export`, Mẫu 03 bằng `POST /compliance/form03/pdf`"
+          },
+          "fromMonth": {
+            "description": "Tháng đầu `YYYY-MM` (theo múi giờ tenant). Bắt buộc với `revenue` và `payments`; bị bỏ qua với `receivables` (công nợ hiện tại)",
+            "type": "string",
+            "pattern": "^\\d{4}-(0[1-9]|1[0-2])$"
+          },
+          "toMonth": {
+            "description": "Tháng cuối `YYYY-MM`, không trước `fromMonth`, khoảng tối đa 24 tháng; vi phạm → 422 `VALIDATION_FAILED`",
+            "type": "string",
+            "pattern": "^\\d{4}-(0[1-9]|1[0-2])$"
+          },
+          "formats": {
+            "default": [
+              "xlsx",
+              "csv"
+            ],
+            "description": "Mặc định cả `xlsx` và `csv` (Spec §5.4 M8)",
+            "minItems": 1,
+            "maxItems": 2,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "xlsx",
+                "csv"
+              ]
+            }
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "example": {
+          "type": "revenue",
+          "fromMonth": "2026-09",
+          "toMonth": "2026-11",
+          "formats": [
+            "xlsx",
+            "csv"
+          ]
+        }
+      },
+      "ExportJob": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "type": {
+            "$ref": "#/components/schemas/ExportType"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ExportStatus"
+          },
+          "params": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "Tham số đã nhận (`fromMonth`, `toMonth`, `year`, `formats`) để màn hình ghi lại \"Xuất doanh thu 09–11/2026\""
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExportFile"
+            },
+            "description": "Rỗng tới khi `ready`; mỗi định dạng một tệp"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "finishedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "status",
+          "params",
+          "files",
+          "createdAt",
+          "finishedAt"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "id": "019c0d50-0001-7b30-8c01-000000000001",
+          "type": "revenue",
+          "status": "queued",
+          "params": {
+            "fromMonth": "2026-09",
+            "toMonth": "2026-11",
+            "formats": [
+              "xlsx",
+              "csv"
+            ]
+          },
+          "files": [],
+          "createdAt": "2026-12-01T09:00:00+07:00",
+          "finishedAt": null
+        }
+      },
+      "ExportType": {
+        "type": "string",
+        "enum": [
+          "revenue",
+          "payments",
+          "receivables",
+          "revenue_book",
+          "form03"
+        ],
+        "description": "`revenue` = doanh thu theo lớp và theo tháng (T12); `payments` = các khoản thu (sổ `revenue_ledger`) trong khoảng tháng; `receivables` = công nợ hiện tại (T11); `revenue_book` = sổ doanh thu của một năm (US-9.5); `form03` = báo cáo Mẫu 03 (US-9.4). Client coi giá trị lạ như tệp bình thường"
+      },
+      "ExportStatus": {
+        "type": "string",
+        "enum": [
+          "queued",
+          "processing",
+          "ready",
+          "failed"
+        ],
+        "description": "`queued`/`processing` = worker chưa xong, client hỏi lại `GET /exports/{id}` mỗi vài giây; `ready` = có `files`; `failed` = worker lỗi, tạo việc mới. Client coi giá trị lạ như `processing`"
+      },
+      "ExportFile": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "$ref": "#/components/schemas/ExportFormat"
+          },
+          "fileId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "downloadUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "URL presigned tải ngay, hết hạn ở `expiresAt` (link tải 72 giờ, Spec §2.7); hết hạn thì hỏi lại `GET /exports/{id}` để lấy URL mới trong thời hạn lưu tệp (7 ngày)"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          }
+        },
+        "required": [
+          "format",
+          "fileId",
+          "sizeBytes",
+          "downloadUrl",
+          "expiresAt"
+        ],
+        "additionalProperties": false
+      },
+      "ExportFormat": {
+        "type": "string",
+        "enum": [
+          "xlsx",
+          "csv",
+          "pdf"
+        ],
+        "description": "`xlsx`, `csv` (UTF-8 có BOM, mở đúng tiếng Việt trong Excel; tiền là số, ngày dd/mm/yyyy, US-8.6 AC1, AC2), `pdf` (khổ A4: chỉ sổ doanh thu và Mẫu 03)"
       },
       "PlanUsage": {
         "type": "object",
@@ -16911,6 +19372,1254 @@
         "example": {
           "status": "processed"
         }
+      },
+      "UploadUrlRequest": {
+        "type": "object",
+        "properties": {
+          "purpose": {
+            "$ref": "#/components/schemas/FilePurpose"
+          },
+          "entityId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "Thực thể mà tệp sẽ gắn vào, theo `purpose` (`receipt` → id hóa đơn của một con của phụ huynh). Server kiểm quyền với thực thể trước khi cấp URL; không thấy hoặc không có quyền → 404 `NOT_FOUND`"
+          },
+          "fileName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "description": "Tên gốc chỉ lưu ở bảng `files`, không đưa vào khóa đối tượng (khóa: `{tenant_id}/{prefix}/{entity_id}/{uuid}.{ext}`)",
+            "example": "bien-lai.jpg"
+          },
+          "mimeType": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "example": "image/jpeg"
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20000000,
+            "description": "Kích thước tệp tính bằng byte, trần chung 20 MB; trần theo `purpose` thấp hơn (`receipt` 10 MB)",
+            "example": 412880
+          }
+        },
+        "required": [
+          "purpose",
+          "entityId",
+          "fileName",
+          "mimeType",
+          "sizeBytes"
+        ],
+        "example": {
+          "purpose": "receipt",
+          "entityId": "019c0a10-0001-7b30-8c01-000000000001",
+          "fileName": "bien-lai.jpg",
+          "mimeType": "image/jpeg",
+          "sizeBytes": 412880
+        }
+      },
+      "FilePurpose": {
+        "type": "string",
+        "enum": [
+          "receipt"
+        ],
+        "description": "Mục đích tệp, quyết định bucket, tiền tố khóa, MIME, kích thước tối đa và ai được tải lên/xuống. Sprint 8 chỉ có `receipt` (biên lai chuyển khoản, US-7.7: ảnh `image/jpeg`, `image/png`, `image/heic`, ≤ 10 MB, bucket private, `entityId` = id hóa đơn). Các mục đích `assignment`, `submission`, `class_message`, `avatar`, `import` thêm vào enum ở Sprint 9 cùng module tương ứng (thêm giá trị vào request không phá hợp đồng). Client coi giá trị lạ ở phản hồi như tệp bình thường"
+      },
+      "UploadUrl": {
+        "type": "object",
+        "properties": {
+          "fileId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "Bản ghi `files` ở trạng thái `pending` (quá 24 giờ chưa `complete` bị job dọn xóa)"
+          },
+          "uploadUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "URL presigned (SigV4) để client PUT trực tiếp lên kho S3; hết hạn sau 10 phút (`expiresAt`)"
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "PUT"
+            ]
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Header client phải gửi nguyên văn cùng PUT (ít nhất `Content-Type` = `mimeType` đã khai); khác đi kho S3 từ chối chữ ký",
+            "example": {
+              "Content-Type": "image/jpeg"
+            }
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          }
+        },
+        "required": [
+          "fileId",
+          "uploadUrl",
+          "method",
+          "headers",
+          "expiresAt"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "fileId": "019c0b30-0001-7b30-8c01-000000000001",
+          "uploadUrl": "https://files.example.invalid/teachhub-private/t/receipts/i/f.jpg?X-Amz-Signature=...",
+          "method": "PUT",
+          "headers": {
+            "Content-Type": "image/jpeg"
+          },
+          "expiresAt": "2027-01-05T09:22:00+07:00"
+        }
+      },
+      "FileRecord": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "purpose": {
+            "$ref": "#/components/schemas/FilePurpose"
+          },
+          "entityId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "fileName": {
+            "type": "string"
+          },
+          "mimeType": {
+            "type": "string"
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "status": {
+            "$ref": "#/components/schemas/FileStatus"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          }
+        },
+        "required": [
+          "id",
+          "purpose",
+          "entityId",
+          "fileName",
+          "mimeType",
+          "sizeBytes",
+          "status",
+          "createdAt"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "id": "019c0b30-0001-7b30-8c01-000000000001",
+          "purpose": "receipt",
+          "entityId": "019c0a10-0001-7b30-8c01-000000000001",
+          "fileName": "bien-lai.jpg",
+          "mimeType": "image/jpeg",
+          "sizeBytes": 412880,
+          "status": "ready",
+          "createdAt": "2027-01-05T09:12:00+07:00"
+        }
+      },
+      "FileStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "ready"
+        ],
+        "description": "`pending` = đã cấp URL, chưa xác nhận; `ready` = server đã HEAD kho S3 và kích thước, content-type khớp. Chỉ tệp `ready` mới gắn được vào bài nộp/biên lai"
+      },
+      "FileDownloadUrl": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "URL presigned GET, hết hạn sau 10 phút (`expiresAt`); lấy lại khi hết hạn, đừng lưu lâu"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          }
+        },
+        "required": [
+          "url",
+          "expiresAt"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "url": "https://files.example.invalid/teachhub-private/t/receipts/i/f.jpg?X-Amz-Signature=...",
+          "expiresAt": "2027-01-05T09:22:00+07:00"
+        }
+      },
+      "ComplianceChecklist": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ComplianceItem"
+            }
+          },
+          "totalCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "Số mục áp dụng (không tính `not_applicable`)"
+          },
+          "completedCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "percent": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "`completedCount` / `totalCount` làm tròn xuống, 0 khi `totalCount` = 0"
+          },
+          "nextItemKey": {
+            "description": "Mục `todo` đầu tiên theo thứ tự `items` cho nút \"Bước tiếp theo\" (US-9.1 AC2); null khi đã xong hết. Gói Miễn phí dùng đủ chức năng (US-9.1 AC4)",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ComplianceItemKey"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "totalCount",
+          "completedCount",
+          "percent",
+          "nextItemKey"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "items": [
+            {
+              "itemKey": "business_registration",
+              "title": "Đăng ký hộ kinh doanh",
+              "description": "Giáo viên dạy thêm có thu phí cần đăng ký hộ kinh doanh.",
+              "status": "done",
+              "auto": false,
+              "data": null,
+              "legalArticleSlug": "dang-ky-ho-kinh-doanh",
+              "completedAt": "2026-12-01T09:00:00+07:00"
+            },
+            {
+              "itemKey": "registration_number",
+              "title": "Lưu số giấy chứng nhận",
+              "description": "Nhập số giấy chứng nhận đăng ký hộ kinh doanh.",
+              "status": "todo",
+              "auto": false,
+              "data": null,
+              "legalArticleSlug": null,
+              "completedAt": null
+            }
+          ],
+          "totalCount": 4,
+          "completedCount": 1,
+          "percent": 25,
+          "nextItemKey": "registration_number"
+        }
+      },
+      "ComplianceItem": {
+        "type": "object",
+        "properties": {
+          "itemKey": {
+            "$ref": "#/components/schemas/ComplianceItemKey"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string",
+            "description": "Giải thích ngắn của mục (US-9.1 AC3), do server cấp để chỉnh nội dung không cần phát hành app"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ComplianceItemStatus"
+          },
+          "auto": {
+            "type": "boolean",
+            "description": "`true` = trạng thái do hệ thống suy ra (`public_disclosure`, `school_declaration`), `PATCH` bị từ chối; người dùng làm ở màn tương ứng"
+          },
+          "data": {
+            "description": "Dữ liệu nhập cho mục (vd. `registrationNo` của `registration_number`); null khi mục không có ô nhập hoặc chưa nhập",
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "registrationNo": {
+                "type": "string",
+                "maxLength": 50
+              }
+            },
+            "additionalProperties": false
+          },
+          "legalArticleSlug": {
+            "description": "Bài thư viện quy định liên quan (`GET /legal-articles/{slug}`, US-9.1 AC3); null nếu chưa có bài đã phát hành",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "completedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          }
+        },
+        "required": [
+          "itemKey",
+          "title",
+          "description",
+          "status",
+          "auto",
+          "data",
+          "legalArticleSlug",
+          "completedAt"
+        ],
+        "additionalProperties": false
+      },
+      "ComplianceItemKey": {
+        "type": "string",
+        "enum": [
+          "business_registration",
+          "registration_number",
+          "public_disclosure",
+          "school_declaration"
+        ],
+        "description": "`business_registration` = đăng ký hộ kinh doanh; `registration_number` = lưu số giấy chứng nhận (có `data.registrationNo`); `public_disclosure` = công khai Mẫu 02 (tự `done` khi đang công khai); `school_declaration` = khai trường chính khóa (tự `done` khi đã khai, `not_applicable` khi khai \"Không\"). Client bỏ qua khóa lạ"
+      },
+      "ComplianceItemStatus": {
+        "type": "string",
+        "enum": [
+          "todo",
+          "done",
+          "not_applicable"
+        ],
+        "description": "`not_applicable` = không áp dụng, không tính vào % hoàn thành (chỉ `school_declaration` khi giáo viên khai không dạy ở trường, US-9.4 AC3). Client coi giá trị lạ như `todo`"
+      },
+      "UpdateChecklistItemRequest": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "todo",
+              "done"
+            ]
+          },
+          "data": {
+            "description": "`registration_number` với `status = done` bắt buộc `data.registrationNo`; mục khác không nhận `data`. Sai → 422 `VALIDATION_FAILED`",
+            "type": "object",
+            "properties": {
+              "registrationNo": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 50
+              }
+            },
+            "required": [
+              "registrationNo"
+            ]
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "example": {
+          "status": "done",
+          "data": {
+            "registrationNo": "01A8012345"
+          }
+        }
+      },
+      "Form02": {
+        "type": "object",
+        "properties": {
+          "featureEnabled": {
+            "type": "boolean",
+            "description": "`compliance.form02` của gói. `false` (Miễn phí): vẫn trả bảng điền sẵn để client làm mờ và mời nâng cấp (US-9.2 AC4); `POST .../publish` → 402 `FEATURE_REQUIRES_PRO`"
+          },
+          "teacherName": {
+            "type": "string"
+          },
+          "businessRegNo": {
+            "description": "Số giấy chứng nhận lưu ở checklist",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Form02Row"
+            },
+            "description": "Mỗi lớp `active` một dòng, điền từ dữ liệu lớp (US-9.2 AC1)"
+          },
+          "missing": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Form02MissingField"
+            },
+            "description": "Trường còn thiếu, chỉ rõ theo lớp (US-9.2 AC1); rỗng mới công khai được"
+          },
+          "canPublish": {
+            "type": "boolean",
+            "description": "`rows` không rỗng và `missing` rỗng"
+          },
+          "isPublished": {
+            "type": "boolean"
+          },
+          "slug": {
+            "description": "Đường dẫn cố định của trang công khai `/cong-khai/{slug}`, sinh một lần ở lần công khai đầu, không đổi khi tắt/bật lại (US-9.2 AC2); null khi chưa từng công khai",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "publicUrl": {
+            "description": "URL đầy đủ của trang công khai khi `isPublished`; null nếu không",
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          },
+          "pdfStatus": {
+            "type": "string",
+            "enum": [
+              "none",
+              "processing",
+              "ready",
+              "failed"
+            ],
+            "description": "PDF A4 do worker sinh lên bucket `public` mỗi khi công khai hoặc dữ liệu lớp đổi"
+          },
+          "pdfUrl": {
+            "description": "URL công khai của PDF (`files.dayhoc.app`) khi `pdfStatus = ready` và `isPublished`",
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          },
+          "updatedAt": {
+            "description": "Ngày cập nhật bảng công khai (US-9.2 AC3); null khi chưa công khai",
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          }
+        },
+        "required": [
+          "featureEnabled",
+          "teacherName",
+          "businessRegNo",
+          "rows",
+          "missing",
+          "canPublish",
+          "isPublished",
+          "slug",
+          "publicUrl",
+          "pdfStatus",
+          "pdfUrl",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "Form02Row": {
+        "type": "object",
+        "properties": {
+          "classId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "className": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "grade": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 12
+          },
+          "scheduleSummary": {
+            "description": "Lịch học rút gọn do server soạn từ lịch lặp, vd. \"T2, T4 18:00–19:30\"; null khi lớp chưa có lịch",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "location": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "feeType": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FeeType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "feeAmount": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 1000000000
+          },
+          "teacherName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "classId",
+          "className",
+          "subject",
+          "grade",
+          "scheduleSummary",
+          "location",
+          "feeType",
+          "feeAmount",
+          "teacherName"
+        ],
+        "additionalProperties": false
+      },
+      "Form02MissingField": {
+        "type": "object",
+        "properties": {
+          "classId": {
+            "description": "null = thiếu ở cấp cơ sở (vd. `teacherName`)",
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "field": {
+            "type": "string",
+            "enum": [
+              "location",
+              "feeAmount",
+              "scheduleSummary",
+              "teacherName"
+            ]
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "classId",
+          "field",
+          "message"
+        ],
+        "additionalProperties": false
+      },
+      "PublishForm02Request": {
+        "type": "object",
+        "properties": {
+          "published": {
+            "default": true,
+            "description": "`true` (mặc định) = bật công khai; `false` = tắt (trang công khai trả 404, PDF giữ nhưng không công khai)",
+            "type": "boolean"
+          }
+        },
+        "example": {
+          "published": true
+        }
+      },
+      "SchoolDeclaration": {
+        "type": "object",
+        "properties": {
+          "teachesAtSchool": {
+            "description": "null = chưa khai; `false` = khai \"Không\" (ẩn Mẫu 03 và cảnh báo trùng, US-9.4 AC3)",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "schoolName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "schoolClasses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Các lớp chính khóa đang dạy, vd. [\"9A3\", \"9A4\"]"
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          }
+        },
+        "required": [
+          "teachesAtSchool",
+          "schoolName",
+          "schoolClasses",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "PutSchoolDeclarationRequest": {
+        "type": "object",
+        "properties": {
+          "teachesAtSchool": {
+            "type": "boolean"
+          },
+          "schoolName": {
+            "description": "Bắt buộc khi `teachesAtSchool = true`; bị bỏ qua khi `false`",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "schoolClasses": {
+            "description": "Ít nhất một lớp khi `teachesAtSchool = true`; bị bỏ qua khi `false`",
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 30
+            }
+          }
+        },
+        "required": [
+          "teachesAtSchool"
+        ],
+        "description": "Thay toàn bộ khai báo (PUT, idempotent). Đặt `school_declaration` của checklist `done` hoặc `not_applicable`",
+        "example": {
+          "teachesAtSchool": true,
+          "schoolName": "THCS Lê Lợi",
+          "schoolClasses": [
+            "9A3",
+            "9A4"
+          ]
+        }
+      },
+      "Form03": {
+        "type": "object",
+        "properties": {
+          "featureEnabled": {
+            "type": "boolean",
+            "description": "`compliance.form03` của gói; `false` thì `POST /compliance/form03/pdf` → 402 `FEATURE_REQUIRES_PRO`"
+          },
+          "applicable": {
+            "type": "boolean",
+            "description": "`teachesAtSchool = true`. `false` (chưa khai hoặc khai \"Không\") thì `rows` rỗng và PDF bị từ chối"
+          },
+          "declaration": {
+            "$ref": "#/components/schemas/SchoolDeclaration"
+          },
+          "teacherName": {
+            "type": "string"
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Form03Row"
+            },
+            "description": "Học viên `active` có `school` và `schoolClass` trùng khai báo (so khớp không phân biệt hoa thường và dấu), điền sẵn từ dữ liệu lớp và học viên (US-9.4 AC2). Cột chính xác của biểu mẫu do PDF quy định [Cần luật sư chốt mẫu]"
+          }
+        },
+        "required": [
+          "featureEnabled",
+          "applicable",
+          "declaration",
+          "teacherName",
+          "rows"
+        ],
+        "additionalProperties": false
+      },
+      "Form03Row": {
+        "type": "object",
+        "properties": {
+          "studentId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "fullName": {
+            "type": "string"
+          },
+          "dob": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+          },
+          "school": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "schoolClass": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "classNames": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Các lớp đang ghi danh ở tenant này"
+          }
+        },
+        "required": [
+          "studentId",
+          "fullName",
+          "dob",
+          "school",
+          "schoolClass",
+          "classNames"
+        ],
+        "additionalProperties": false
+      },
+      "RevenueBook": {
+        "type": "object",
+        "properties": {
+          "year": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "cumulativeAmount": {
+            "type": "integer",
+            "minimum": -100000000000,
+            "maximum": 100000000000,
+            "description": "Doanh thu lũy kế cả năm = Σ `amount` của `revenue_ledger` có `fiscal_year` = `year`, gồm dòng đảo (US-9.5 AC1, AC2). Hủy thanh toán của năm trước không làm năm này giảm (dòng đảo mang ngày của khoản gốc)"
+          },
+          "monthly": {
+            "minItems": 12,
+            "maxItems": 12,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "month": {
+                  "type": "string",
+                  "pattern": "^\\d{4}-(0[1-9]|1[0-2])$"
+                },
+                "amount": {
+                  "type": "integer",
+                  "minimum": -100000000000,
+                  "maximum": 100000000000,
+                  "description": "Σ `amount` của tháng"
+                }
+              },
+              "required": [
+                "month",
+                "amount"
+              ],
+              "additionalProperties": false
+            },
+            "description": "12 tháng của năm, T1 trước"
+          },
+          "thresholds": {
+            "minItems": 2,
+            "maxItems": 2,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaxThreshold"
+            },
+            "description": "Hai ngưỡng theo thứ tự tăng dần (500 triệu, 1 tỷ). Gói Miễn phí cũng đầy đủ (US-9.5 AC4)"
+          },
+          "alerts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaxAlert"
+            },
+            "description": "Cảnh báo đã phát sinh trong năm, mới trước"
+          },
+          "entries": {
+            "type": "object",
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/RevenueEntry"
+                }
+              },
+              "total": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "page": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "pageSize": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "totalAmount": {
+                "type": "integer",
+                "minimum": -100000000000,
+                "maximum": 100000000000,
+                "description": "Σ `amount` của mọi dòng trong năm, bằng `cumulativeAmount`"
+              }
+            },
+            "required": [
+              "items",
+              "total",
+              "page",
+              "pageSize",
+              "totalAmount"
+            ],
+            "additionalProperties": false,
+            "description": "Các dòng sổ (cùng dạng `RevenueEntry` của `GET /reports/payments`), mới trước, phân trang offset"
+          }
+        },
+        "required": [
+          "year",
+          "cumulativeAmount",
+          "monthly",
+          "thresholds",
+          "alerts",
+          "entries"
+        ],
+        "additionalProperties": false
+      },
+      "TaxThreshold": {
+        "type": "object",
+        "properties": {
+          "thresholdAmount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "Ngưỡng doanh thu năm: 500.000.000 hoặc 1.000.000.000 (US-9.5 AC2)"
+          },
+          "warnAmount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "Mốc cảnh báo = 80% ngưỡng: 400.000.000 hoặc 800.000.000 (US-9.5 AC3)"
+          },
+          "progressPercent": {
+            "type": "number",
+            "minimum": 0,
+            "description": "`cumulativeAmount` / `thresholdAmount` × 100, một chữ số thập phân, không chặn ở 100 (vượt ngưỡng thì > 100); 0 khi lũy kế âm. Client vẽ thanh tiến độ"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "below",
+              "warning",
+              "exceeded"
+            ],
+            "description": "`below` < mốc cảnh báo; `warning` ≥ mốc cảnh báo và < ngưỡng; `exceeded` ≥ ngưỡng. Client coi giá trị lạ như `below`"
+          }
+        },
+        "required": [
+          "thresholdAmount",
+          "warnAmount",
+          "progressPercent",
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "TaxAlert": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "milestone": {
+            "type": "string",
+            "enum": [
+              "400m",
+              "800m"
+            ],
+            "description": "Mốc đã vượt (`400m` = 80% của 500 triệu, `800m` = 80% của 1 tỷ). Mỗi (tenant, năm, mốc) chỉ một cảnh báo (`tax_threshold_alerts` unique, US-9.5 AC3)"
+          },
+          "warnAmount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "Mốc cảnh báo (VND)"
+          },
+          "thresholdAmount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000000,
+            "description": "Ngưỡng tương ứng (VND)"
+          },
+          "cumulativeAmount": {
+            "type": "integer",
+            "minimum": -100000000000,
+            "maximum": 100000000000,
+            "description": "Lũy kế ngay sau thanh toán làm vượt mốc"
+          },
+          "paymentId": {
+            "description": "Thanh toán làm vượt mốc",
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "triggeredAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "dismissedAt": {
+            "description": "Giáo viên đã đóng cảnh báo (`POST /compliance/tax-alerts/{id}/dismiss`); vẫn trả để xem lại",
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "legalArticleSlug": {
+            "description": "Bài thư viện giải thích nghĩa vụ kèm cảnh báo (US-9.5 AC3); null nếu chưa có bài đã phát hành",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "milestone",
+          "warnAmount",
+          "thresholdAmount",
+          "cumulativeAmount",
+          "paymentId",
+          "triggeredAt",
+          "dismissedAt",
+          "legalArticleSlug"
+        ],
+        "additionalProperties": false
+      },
+      "ExportRevenueBookRequest": {
+        "type": "object",
+        "properties": {
+          "year": {
+            "description": "Bỏ trống = năm hiện tại",
+            "type": "integer",
+            "minimum": 2020,
+            "maximum": 2100
+          },
+          "formats": {
+            "default": [
+              "xlsx",
+              "pdf"
+            ],
+            "description": "Mặc định `xlsx` và `pdf` (US-9.5 \"xem, xuất PDF/Excel\")",
+            "minItems": 1,
+            "maxItems": 3,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "xlsx",
+                "csv",
+                "pdf"
+              ]
+            }
+          }
+        },
+        "example": {
+          "year": 2026,
+          "formats": [
+            "xlsx",
+            "pdf"
+          ]
+        }
+      },
+      "PublicDisclosure": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "providerName": {
+            "type": "string",
+            "description": "Tên cơ sở/người dạy, không có dữ liệu học viên hay phụ huynh"
+          },
+          "businessRegNo": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "className": {
+                  "type": "string"
+                },
+                "subject": {
+                  "type": "string"
+                },
+                "grade": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 12
+                },
+                "scheduleSummary": {
+                  "description": "Lịch học rút gọn do server soạn từ lịch lặp, vd. \"T2, T4 18:00–19:30\"; null khi lớp chưa có lịch",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "location": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "feeType": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/FeeType"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "feeAmount": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 1,
+                  "maximum": 1000000000
+                },
+                "teacherName": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "className",
+                "subject",
+                "grade",
+                "scheduleSummary",
+                "location",
+                "feeType",
+                "feeAmount",
+                "teacherName"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "pdfUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "description": "\"Cập nhật ngày…\" hiện trên trang (US-9.2 AC3)"
+          }
+        },
+        "required": [
+          "slug",
+          "providerName",
+          "businessRegNo",
+          "rows",
+          "pdfUrl",
+          "updatedAt"
+        ],
+        "additionalProperties": false,
+        "description": "Dữ liệu trang `/cong-khai/:slug` (CK), không cần đăng nhập, chỉ chứa thông tin Mẫu 02 vốn phải niêm yết công khai"
+      },
+      "LegalArticleViewPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LegalArticleView"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "pageSize": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "pageSize"
+        ],
+        "additionalProperties": false
+      },
+      "LegalArticleView": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "bodyMarkdown": {
+            "type": "string"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": [
+                "title",
+                "url"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Trích dẫn văn bản gốc kèm liên kết (US-9.6 AC1)"
+          },
+          "reviewedBy": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reviewerRole": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "lawyer",
+              "accountant",
+              null
+            ]
+          },
+          "reviewedOn": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+          },
+          "disclaimer": {
+            "type": "string",
+            "description": "Luôn là \"Công cụ hỗ trợ, không thay tư vấn pháp lý\" (US-9.6 AC1)"
+          },
+          "publishedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          }
+        },
+        "required": [
+          "slug",
+          "title",
+          "summary",
+          "bodyMarkdown",
+          "sources",
+          "reviewedBy",
+          "reviewerRole",
+          "reviewedOn",
+          "disclaimer",
+          "publishedAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false,
+        "description": "Bài đã phát hành, dạng đọc cho giáo viên; không có trường soạn thảo của `LegalArticle` (admin)"
       }
     }
   }
