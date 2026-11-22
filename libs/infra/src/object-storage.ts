@@ -102,13 +102,19 @@ export class ObjectStorage {
   }
 
   /** Vài byte đầu của đối tượng (GET Range) để kiểm magic bytes; đối tượng không có → `null`. */
-  async firstBytes(key: string, n: number): Promise<Uint8Array | null> {
+  /** `ifMatch`: đọc đúng phiên bản đã HEAD; đối tượng bị ghi đè giữa chừng → null (412). */
+  async firstBytes(
+    key: string,
+    n: number,
+    ifMatch?: string,
+  ): Promise<Uint8Array | null> {
     try {
       const r = await this.client.send(
         new GetObjectCommand({
           Bucket: this.privateBucket,
           Key: key,
           Range: `bytes=0-${n - 1}`,
+          IfMatch: ifMatch,
         }),
         { abortSignal: AbortSignal.timeout(5000) },
       );
@@ -118,7 +124,8 @@ export class ObjectStorage {
         name?: string;
         $metadata?: { httpStatusCode?: number };
       };
-      if (err.name === 'NoSuchKey' || err.$metadata?.httpStatusCode === 404)
+      const status = err.$metadata?.httpStatusCode;
+      if (err.name === 'NoSuchKey' || status === 404 || status === 412)
         return null;
       throw e;
     }

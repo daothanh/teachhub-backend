@@ -159,7 +159,11 @@ export class FilesService {
     })();
     if (!bad) {
       // Chữ ký thật của nội dung phải khớp MIME đã khai (Content-Type do client tự khai).
-      const first = await this.storage.firstBytes(file.objectKey, MAGIC_BYTES);
+      const first = await this.storage.firstBytes(
+        file.objectKey,
+        MAGIC_BYTES,
+        head.etag ?? undefined,
+      );
       if (!first) throw new AppException('CONFLICT_STALE');
       if (!matchesMagic(file.mime, first))
         return this.reject(file.objectKey, 'FILE_TYPE_NOT_ALLOWED');
