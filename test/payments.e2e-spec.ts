@@ -695,13 +695,18 @@ describe('payments: ghi và hủy thanh toán', () => {
         connectionString: t.db.url('teachhub_worker'),
       });
       const tx = new TxService(drizzle(pool, { schema, casing: 'snake_case' }));
-      const pushed: { copy: { title: string }; data: Record<string, string> }[] = [];
+      const pushed: {
+        copy: { title: string };
+        data: Record<string, string>;
+      }[] = [];
       const mails: { to: string; subject: string; text: string }[] = [];
       const notifier = new PaymentRecordedNotifier(
         tx,
         new AbsenceNotifier(tx, {
           enabled: true,
-          send: (ms: { copy: { title: string }; data: Record<string, string> }[]) => {
+          send: (
+            ms: { copy: { title: string }; data: Record<string, string> }[],
+          ) => {
             pushed.push(...ms);
             return Promise.resolve(
               ms.map(() => ({ ok: true as const, messageId: 'm' })),
