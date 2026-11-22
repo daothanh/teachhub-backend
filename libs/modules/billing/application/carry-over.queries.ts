@@ -28,6 +28,7 @@ import {
   monthEnd,
 } from '../domain/billing-period.js';
 import {
+  CARRY_OPEN_STATUSES,
   diffSessionCharges,
   type IssuedSession,
   type PrevAdjustment,
@@ -38,8 +39,6 @@ import type { FeeType } from '../domain/invoice-calculator.js';
 
 /** Hóa đơn đã phát hành mới được so điểm danh (nháp/hủy không có "đã phát hành"). */
 const ISSUED = ['issued', 'partially_paid', 'paid', 'pending_confirmation'];
-/** Hóa đơn còn nợ để chuyển kỳ (không gồm đã `paid`, nháp, hủy). */
-const OPEN = ['issued', 'partially_paid', 'pending_confirmation'];
 /** shortcut: chỉ so điểm danh các kỳ trong 12 tháng gần nhất để chi phí mỗi đêm có trần; sửa điểm danh cũ hơn thì không tự điều chỉnh. */
 export const PREV_ADJUSTMENT_LOOKBACK_MONTHS = 12;
 const CHUNK = 5000;
@@ -132,7 +131,7 @@ export async function loadCarryState(
       and(
         eq(invoices.tenantId, tenantId),
         inArray(invoices.studentId, studentIds),
-        inArray(invoices.status, OPEN),
+        inArray(invoices.status, CARRY_OPEN_STATUSES),
         lt(billingPeriods.periodMonth, periodMonth),
       ),
     )

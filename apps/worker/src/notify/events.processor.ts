@@ -5,12 +5,15 @@ import { captureJobFailure } from '@teachhub/core';
 import {
   BILLING_DRAFTS_READY,
   INVOICE_ISSUED,
+  PAYMENT_CLAIM_CREATED,
+  PAYMENT_CLAIM_REJECTED,
   PAYMENT_RECORDED,
   PAYMENT_REMINDER,
 } from '@teachhub/modules/billing';
 import {
   BillingReadyNotifier,
   InvoiceIssuedNotifier,
+  PaymentClaimNotifier,
   PaymentRecordedNotifier,
   PaymentReminderNotifier,
   SubscriptionNotifier,
@@ -33,7 +36,7 @@ interface ScheduleChangedJob {
 
 /**
  * Consumer duy nhất của hàng đợi `events` (một hàng đợi chỉ nên có một processor), phân loại theo tên sự kiện:
- * `billing_drafts_ready` (S5-BE-05) → thông báo + push giáo viên; `invoice_issued` (S5-BE-07) → thông báo + push + email phụ huynh; `payment_recorded` (S6-BE-02) → biên nhận push + email phụ huynh; `payment_reminder` (S6-BE-04) → nhắc nợ push + email phụ huynh; `subscription_expiring` (nhắc gia hạn) và `subscription_activated` (Pro kích hoạt) → thông báo + push chủ tenant; `schedule_changed` (S4-BE-07) → chỉ ghi log.
+ * `billing_drafts_ready` (S5-BE-05) → thông báo + push giáo viên; `invoice_issued` (S5-BE-07) → thông báo + push + email phụ huynh; `payment_recorded` (S6-BE-02) → biên nhận push + email phụ huynh; `payment_reminder` (S6-BE-04) → nhắc nợ push + email phụ huynh; `payment_claim_created` / `payment_claim_rejected` (S8-BE-claims, US-7.7) → thông báo + push giáo viên / phụ huynh đã báo; `subscription_expiring` (nhắc gia hạn) và `subscription_activated` (Pro kích hoạt) → thông báo + push chủ tenant; `schedule_changed` (S4-BE-07) → chỉ ghi log.
  * shortcut (schedule_changed): chưa tạo thông báo cho phụ huynh. Loại `schedule_changed` chưa có trong oneOf notification
  * của hợp đồng (Owner chưa chốt), nên chưa tạo dòng `notifications` và chưa gửi push. Khi chốt: lấy phụ huynh có
  * `guardians.user_id` của học viên đang học lớp `payload.classId`, tạo thông báo idempotent theo `eventId` như báo vắng.
@@ -49,6 +52,7 @@ export class EventsProcessor extends WorkerHost {
     private readonly paymentRecorded: PaymentRecordedNotifier,
     private readonly paymentReminder: PaymentReminderNotifier,
     private readonly subscription: SubscriptionNotifier,
+    private readonly paymentClaim: PaymentClaimNotifier,
   ) {
     super();
   }
@@ -62,6 +66,10 @@ export class EventsProcessor extends WorkerHost {
     if (job.name === BILLING_DRAFTS_READY)
       return this.billingReady.handle(job.data);
     if (job.name === INVOICE_ISSUED) return this.invoiceIssued.handle(job.data);
+    if (job.name === PAYMENT_CLAIM_CREATED)
+      return this.paymentClaim.handleCreated(job.data);
+    if (job.name === PAYMENT_CLAIM_REJECTED)
+      return this.paymentClaim.handleRejected(job.data);
     if (job.name === PAYMENT_RECORDED)
       return this.paymentRecorded.handle(job.data);
     if (job.name === PAYMENT_REMINDER)

@@ -3,8 +3,9 @@ import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { CoreModule, type Env } from '@teachhub/core';
 import { DbModule } from '@teachhub/db';
-import { JobsModule, RedisModule } from '@teachhub/infra';
+import { JobsModule, ObjectStorageModule, RedisModule } from '@teachhub/infra';
 import { BillingJobsModule } from '@teachhub/modules/billing';
+import { FilesJobsModule } from '@teachhub/modules/files';
 import { NotificationsJobsModule } from '@teachhub/modules/notifications';
 import { SubscriptionJobsModule } from '@teachhub/modules/subscription';
 import { ScheduleRulesModule } from '@teachhub/modules/schedule';
@@ -23,11 +24,13 @@ import { UrgentProcessor } from './notify/urgent.processor.js';
     CoreModule,
     DbModule.register('WORKER_DATABASE_URL'),
     RedisModule,
+    ObjectStorageModule,
     JobsModule,
     ScheduleRulesModule,
     BillingJobsModule,
     NotificationsJobsModule,
     SubscriptionJobsModule,
+    FilesJobsModule,
     BullModule.registerQueue(
       { name: CRON_QUEUE },
       { name: OUTBOX_QUEUE_URGENT },

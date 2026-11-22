@@ -41,7 +41,8 @@ import type { Actor } from './billing.service.js';
 const DEFAULT_TZ = 'Asia/Ho_Chi_Minh';
 const CHUNK = 1000;
 
-type Reason = 'settled' | 'void' | 'student_disabled' | 'tenant_disabled';
+type Reason =
+  'settled' | 'void' | 'student_disabled' | 'tenant_disabled' | 'claim_pending';
 type JobRow = typeof dunningJobs.$inferSelect;
 
 interface InvoiceFacts {
@@ -177,16 +178,19 @@ export class DunningService {
     const reasonOf = (f: InvoiceFacts): Reason | null =>
       f.status === 'void'
         ? 'void'
-        : !isDunnable(f)
-          ? 'settled'
-          : !settings.enabled
-            ? 'tenant_disabled'
-            : off.has(f.studentId)
-              ? 'student_disabled'
-              : null;
+        : f.status === 'pending_confirmation'
+          ? 'claim_pending'
+          : !isDunnable(f)
+            ? 'settled'
+            : !settings.enabled
+              ? 'tenant_disabled'
+              : off.has(f.studentId)
+                ? 'student_disabled'
+                : null;
     const live: InvoiceFacts[] = [];
     for (const reason of [
       'void',
+      'claim_pending',
       'settled',
       'tenant_disabled',
       'student_disabled',
