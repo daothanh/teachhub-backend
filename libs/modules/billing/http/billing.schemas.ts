@@ -448,6 +448,15 @@ export const createAdjustmentRequestSchema = z
           'Bắt buộc (US-7.2 AC3); ghi nhật ký kiểm toán cùng người sửa và giá trị trước/sau',
       }),
   })
+  .superRefine((v, ctx) => {
+    if (v.kind === 'surcharge' && v.amount <= 0) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Phụ thu phải lớn hơn 0.',
+        path: ['amount'],
+      });
+    }
+  })
   .meta({
     id: 'CreateInvoiceAdjustmentRequest',
     example: {

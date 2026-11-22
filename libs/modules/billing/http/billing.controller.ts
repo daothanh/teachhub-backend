@@ -174,7 +174,7 @@ export class BillingController {
   @ApiOperation({
     summary: 'Thêm dòng điều chỉnh vào bản nháp (US-7.2 AC3)',
     description:
-      'Chỉ khi hóa đơn còn `draft`; đã phát hành hay hủy → 409 `INVOICE_IMMUTABLE`. Thêm dòng `manual_adjustment` (hoặc `surcharge` khi `kind = surcharge`, US-7.8) có `amount` ≠ 0 (âm giảm, dương phụ thu), bắt buộc `adjustmentReason`, ghi nhật ký kiểm toán; trả hóa đơn đã tính lại. Mỗi hóa đơn tối đa 20 dòng điều chỉnh, vượt → 422 `VALIDATION_FAILED`. Giới hạn 20 lần/phút/user (429 `RATE_LIMITED`). ' +
+      'Chỉ khi hóa đơn còn `draft`; đã phát hành hay hủy → 409 `INVOICE_IMMUTABLE`. Thêm dòng `manual_adjustment` (hoặc `surcharge` khi `kind = surcharge`, US-7.8) có `amount` ≠ 0 (âm giảm, dương phụ thu), bắt buộc `adjustmentReason`, ghi nhật ký kiểm toán; trả hóa đơn đã tính lại. Mỗi hóa đơn tối đa 20 dòng điều chỉnh (tính cả `surcharge`), vượt → 422 `VALIDATION_FAILED`. Dòng `surcharge` không lưu `adjustmentReason` (null), lý do chỉ ghi ở nhật ký kiểm toán. Giới hạn 20 lần/phút/user (429 `RATE_LIMITED`). ' +
       'Tổng `totalAmount` không âm: điều chỉnh làm tổng < 0 thì `totalAmount = 0` và `clampedAmount` là phần âm bị cắt (chuyển kỳ khi có US-7.6). Chưa có endpoint xóa dòng điều chỉnh: nhập sai thì thêm dòng ngược dấu.',
   })
   @ApiCreatedResponse({ standardSchema: invoiceSchema })
