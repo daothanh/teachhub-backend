@@ -1,6 +1,12 @@
-import { InjectQueue, Processor, WorkerHost } from '@nestjs/bullmq';
+import {
+  InjectQueue,
+  OnWorkerEvent,
+  Processor,
+  WorkerHost,
+} from '@nestjs/bullmq';
 import { Injectable, type OnApplicationBootstrap } from '@nestjs/common';
 import type { Job, Queue } from 'bullmq';
+import { captureJobFailure } from '@teachhub/core';
 import {
   JOB_PURGE_IDEMPOTENCY,
   PurgeIdempotencyKeysJob,
@@ -103,6 +109,11 @@ export class CronProcessor
       { pattern: '0 4 * * *', tz: TZ },
       { name: JOB_PURGE_PENDING_FILES, opts },
     );
+  }
+
+  @OnWorkerEvent('failed')
+  onFailed(job: Job | undefined, err: Error): void {
+    captureJobFailure(job, err);
   }
 
   async process(job: Job): Promise<number> {

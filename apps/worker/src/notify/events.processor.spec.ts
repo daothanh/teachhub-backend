@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { EventsProcessor } from './events.processor.js';
 
 // Các index module nạp CoreModule (đọc env lúc import): chỉ cần hằng tên sự kiện và kiểu notifier.
+vi.mock('@teachhub/core', () => ({ captureJobFailure: vi.fn() }));
 vi.mock('@teachhub/modules/billing', () => ({
   BILLING_DRAFTS_READY: 'billing_drafts_ready',
   INVOICE_ISSUED: 'invoice_issued',
