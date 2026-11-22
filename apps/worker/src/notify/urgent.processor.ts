@@ -2,6 +2,7 @@ import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Injectable, Logger } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
 import type { Job } from 'bullmq';
+import { captureJobFailure } from '@teachhub/core';
 import { TxService } from '@teachhub/db';
 import { ATTENDANCE_RECORDED } from '@teachhub/modules/attendance';
 import {
@@ -37,6 +38,7 @@ export class UrgentProcessor extends WorkerHost {
     job: Job<OutboxJobData> | undefined,
     err: Error,
   ): Promise<void> {
+    captureJobFailure(job, err);
     if (!job || job.attemptsMade < (job.opts.attempts ?? 1)) return;
     const eventId = job.data?.eventId;
     this.log.error(

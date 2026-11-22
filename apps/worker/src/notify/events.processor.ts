@@ -1,6 +1,7 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Injectable, Logger } from '@nestjs/common';
 import type { Job } from 'bullmq';
+import { captureJobFailure } from '@teachhub/core';
 import {
   BILLING_DRAFTS_READY,
   INVOICE_ISSUED,
@@ -50,6 +51,11 @@ export class EventsProcessor extends WorkerHost {
     private readonly subscription: SubscriptionNotifier,
   ) {
     super();
+  }
+
+  @OnWorkerEvent('failed')
+  onFailed(job: Job | undefined, err: Error): void {
+    captureJobFailure(job, err);
   }
 
   process(job: Job): Promise<void> {

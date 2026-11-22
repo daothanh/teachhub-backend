@@ -12,3 +12,4 @@ export * from './public.decorator.js';
 export * from './uuid.js';
 export * from './invite-status.js';
 export * from './money.js';
+export * from './sentry.js';

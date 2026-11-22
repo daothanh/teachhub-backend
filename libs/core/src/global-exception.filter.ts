@@ -5,6 +5,7 @@ import {
   HttpException,
   Logger,
 } from '@nestjs/common';
+import * as Sentry from '@sentry/nestjs';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { AppException } from './app.exception.js';
 import { ERROR_CODES, type ErrorCode } from './error-codes.js';
@@ -40,7 +41,12 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 
     const { status, body } = toErrorBody(exception);
     body.requestId = req.id;
-    if (status >= 500) this.logger.error(loggable(exception));
+    if (status >= 500) {
+      const safe = loggable(exception);
+      this.logger.error(safe);
+      // Chỉ 5xx; không kèm request (beforeSend cũng lọc lại). No-op khi chưa init Sentry.
+      Sentry.captureException(safe);
+    }
     // 429 (RATE_LIMITED, OTP_LOCKED): client đọc được cả header chuẩn lẫn details (§5.6).
     const retryAfter = body.details?.retryAfterSec;
     if (typeof retryAfter === 'number') {
