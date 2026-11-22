@@ -23,8 +23,21 @@ const emptyToUndefined = (v: unknown) => (v === '' ? undefined : v);
 
 const isLocalOrTest = (v: string | undefined) => v === 'local' || v === 'test';
 
+/** Sentry (S0-OPS-03): chuỗi rỗng = tắt. Đọc cả trước khi Nest dựng (instrument.ts), nên tách riêng để dùng lại. */
+export const sentryEnvShape = {
+  SENTRY_DSN: z.preprocess(emptyToUndefined, z.url().optional()),
+  /** Tỷ lệ lấy mẫu trace (0..1); mặc định 0 = không trace. */
+  SENTRY_TRACES_SAMPLE_RATE: z.preprocess(
+    emptyToUndefined,
+    z.coerce.number().min(0).max(1).default(0),
+  ),
+  /** Phiên bản chạy (compose đặt = IMAGE_TAG), gắn vào `release` của Sentry. */
+  APP_VERSION: z.preprocess(emptyToUndefined, z.string().optional()),
+};
+
 export const envSchema = z
   .object({
+    ...sentryEnvShape,
     NODE_ENV: z
       .enum(['local', 'development', 'staging', 'production', 'test'])
       // Thiếu = không phải local: không bao giờ rơi về khóa mặc định `dev-only-...`.

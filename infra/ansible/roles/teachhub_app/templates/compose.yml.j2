@@ -4,6 +4,8 @@ name: teachhub
 x-backend: &backend
   image: {{ backend_image }}:${IMAGE_TAG:-main}
   env_file: backend.env
+  environment:
+    APP_VERSION: ${IMAGE_TAG:-main}
   restart: unless-stopped
 
 services:

@@ -114,6 +114,11 @@ tofu apply   -var create=true        # tạo mỗi loại 1 máy (tính tiền t
 tofu destroy -var create=true        # xóa ngay, rồi ghi kết quả vào issue R25
 ```
 
+## Sentry và uptime (S0-OPS-03): việc của Owner
+
+- **Sentry:** Owner tạo project Sentry (loại Node/NestJS) cho backend, lấy DSN rồi truyền `-e sentry_dsn=<DSN>` khi chạy Ansible (biến tùy chọn: trống/thiếu thì không ghi `SENTRY_DSN`, app không gửi gì). Dùng một project (hoặc DSN) riêng cho dev và staging; `environment` lấy từ `NODE_ENV`, `release` từ `APP_VERSION` (= `IMAGE_TAG` của compose). App chỉ báo lỗi 5xx, lỗi không bắt được và job BullMQ hết lượt thử (tag `job`, `queue`, không payload); `beforeSend` bỏ body, cookie, query, header nhạy cảm, `user` (trừ id), và che email/SĐT. Tăng `SENTRY_TRACES_SAMPLE_RATE` chỉ khi cần trace (mặc định 0).
+- **Uptime → Lark (không làm trong code app):** tạo Sentry Uptime Monitor (hoặc Better Stack) gọi `GET https://<host api>/health/ready` mỗi 1 phút, mong 200 (503 khi DB/Redis/S3 hỏng), cảnh báo sau 2 lần lỗi liên tiếp. Kênh thông báo: webhook của bot trong nhóm Lark (Sentry: Alert → Webhook; Better Stack: Integrations → Webhook). Owner tạo bot/webhook Lark và dán URL.
+
 ## Lưu ý
 
 - State Terraform lưu ở local và **chứa bí mật**: mật khẩu DB, khóa origin, khóa JWT. Không commit, không chia sẻ. State staging nằm trên R2 (xem mục Staging).
