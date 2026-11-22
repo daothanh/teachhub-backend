@@ -19298,7 +19298,7 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 60,
-            "description": "Loại sự kiện RevenueCat. Cập nhật gói: `INITIAL_PURCHASE`, `RENEWAL`, `PRODUCT_CHANGE`, `UNCANCELLATION`, `NON_RENEWING_PURCHASE` → `active`; `EXPIRATION` → `expired`; `CANCELLATION`, `BILLING_ISSUE` chỉ ghi sự kiện, gói giữ tới hết kỳ. Loại khác và `TEST` → `ignored`",
+            "description": "Loại sự kiện RevenueCat. Cập nhật gói: `INITIAL_PURCHASE`, `RENEWAL`, `PRODUCT_CHANGE`, `UNCANCELLATION`, `NON_RENEWING_PURCHASE` → `active`; `EXPIRATION` và `CANCELLATION` có `cancel_reason = CUSTOMER_SUPPORT` (hoàn tiền) → `expired` ngay; `CANCELLATION` khác, `BILLING_ISSUE` chỉ ghi sự kiện, gói giữ tới hết kỳ. `TRANSFER`, loại khác và `TEST` → `ignored`",
             "example": "INITIAL_PURCHASE"
           },
           "app_user_id": {
@@ -19343,6 +19343,12 @@
             "type": "integer",
             "minimum": -9007199254740991,
             "maximum": 9007199254740991
+          },
+          "cancel_reason": {
+            "description": "Lý do của `CANCELLATION`. `CUSTOMER_SUPPORT` = đã hoàn tiền → hạ gói ngay (cùng kiểm tra như `EXPIRATION`); lý do khác chỉ ghi sự kiện",
+            "example": "UNSUBSCRIBE",
+            "type": "string",
+            "maxLength": 40
           }
         },
         "required": [
