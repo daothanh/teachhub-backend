@@ -24,7 +24,6 @@ import {
   ApiErrors,
   ApiIdempotencyKey,
   ApiPlanLimitExceeded,
-  AppException,
   Ctx,
   type RequestContext,
 } from '@teachhub/core';
@@ -103,7 +102,7 @@ export class ClassesController {
     summary: 'Tạo lớp (US-1.1 AC1, AC2)',
     description:
       'Bắt buộc tên, môn, khối, hình thức, ngày bắt đầu; địa điểm bắt buộc với lớp tại chỗ; ngày kết thúc không nhỏ hơn ngày bắt đầu. Sai → 422 `VALIDATION_FAILED` kèm `errors` theo trường. ' +
-      'Lịch lặp đặt riêng ở `PUT /classes/{id}/schedule-rules`. Phản hồi là lớp kèm `warnings` (mặc định rỗng). ' +
+      'Lịch lặp đặt riêng ở `PUT /classes/{id}/schedule-rules`. Phản hồi là lớp kèm `warnings` (không chặn): lớp khối 1 đến 5 môn văn hóa có `TT29_PRIMARY_ACADEMIC` (US-9.3 AC1), xác nhận qua `POST /classes/{id}/warning-acknowledgements`; môn nghệ thuật, thể thao, kỹ năng sống không cảnh báo (nhận diện theo tên môn). ' +
       'Hết hạn mức gói → 402 `PLAN_LIMIT_EXCEEDED`.',
   })
   @ApiCreatedResponse({ standardSchema: classCreatedSchema })
@@ -214,7 +213,7 @@ export class ClassesController {
       this.enrollments.enroll(t, ctx.tenantId!, id, body),
     );
   }
-  // Hợp đồng Sprint 8 (S7-CT-01), thân hàm 501 tới task backend `classes`. US-9.3 AC3 (cảnh báo, không chặn).
+  // Hợp đồng Sprint 8 (S7-CT-01), thân hàm ở task backend `compliance`. US-9.3 AC3 (cảnh báo, không chặn).
   @Post(':id/warning-acknowledgements')
   @HttpCode(204)
   @ApiOperation({
@@ -226,11 +225,22 @@ export class ClassesController {
   @ApiNoContentResponse()
   @ApiIdempotencyKey()
   @ApiErrors('VALIDATION_FAILED', 'NOT_FOUND')
-  acknowledgeWarning(
-    @Param('id', { schema: idParam }) _id: string,
+  async acknowledgeWarning(
+    @Ctx() ctx: RequestContext,
+    @Req() req: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @Param('id', { schema: idParam }) id: string,
     @Body({ schema: acknowledgeClassWarningRequestSchema })
-    _body: AcknowledgeClassWarningRequest,
-  ): void {
-    throw new AppException('NOT_IMPLEMENTED');
+    body: AcknowledgeClassWarningRequest,
+  ): Promise<void> {
+    await this.idem.run(req, reply, ctx, async (t) => ({
+      status: 204,
+      body: await this.classes.acknowledgeWarning(
+        t,
+        { tenantId: ctx.tenantId!, userId: ctx.userId! },
+        id,
+        body.code,
+      ),
+    }));
   }
 }

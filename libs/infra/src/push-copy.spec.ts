@@ -15,6 +15,7 @@ const SENT_TYPES = [
   'schedule_changed',
   'subscription_expiring',
   'subscription_activated',
+  'tax_threshold_alert',
 ];
 
 describe('pushCopyFor', () => {

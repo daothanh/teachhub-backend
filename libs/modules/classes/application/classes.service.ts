@@ -20,6 +20,7 @@ import {
   uuidv7,
 } from '@teachhub/core';
 import {
+  acknowledgements,
   branches,
   classes,
   enrollments,
@@ -39,6 +40,7 @@ import {
   resolveFeeRules,
 } from '../domain/class-fee.js';
 import { classDraftErrors } from '../domain/class-rules.js';
+import { classWarnings } from '../domain/class-warnings.js';
 import type {
   Class,
   ClassCreated,
@@ -137,7 +139,40 @@ export class ClassesService {
     // `id` do client gửi đã có (kể cả ở tenant khác): không tiết lộ, coi như dữ liệu cũ.
     if (!row) throw new AppException('CONFLICT_STALE');
     const [created] = await this.hydrate(tx, ctx.tenantId, [row]);
-    return { ...created!, warnings: [] };
+    return { ...created!, warnings: classWarnings(row) };
+  }
+
+  /**
+   * Ghi xác nhận "Tôi đã hiểu, vẫn tạo" (US-9.3 AC3). Chỉ nhận mã đang có trong cảnh báo hiện tại của lớp; gọi lại cùng mã không
+   * ghi trùng (unique tenant, kind, lớp, mã). Lớp của tenant khác → NOT_FOUND.
+   */
+  async acknowledgeWarning(
+    tx: Tx,
+    ctx: { tenantId: string; userId: string },
+    id: string,
+    code: string,
+  ): Promise<void> {
+    const [row] = await tx
+      .select()
+      .from(classes)
+      .where(and(eq(classes.tenantId, ctx.tenantId), eq(classes.id, id)));
+    if (!row) throw new AppException('NOT_FOUND');
+    if (!classWarnings(row).some((w) => w.code === code)) {
+      throw new AppException('VALIDATION_FAILED', undefined, {
+        code: ['Lớp này không có cảnh báo này để xác nhận.'],
+      });
+    }
+    await tx
+      .insert(acknowledgements)
+      .values({
+        id: uuidv7(),
+        tenantId: ctx.tenantId,
+        kind: 'class_warning',
+        entityId: id,
+        code,
+        userId: ctx.userId,
+      })
+      .onConflictDoNothing();
   }
 
   async update(

@@ -6,6 +6,7 @@ import { InvoiceIssuedNotifier } from './application/invoice-issued-notifier.ser
 import { PaymentClaimNotifier } from './application/payment-claim-notifier.service.js';
 import { PaymentRecordedNotifier } from './application/payment-recorded-notifier.service.js';
 import { PaymentReminderNotifier } from './application/payment-reminder-notifier.service.js';
+import { TaxThresholdNotifier } from './application/tax-threshold-notifier.service.js';
 import { SubscriptionNotifier } from './application/subscription-notifier.service.js';
 import { PurgeStaleDevicesJob } from './application/devices.service.js';
 
@@ -21,6 +22,7 @@ import { PurgeStaleDevicesJob } from './application/devices.service.js';
     PaymentRecordedNotifier,
     PaymentReminderNotifier,
     SubscriptionNotifier,
+    TaxThresholdNotifier,
   ],
   exports: [
     PurgeStaleDevicesJob,
@@ -31,6 +33,7 @@ import { PurgeStaleDevicesJob } from './application/devices.service.js';
     PaymentRecordedNotifier,
     PaymentReminderNotifier,
     SubscriptionNotifier,
+    TaxThresholdNotifier,
   ],
 })
 export class NotificationsJobsModule {}

@@ -5,6 +5,7 @@ import { CoreModule, type Env } from '@teachhub/core';
 import { DbModule } from '@teachhub/db';
 import { JobsModule, ObjectStorageModule, RedisModule } from '@teachhub/infra';
 import { BillingJobsModule } from '@teachhub/modules/billing';
+import { ComplianceJobsModule } from '@teachhub/modules/compliance';
 import { FilesJobsModule } from '@teachhub/modules/files';
 import { NotificationsJobsModule } from '@teachhub/modules/notifications';
 import { SubscriptionJobsModule } from '@teachhub/modules/subscription';
@@ -29,6 +30,7 @@ import { UrgentProcessor } from './notify/urgent.processor.js';
     ScheduleRulesModule,
     BillingJobsModule,
     NotificationsJobsModule,
+    ComplianceJobsModule,
     SubscriptionJobsModule,
     FilesJobsModule,
     BullModule.registerQueue(

@@ -1956,7 +1956,7 @@
         ]
       },
       "post": {
-        "description": "Bắt buộc tên, môn, khối, hình thức, ngày bắt đầu; địa điểm bắt buộc với lớp tại chỗ; ngày kết thúc không nhỏ hơn ngày bắt đầu. Sai → 422 `VALIDATION_FAILED` kèm `errors` theo trường. Lịch lặp đặt riêng ở `PUT /classes/{id}/schedule-rules`. Phản hồi là lớp kèm `warnings` (mặc định rỗng). Hết hạn mức gói → 402 `PLAN_LIMIT_EXCEEDED`.",
+        "description": "Bắt buộc tên, môn, khối, hình thức, ngày bắt đầu; địa điểm bắt buộc với lớp tại chỗ; ngày kết thúc không nhỏ hơn ngày bắt đầu. Sai → 422 `VALIDATION_FAILED` kèm `errors` theo trường. Lịch lặp đặt riêng ở `PUT /classes/{id}/schedule-rules`. Phản hồi là lớp kèm `warnings` (không chặn): lớp khối 1 đến 5 môn văn hóa có `TT29_PRIMARY_ACADEMIC` (US-9.3 AC1), xác nhận qua `POST /classes/{id}/warning-acknowledgements`; môn nghệ thuật, thể thao, kỹ năng sống không cảnh báo (nhận diện theo tên môn). Hết hạn mức gói → 402 `PLAN_LIMIT_EXCEEDED`.",
         "operationId": "classes_create",
         "parameters": [
           {
@@ -10147,7 +10147,7 @@
     },
     "/v1/compliance/revenue-book": {
       "get": {
-        "description": "Đọc thẳng từ `revenue_ledger` nên khớp từng đồng với báo cáo T12 (cùng sổ, `fiscal_year` theo múi giờ tenant). `thresholds` hai ngưỡng 500 triệu và 1 tỷ kèm thanh tiến độ; `alerts` các cảnh báo 80% (400 triệu, 800 triệu) đã phát sinh: sinh một lần cho mỗi mốc khi thanh toán được ghi làm lũy kế vượt mốc, không sinh lại khi hủy rồi thu lại (unique `(tenant, năm, mốc)`). Mọi gói xem được (US-9.5 AC4). `entries` phân trang offset. Push/thông báo hộp thư cho cảnh báo (loại `tax_threshold_alert`) chờ PR `oneOf` của `Notification` (xem CHANGELOG); tới đó app đọc `alerts` của endpoint này.",
+        "description": "Đọc thẳng từ `revenue_ledger` nên khớp từng đồng với báo cáo T12 (cùng sổ, `fiscal_year` theo múi giờ tenant). `thresholds` hai ngưỡng 500 triệu và 1 tỷ kèm thanh tiến độ; `alerts` các cảnh báo 80% (400 triệu, 800 triệu) đã phát sinh: sinh một lần cho mỗi mốc khi lũy kế (theo thứ tự ghi sổ) chạm mốc, không sinh lại khi hủy rồi thu lại (unique `(tenant, năm, mốc)`). Cảnh báo được tính bằng job hằng ngày 08:00 giờ VN và ngay khi mở endpoint này (không nằm trong luồng ghi thanh toán nên không làm chậm nó), nên có thể trễ tới một ngày so với lúc ghi nếu chủ tenant chưa mở sổ. Mọi gói xem được (US-9.5 AC4). `entries` phân trang offset. Cảnh báo kèm push chữ chung cho chủ tenant (loại `tax_threshold_alert`, không số tiền); dòng hộp thư của loại này chờ PR `oneOf` của `Notification` (xem CHANGELOG), tới đó app đọc `alerts` của endpoint này.",
         "operationId": "compliance_revenueBook",
         "parameters": [
           {

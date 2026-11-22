@@ -16,6 +16,9 @@ vi.mock('@teachhub/modules/subscription', () => ({
   SUBSCRIPTION_EXPIRING: 'subscription_expiring',
   SUBSCRIPTION_ACTIVATED: 'subscription_activated',
 }));
+vi.mock('@teachhub/modules/compliance', () => ({
+  TAX_THRESHOLD_ALERT: 'tax_threshold_alert',
+}));
 vi.mock('@teachhub/modules/schedule', () => ({
   SCHEDULE_CHANGED: 'schedule_changed',
 }));
@@ -26,6 +29,7 @@ vi.mock('@teachhub/modules/notifications', () => ({
   PaymentRecordedNotifier: class {},
   PaymentReminderNotifier: class {},
   SubscriptionNotifier: class {},
+  TaxThresholdNotifier: class {},
 }));
 
 const job = (name: string, data: unknown) => ({ name, data }) as Job;
@@ -38,6 +42,7 @@ describe('EventsProcessor: phân loại sự kiện outbox', () => {
     const reminder = vi.fn().mockResolvedValue(undefined);
     const expiring = vi.fn().mockResolvedValue(undefined);
     const activated = vi.fn().mockResolvedValue(undefined);
+    const tax = vi.fn().mockResolvedValue(undefined);
     const claimCreated = vi.fn().mockResolvedValue(undefined);
     const claimRejected = vi.fn().mockResolvedValue(undefined);
     return {
@@ -49,12 +54,14 @@ describe('EventsProcessor: phân loại sự kiện outbox', () => {
       reminder,
       expiring,
       activated,
+      tax,
       p: new EventsProcessor(
         { handle } as never,
         { handle: issued } as never,
         { handle: paid } as never,
         { handle: reminder } as never,
         { handleExpiring: expiring, handleActivated: activated } as never,
+        { handle: tax } as never,
         { handleCreated: claimCreated, handleRejected: claimRejected } as never,
       ),
     };
@@ -101,6 +108,14 @@ describe('EventsProcessor: phân loại sự kiện outbox', () => {
     await p.process(job('subscription_activated', data));
     expect(activated).toHaveBeenCalledExactlyOnceWith(data);
     expect(reminder).not.toHaveBeenCalled();
+  });
+
+  it('tax_threshold_alert → TaxThresholdNotifier.handle với nguyên dữ liệu job', async () => {
+    const { p, tax, expiring } = make();
+    const data = { eventId: 'e', tenantId: 't', payload: {} };
+    await p.process(job('tax_threshold_alert', data));
+    expect(tax).toHaveBeenCalledExactlyOnceWith(data);
+    expect(expiring).not.toHaveBeenCalled();
   });
 
   it('payment_claim_created / payment_claim_rejected → PaymentClaimNotifier tương ứng, không đụng notifier khác', async () => {

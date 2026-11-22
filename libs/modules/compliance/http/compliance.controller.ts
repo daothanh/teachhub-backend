@@ -8,6 +8,8 @@ import {
   Post,
   Put,
   Query,
+  Req,
+  Res,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import {
@@ -19,9 +21,21 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { z } from 'zod';
-import { ApiErrors, ApiIdempotencyKey, AppException } from '@teachhub/core';
+import type { FastifyReply, FastifyRequest } from 'fastify';
+import {
+  ApiErrors,
+  ApiIdempotencyKey,
+  AppException,
+  Ctx,
+  type RequestContext,
+} from '@teachhub/core';
+import { TxService } from '@teachhub/db';
+import { Idempotency } from '@teachhub/infra';
 import { RequiresRole } from '@teachhub/modules/identity';
 import { RequiresFeature } from '@teachhub/modules/subscription';
+import { ChecklistService } from '../application/checklist.service.js';
+import { RevenueBookService } from '../application/revenue-book.service.js';
+import type { ItemKey } from '../domain/checklist.js';
 import {
   type ExportJob,
   exportJobSchema,
@@ -52,7 +66,7 @@ import {
 
 const idParam = z.uuid();
 
-// Hợp đồng Sprint 8 (S7-CT-01), thân hàm 501 tới task backend `compliance`. Chỉ `tenant_owner` (MVP: giáo viên là chủ tenant).
+// Hợp đồng Sprint 8 (S7-CT-01). Đã làm: checklist, sổ doanh thu, đóng cảnh báo; còn 501: Mẫu 02, khai trường + Mẫu 03, xuất sổ (chờ luật sư/kế toán chốt cột và nghĩa vụ, xem contracts/CHANGELOG.md). Chỉ `tenant_owner` (MVP: giáo viên là chủ tenant).
 // Gói Miễn phí: checklist, khai trường, sổ doanh thu và ngưỡng đầy đủ; xem trước Mẫu 02/03 có dữ liệu nhưng công khai/PDF/xuất sổ là Pro (402 `FEATURE_REQUIRES_PRO`).
 @ApiTags('compliance')
 @ApiBearerAuth('bearer')
@@ -60,6 +74,13 @@ const idParam = z.uuid();
 @ApiErrors('UNAUTHENTICATED', 'TOKEN_EXPIRED', 'FORBIDDEN')
 @Controller('compliance')
 export class ComplianceController {
+  constructor(
+    private readonly tx: TxService,
+    private readonly idem: Idempotency,
+    private readonly checklistSvc: ChecklistService,
+    private readonly book: RevenueBookService,
+  ) {}
+
   @Get('checklist')
   @ApiOperation({
     summary: 'Checklist tuân thủ Thông tư 29 (T13, US-9.1)',
@@ -67,8 +88,8 @@ export class ComplianceController {
       'Bốn mục theo US-9.1 AC1, kèm % hoàn thành và mục tiếp theo. Tenant mới trả đủ mục ở `todo`; `school_declaration` là `not_applicable` khi đã khai "Không". Mọi gói dùng đủ (US-9.1 AC4). Đủ mọi mục `done` thì ghi sự kiện `compliance_item_completed` mỗi mục (Spec §8).',
   })
   @ApiOkResponse({ standardSchema: complianceChecklistSchema })
-  checklist(): ComplianceChecklist {
-    throw new AppException('NOT_IMPLEMENTED');
+  checklist(@Ctx() ctx: RequestContext): Promise<ComplianceChecklist> {
+    return this.tx.run(ctx, (t) => this.checklistSvc.get(t, ctx.tenantId!));
   }
 
   @Patch('checklist/:itemKey')
@@ -81,11 +102,17 @@ export class ComplianceController {
   @ApiIdempotencyKey()
   @ApiErrors('VALIDATION_FAILED', 'NOT_FOUND')
   updateItem(
-    @Param('itemKey', { schema: complianceItemKeySchema }) _itemKey: string,
+    @Ctx() ctx: RequestContext,
+    @Req() req: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @Param('itemKey', { schema: complianceItemKeySchema }) itemKey: ItemKey,
     @Body({ schema: updateChecklistItemRequestSchema })
-    _body: UpdateChecklistItemRequest,
-  ): ComplianceChecklist {
-    throw new AppException('NOT_IMPLEMENTED');
+    body: UpdateChecklistItemRequest,
+  ): Promise<ComplianceChecklist> {
+    return this.idem.run(req, reply, ctx, async (t) => ({
+      status: 200,
+      body: await this.checklistSvc.update(t, ctx.tenantId!, itemKey, body),
+    }));
   }
 
   @Get('form02')
@@ -179,15 +206,16 @@ export class ComplianceController {
   @ApiOperation({
     summary: 'Sổ doanh thu, lũy kế và ngưỡng thuế của năm (T13, US-9.5)',
     description:
-      'Đọc thẳng từ `revenue_ledger` nên khớp từng đồng với báo cáo T12 (cùng sổ, `fiscal_year` theo múi giờ tenant). `thresholds` hai ngưỡng 500 triệu và 1 tỷ kèm thanh tiến độ; `alerts` các cảnh báo 80% (400 triệu, 800 triệu) đã phát sinh: sinh một lần cho mỗi mốc khi thanh toán được ghi làm lũy kế vượt mốc, không sinh lại khi hủy rồi thu lại (unique `(tenant, năm, mốc)`). Mọi gói xem được (US-9.5 AC4). `entries` phân trang offset. ' +
-      'Push/thông báo hộp thư cho cảnh báo (loại `tax_threshold_alert`) chờ PR `oneOf` của `Notification` (xem CHANGELOG); tới đó app đọc `alerts` của endpoint này.',
+      'Đọc thẳng từ `revenue_ledger` nên khớp từng đồng với báo cáo T12 (cùng sổ, `fiscal_year` theo múi giờ tenant). `thresholds` hai ngưỡng 500 triệu và 1 tỷ kèm thanh tiến độ; `alerts` các cảnh báo 80% (400 triệu, 800 triệu) đã phát sinh: sinh một lần cho mỗi mốc khi lũy kế (theo thứ tự ghi sổ) chạm mốc, không sinh lại khi hủy rồi thu lại (unique `(tenant, năm, mốc)`). Cảnh báo được tính bằng job hằng ngày 08:00 giờ VN và ngay khi mở endpoint này (không nằm trong luồng ghi thanh toán nên không làm chậm nó), nên có thể trễ tới một ngày so với lúc ghi nếu chủ tenant chưa mở sổ. Mọi gói xem được (US-9.5 AC4). `entries` phân trang offset. ' +
+      'Cảnh báo kèm push chữ chung cho chủ tenant (loại `tax_threshold_alert`, không số tiền); dòng hộp thư của loại này chờ PR `oneOf` của `Notification` (xem CHANGELOG), tới đó app đọc `alerts` của endpoint này.',
   })
   @ApiOkResponse({ standardSchema: revenueBookSchema })
   @ApiErrors('VALIDATION_FAILED')
   revenueBook(
-    @Query({ schema: revenueBookQuerySchema }) _query: RevenueBookQuery,
-  ): RevenueBook {
-    throw new AppException('NOT_IMPLEMENTED');
+    @Ctx() ctx: RequestContext,
+    @Query({ schema: revenueBookQuerySchema }) query: RevenueBookQuery,
+  ): Promise<RevenueBook> {
+    return this.tx.run(ctx, (t) => this.book.get(t, ctx.tenantId!, query));
   }
 
   @Post('revenue-book/export')
@@ -218,7 +246,10 @@ export class ComplianceController {
   })
   @ApiNoContentResponse()
   @ApiErrors('VALIDATION_FAILED', 'NOT_FOUND')
-  dismissTaxAlert(@Param('id', { schema: idParam }) _id: string): void {
-    throw new AppException('NOT_IMPLEMENTED');
+  dismissTaxAlert(
+    @Ctx() ctx: RequestContext,
+    @Param('id', { schema: idParam }) id: string,
+  ): Promise<void> {
+    return this.tx.run(ctx, (t) => this.book.dismiss(t, ctx.tenantId!, id));
   }
 }
