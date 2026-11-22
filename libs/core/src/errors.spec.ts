@@ -171,6 +171,49 @@ describe('validateEnv', () => {
     expect(env.S3_FORCE_PATH_STYLE).toBe(true);
   });
 
+  describe('timeout CSDL', () => {
+    const base = {
+      DATABASE_URL: 'postgres://a@b/c',
+      REDIS_URL: 'redis://x',
+      NODE_ENV: 'local',
+      S3_REGION: 'us-east-1',
+      S3_ACCESS_KEY_ID: 'k',
+      S3_SECRET_ACCESS_KEY: 's',
+      S3_BUCKET_PRIVATE: 'b',
+    };
+
+    it('thiếu hoặc rỗng → mặc định; worker rộng hơn api', () => {
+      const env = validateEnv({ ...base, DB_LOCK_TIMEOUT_MS: '' });
+      expect([
+        env.DB_STATEMENT_TIMEOUT_MS,
+        env.DB_LOCK_TIMEOUT_MS,
+        env.DB_IDLE_IN_TX_TIMEOUT_MS,
+        env.DB_CONNECT_TIMEOUT_MS,
+      ]).toEqual([15_000, 5_000, 30_000, 5_000]);
+      expect([
+        env.WORKER_DB_STATEMENT_TIMEOUT_MS,
+        env.WORKER_DB_LOCK_TIMEOUT_MS,
+        env.WORKER_DB_IDLE_IN_TX_TIMEOUT_MS,
+        env.WORKER_DB_CONNECT_TIMEOUT_MS,
+      ]).toEqual([300_000, 30_000, 120_000, 10_000]);
+    });
+
+    it('đọc số từ env', () => {
+      expect(
+        validateEnv({ ...base, WORKER_DB_STATEMENT_TIMEOUT_MS: '600000' })
+          .WORKER_DB_STATEMENT_TIMEOUT_MS,
+      ).toBe(600_000);
+    });
+
+    it('không phải số, 0 (tắt timeout) hoặc âm → không khởi động', () => {
+      for (const v of ['abc', '0', '-1', '1.5']) {
+        expect(() =>
+          validateEnv({ ...base, DB_STATEMENT_TIMEOUT_MS: v }),
+        ).toThrow(/DB_STATEMENT_TIMEOUT_MS/);
+      }
+    });
+  });
+
   describe('GOOGLE_CLIENT_IDS ngoài local/test', () => {
     const sfx = '.apps.googleusercontent.com';
     const web = `432762025168-e2lo4mengjqb64e8bc2sdoat1vbqpdl8${sfx}`;
