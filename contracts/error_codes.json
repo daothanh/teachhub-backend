@@ -3,6 +3,8 @@
   "VALIDATION_FAILED": { "http": 422, "message": "Dữ liệu chưa hợp lệ." },
   "IDEMPOTENCY_KEY_REUSED": { "http": 422, "message": "Idempotency-Key đã dùng cho yêu cầu khác." },
   "TRIAL_ALREADY_USED": { "http": 422, "message": "Bạn đã dùng thử Pro rồi, mỗi tài khoản chỉ dùng thử một lần." },
+  "FILE_TOO_LARGE": { "http": 422, "message": "Tệp quá lớn, vui lòng chọn tệp nhỏ hơn." },
+  "FILE_TYPE_NOT_ALLOWED": { "http": 422, "message": "Định dạng tệp không được hỗ trợ." },
   "PAYOUT_ACCOUNT_MISSING": { "http": 422, "message": "Chưa có tài khoản nhận tiền, vui lòng thêm tài khoản trước khi gửi hóa đơn." },
   "ATTENDANCE_EDIT_WINDOW_CLOSED": { "http": 422, "message": "Buổi học đã quá 7 ngày, chỉ xem được." },
   "UNAUTHENTICATED": { "http": 401, "message": "Bạn cần đăng nhập." },

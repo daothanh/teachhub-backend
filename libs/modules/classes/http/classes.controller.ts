@@ -13,6 +13,7 @@ import {
 import {
   ApiBearerAuth,
   ApiCreatedResponse,
+  ApiNoContentResponse,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
@@ -23,6 +24,7 @@ import {
   ApiErrors,
   ApiIdempotencyKey,
   ApiPlanLimitExceeded,
+  AppException,
   Ctx,
   type RequestContext,
 } from '@teachhub/core';
@@ -32,6 +34,8 @@ import { RequiresRole } from '@teachhub/modules/identity';
 import { ClassesService } from '../application/classes.service.js';
 import { EnrollmentsService } from '../application/enrollments.service.js';
 import {
+  type AcknowledgeClassWarningRequest,
+  acknowledgeClassWarningRequestSchema,
   type Class,
   type ClassCreated,
   classCreatedSchema,
@@ -209,5 +213,24 @@ export class ClassesController {
     return this.idem.run(req, reply, ctx, (t) =>
       this.enrollments.enroll(t, ctx.tenantId!, id, body),
     );
+  }
+  // Hợp đồng Sprint 8 (S7-CT-01), thân hàm 501 tới task backend `classes`. US-9.3 AC3 (cảnh báo, không chặn).
+  @Post(':id/warning-acknowledgements')
+  @HttpCode(204)
+  @ApiOperation({
+    summary:
+      'Xác nhận "Tôi đã hiểu, vẫn tạo" cảnh báo TT29 của lớp (US-9.3 AC3)',
+    description:
+      'Lớp đã được tạo kèm `warnings` (không chặn); lời gọi này ghi xác nhận vào nhật ký (`acknowledgements`, `kind = class_warning`, `entity_id` = lớp, người xác nhận). Gọi lại cùng `code` vẫn 204 (không ghi trùng). `code` không nằm trong `warnings` hiện có của lớp → 422 `VALIDATION_FAILED`. Lớp của tenant khác → 404 `NOT_FOUND`.',
+  })
+  @ApiNoContentResponse()
+  @ApiIdempotencyKey()
+  @ApiErrors('VALIDATION_FAILED', 'NOT_FOUND')
+  acknowledgeWarning(
+    @Param('id', { schema: idParam }) _id: string,
+    @Body({ schema: acknowledgeClassWarningRequestSchema })
+    _body: AcknowledgeClassWarningRequest,
+  ): void {
+    throw new AppException('NOT_IMPLEMENTED');
   }
 }

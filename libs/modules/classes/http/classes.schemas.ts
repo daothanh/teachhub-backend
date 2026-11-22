@@ -221,6 +221,22 @@ export const classCreatedSchema = classSchema
   });
 export type ClassCreated = z.infer<typeof classCreatedSchema>;
 
+/** Cảnh báo không chặn của `POST /classes` (US-9.3): giáo viên xác nhận "Tôi đã hiểu, vẫn tạo" sau khi lớp đã được tạo. */
+export const acknowledgeClassWarningRequestSchema = z
+  .object({
+    code: z.enum(['TT29_PRIMARY_ACADEMIC']).meta({
+      description:
+        '`TT29_PRIMARY_ACADEMIC` = lớp khối 1 đến 5 với môn văn hóa (US-9.3 AC1), trùng `warnings[].code` của `ClassCreated`. Môn nghệ thuật, thể thao, kỹ năng sống không có cảnh báo (US-9.3 AC2)',
+    }),
+  })
+  .meta({
+    id: 'AcknowledgeClassWarningRequest',
+    example: { code: 'TT29_PRIMARY_ACADEMIC' },
+  });
+export type AcknowledgeClassWarningRequest = z.infer<
+  typeof acknowledgeClassWarningRequestSchema
+>;
+
 export const classListQuerySchema = pageQuerySchema.extend({
   status: z.enum(['active', 'archived']).default('active'),
 });

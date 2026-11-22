@@ -361,4 +361,96 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
     file: 'subscription.e2e-spec.ts',
     test: 'webhook: sự kiện của tenant A không đổi gói của tenant B',
   },
+  'POST /v1/classes/{id}/warning-acknowledgements': {
+    notApplicable:
+      'hợp đồng S7-CT-01, thân hàm trả 501 tới task backend classes Sprint 8; test chéo tenant làm cùng task đó',
+  },
+  'POST /v1/family/invoices/{id}/payment-claims': {
+    notApplicable:
+      'hợp đồng S7-CT-01, thân hàm trả 501 tới task backend billing Sprint 8; test chéo tenant làm cùng task đó',
+  },
+  'GET /v1/invoices/{id}/payment-claims': {
+    notApplicable:
+      'hợp đồng S7-CT-01, thân hàm trả 501 tới task backend billing Sprint 8; test chéo tenant làm cùng task đó',
+  },
+  'POST /v1/payment-claims/{id}/resolve': {
+    notApplicable:
+      'hợp đồng S7-CT-01, thân hàm trả 501 tới task backend billing Sprint 8; test chéo tenant làm cùng task đó',
+  },
+  'POST /v1/exports': {
+    notApplicable:
+      'hợp đồng S7-CT-01, thân hàm trả 501 tới task backend reports Sprint 8; test chéo tenant làm cùng task đó',
+  },
+  'GET /v1/exports/{id}': {
+    notApplicable:
+      'hợp đồng S7-CT-01, thân hàm trả 501 tới task backend reports Sprint 8; test chéo tenant làm cùng task đó',
+  },
+  'POST /v1/files/upload-urls': {
+    notApplicable:
+      'hợp đồng S7-CT-01, thân hàm trả 501 tới task backend files Sprint 8; test chéo tenant làm cùng task đó',
+  },
+  'POST /v1/files/{id}/complete': {
+    notApplicable:
+      'hợp đồng S7-CT-01, thân hàm trả 501 tới task backend files Sprint 8; test chéo tenant làm cùng task đó',
+  },
+  'GET /v1/files/{id}/download-url': {
+    notApplicable:
+      'hợp đồng S7-CT-01, thân hàm trả 501 tới task backend files Sprint 8; test chéo tenant làm cùng task đó',
+  },
+  'GET /v1/compliance/checklist': {
+    notApplicable:
+      'hợp đồng S7-CT-01, thân hàm trả 501 tới task backend compliance Sprint 8; test chéo tenant làm cùng task đó',
+  },
+  'PATCH /v1/compliance/checklist/{itemKey}': {
+    notApplicable:
+      'hợp đồng S7-CT-01, thân hàm trả 501 tới task backend compliance Sprint 8; test chéo tenant làm cùng task đó',
+  },
+  'GET /v1/compliance/form02': {
+    notApplicable:
+      'hợp đồng S7-CT-01, thân hàm trả 501 tới task backend compliance Sprint 8; test chéo tenant làm cùng task đó',
+  },
+  'POST /v1/compliance/form02/publish': {
+    notApplicable:
+      'hợp đồng S7-CT-01, thân hàm trả 501 tới task backend compliance Sprint 8; test chéo tenant làm cùng task đó',
+  },
+  'GET /v1/compliance/school-declaration': {
+    notApplicable:
+      'hợp đồng S7-CT-01, thân hàm trả 501 tới task backend compliance Sprint 8; test chéo tenant làm cùng task đó',
+  },
+  'PUT /v1/compliance/school-declaration': {
+    notApplicable:
+      'hợp đồng S7-CT-01, thân hàm trả 501 tới task backend compliance Sprint 8; test chéo tenant làm cùng task đó',
+  },
+  'GET /v1/compliance/form03': {
+    notApplicable:
+      'hợp đồng S7-CT-01, thân hàm trả 501 tới task backend compliance Sprint 8; test chéo tenant làm cùng task đó',
+  },
+  'POST /v1/compliance/form03/pdf': {
+    notApplicable:
+      'hợp đồng S7-CT-01, thân hàm trả 501 tới task backend compliance Sprint 8; test chéo tenant làm cùng task đó',
+  },
+  'GET /v1/compliance/revenue-book': {
+    notApplicable:
+      'hợp đồng S7-CT-01, thân hàm trả 501 tới task backend compliance Sprint 8; test chéo tenant làm cùng task đó',
+  },
+  'POST /v1/compliance/revenue-book/export': {
+    notApplicable:
+      'hợp đồng S7-CT-01, thân hàm trả 501 tới task backend compliance Sprint 8; test chéo tenant làm cùng task đó',
+  },
+  'POST /v1/compliance/tax-alerts/{id}/dismiss': {
+    notApplicable:
+      'hợp đồng S7-CT-01, thân hàm trả 501 tới task backend compliance Sprint 8; test chéo tenant làm cùng task đó',
+  },
+  'GET /v1/legal-articles': {
+    notApplicable:
+      'hợp đồng S7-CT-01, thân hàm trả 501 tới task backend compliance Sprint 8; test chéo tenant làm cùng task đó',
+  },
+  'GET /v1/legal-articles/{slug}': {
+    notApplicable:
+      'hợp đồng S7-CT-01, thân hàm trả 501 tới task backend compliance Sprint 8; test chéo tenant làm cùng task đó',
+  },
+  'GET /v1/public/disclosures/{slug}': {
+    notApplicable:
+      'công khai theo thiết kế (trang /cong-khai/:slug, US-9.2 AC2), chỉ trả snapshot đã bật công khai và không có dữ liệu học viên; thân hàm trả 501 tới task backend compliance Sprint 8, test 404 slug lạ/đã tắt làm cùng task đó',
+  },
 };
