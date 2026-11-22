@@ -59,9 +59,9 @@ export class FilesController {
   @ApiOperation({
     summary: 'Xin URL tải tệp lên kho S3 (US-7.7, Spec §3.6c)',
     description:
-      'Kiểm quyền với `entityId` theo `purpose`, MIME và kích thước theo bảng giới hạn của `purpose` rồi cấp URL PUT 10 phút; tệp không đi qua API. ' +
+      'Kiểm quyền với `entityId` theo `purpose`, MIME và kích thước theo bảng giới hạn của `purpose` rồi cấp URL PUT 2 phút; tệp không đi qua API. ' +
       'MIME ngoài danh sách → 422 `FILE_TYPE_NOT_ALLOWED`; quá trần → 422 `FILE_TOO_LARGE`; `entityId` không thấy hoặc không có quyền → 404 `NOT_FOUND`. ' +
-      'Gọi lại cùng `Idempotency-Key` trả lại cùng `fileId` và URL. Chưa đồng ý điều khoản → 403 `CONSENT_REQUIRED`. Giới hạn 30 lần/phút/user. ' +
+      'Gọi lại cùng `Idempotency-Key` trả lại cùng `fileId` và URL. Chưa đồng ý điều khoản → 403 `CONSENT_REQUIRED`. Tối đa 5 tệp `pending` mỗi (người tải, hóa đơn): vượt → 429 `RATE_LIMITED`. Giới hạn 30 lần/phút/user. ' +
       'URL ký cả `Content-Type` và số byte đã khai (`Content-Length`): client gửi khác loại hoặc nhiều/ít byte hơn thì kho S3 từ chối chữ ký (403 từ kho, không qua API), nên URL không dùng để đẩy tệp lớn hơn khai báo.',
   })
   @ApiCreatedResponse({ standardSchema: uploadUrlSchema })
@@ -91,7 +91,7 @@ export class FilesController {
     summary: 'Xác nhận đã tải xong, tệp sẵn sàng (US-7.7)',
     description:
       'Server HEAD kho S3: không có đối tượng → 409 `CONFLICT_STALE` (client PUT lại bằng URL còn hạn hoặc xin URL mới); nhiều byte hơn khai báo hoặc quá trần → 422 `FILE_TOO_LARGE`, content-type lệch → 422 `FILE_TYPE_NOT_ALLOWED`, ít byte hơn khai báo → 422 `VALIDATION_FAILED` ở `sizeBytes`; cả ba xóa đối tượng (tệp vẫn `pending`, client xin URL mới). ' +
-      'Chỉ người đã xin URL gọi được (người khác → 404). Gọi lại trên tệp đã `ready` vẫn 200 với bản ghi hiện tại.',
+      'Sau khi đủ kích thước và content-type, server đọc vài byte đầu: chữ ký không khớp MIME khai (JPEG/PNG/HEIC) → 422 `FILE_TYPE_NOT_ALLOWED` và xóa đối tượng; tệp `pending` quá 24 giờ → 409 `CONFLICT_STALE`. Chỉ người đã xin URL gọi được (người khác → 404). Gọi lại trên tệp đã `ready` vẫn 200 với bản ghi hiện tại.',
   })
   @ApiOkResponse({ standardSchema: fileRecordSchema })
   @ApiErrors(

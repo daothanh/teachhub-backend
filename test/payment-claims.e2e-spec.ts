@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
 import { startTestS3, type TestS3 } from './containers.js';
@@ -157,7 +158,18 @@ describe('payment_claims: báo đã chuyển khoản (US-7.7)', () => {
     s3 = await startTestS3();
     t = await startTestApp(s3.env);
     appPool = new pg.Pool({ connectionString: t.db.url('teachhub_app') });
-    f = familyFixture(t);
+    f = familyFixture(t, {
+      client: new S3Client({
+        endpoint: s3.env.S3_ENDPOINT,
+        region: 'us-east-1',
+        forcePathStyle: true,
+        credentials: {
+          accessKeyId: s3.env.S3_ACCESS_KEY_ID!,
+          secretAccessKey: s3.env.S3_SECRET_ACCESS_KEY!,
+        },
+      }),
+      bucket: s3.env.S3_BUCKET_PRIVATE!,
+    });
     A = await f.mkTeacher('Cô Lan');
     B = await f.mkTeacher('Thầy Bình');
     P1 = await f.mkParent(true, 'Nguyễn Văn Hải');
@@ -947,5 +959,67 @@ describe('payment_claims: báo đã chuyển khoản (US-7.7)', () => {
     // Phụ huynh nhận thông báo trong hộp thư của mình qua API.
     const inbox = await f.call(P1.token, 'GET', '/notifications');
     expect(inbox.statusCode, inbox.body).toBe(200);
+  });
+
+  it('tệp bị ghi đè sau complete (ETag đổi) → 422 ở receiptFileId, hóa đơn không đổi; tệp biến mất cũng 422', async () => {
+    const a = await f.invoice(c1);
+    const fileId = await f.uploadReceipt(P1, a);
+    const [row] = await q(
+      `select bucket, object_key from files where id = $1`,
+      [fileId],
+    );
+    const s3c = new S3Client({
+      endpoint: s3.env.S3_ENDPOINT,
+      region: 'us-east-1',
+      forcePathStyle: true,
+      credentials: {
+        accessKeyId: s3.env.S3_ACCESS_KEY_ID!,
+        secretAccessKey: s3.env.S3_SECRET_ACCESS_KEY!,
+      },
+    });
+    await s3c.send(
+      new PutObjectCommand({
+        Bucket: row.bucket,
+        Key: row.object_key,
+        Body: Buffer.from('thay-the-sau-complete'),
+        ContentType: 'image/jpeg',
+      }),
+    );
+    const r = await claim(P1, a, { receiptFileId: fileId });
+    expect(r.statusCode, r.body).toBe(422);
+    expect(JSON.stringify(r.json())).toContain('receiptFileId');
+    expect((await inv(a)).status).toBe('issued');
+    expect(
+      await q(`select 1 from payment_claims where invoice_id = $1`, [a]),
+    ).toHaveLength(0);
+    s3c.destroy();
+  });
+
+  it('audit payment_claims không chứa ghi chú, lý do từ chối, tên người báo/xử lý', async () => {
+    const a = await setup(c1, P1);
+    const c = (
+      await claim(P1, a.invoiceId, {
+        receiptFileId: a.receiptFileId,
+        note: 'GHI-CHU-RIENG',
+      })
+    ).json() as Claim;
+    expect(
+      (await resolve(A, c.id, { decision: 'reject', reason: 'LY-DO-RIENG' }))
+        .statusCode,
+    ).toBe(200);
+    const rows = await q(
+      `select before_data, after_data from audit_logs where entity = 'payment_claims' and entity_id = $1`,
+      [c.id],
+    );
+    expect(rows).toHaveLength(2);
+    const all = JSON.stringify(rows);
+    for (const secret of [
+      'GHI-CHU-RIENG',
+      'LY-DO-RIENG',
+      'Nguyễn Văn Hải',
+      'Cô Lan',
+    ])
+      expect(all).not.toContain(secret);
+    expect(all).toContain('rejected');
   });
 });

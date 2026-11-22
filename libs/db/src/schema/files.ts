@@ -40,6 +40,8 @@ export const files = pgTable(
     status: text().notNull().default('pending'),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     readyAt: timestamp({ withTimezone: true }),
+    /** ETag kho S3 lúc `complete`: tạo claim HEAD lại và so, đối tượng bị ghi đè sau đó thì lệch. */
+    etag: text(),
   },
   (t) => [
     unique('files_tenant_id_id_uq').on(t.tenantId, t.id),

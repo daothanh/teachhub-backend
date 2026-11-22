@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { AppException } from '@teachhub/core';
 import {
+  files,
   invoices,
   paymentClaims,
   recordOutboxEvent,
@@ -10,6 +11,7 @@ import {
   users,
   writeAudit,
 } from '@teachhub/db';
+import { ObjectStorage } from '@teachhub/infra';
 import { ConsentsService } from '@teachhub/modules/identity';
 import { formatInZone } from '@teachhub/modules/schedule';
 import {
@@ -69,6 +71,7 @@ export class PaymentClaimsService {
     private readonly payments: PaymentsService,
     private readonly dunning: DunningService,
     private readonly consents: ConsentsService,
+    private readonly storage: ObjectStorage,
   ) {}
 
   async create(
@@ -78,6 +81,32 @@ export class PaymentClaimsService {
     body: CreatePaymentClaimRequest,
   ): Promise<PaymentClaim> {
     await this.consents.assertAccepted(userId, 'parent');
+    // Tệp bị ghi đè sau `complete` (URL PUT còn hạn hoặc khóa đối tượng bị lộ): HEAD lại, ETag/kích thước phải như lúc `complete`.
+    // Quyền sở hữu và các điều kiện khác do hàm CSDL kiểm; tệp không thấy ở đây thì để hàm trả `bad_file`.
+    const [f] = await t
+      .select({
+        key: files.objectKey,
+        etag: files.etag,
+        size: files.sizeBytes,
+        status: files.status,
+      })
+      .from(files)
+      .where(
+        and(
+          eq(files.id, body.receiptFileId),
+          eq(files.ownerUserId, userId),
+          eq(files.entityId, invoiceId),
+        ),
+      );
+    if (f?.status === 'ready') {
+      const head = await this.storage.head(f.key);
+      if (!head || head.etag !== f.etag || head.sizeBytes !== f.size)
+        throw new AppException('VALIDATION_FAILED', undefined, {
+          receiptFileId: [
+            'Tệp biên lai đã thay đổi sau khi tải lên; vui lòng tải lại biên lai.',
+          ],
+        });
+    }
     const r = (
       await t.execute<{ r: CreateResult }>(sql`
         select app_private.create_payment_claim(${invoiceId}::uuid, ${body.receiptFileId}::uuid,

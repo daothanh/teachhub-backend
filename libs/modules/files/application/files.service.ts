@@ -7,6 +7,11 @@ import { ObjectStorage } from '@teachhub/infra';
 import { ConsentsService } from '@teachhub/modules/identity';
 import {
   extensionFor,
+  MAGIC_BYTES,
+  matchesMagic,
+  MAX_PENDING_PER_ENTITY,
+  PENDING_TTL_HOURS,
+  PUT_TTL_SEC,
   type FilePurpose,
   normalizeMime,
   objectKeyOf,
@@ -69,6 +74,23 @@ export class FilesService {
     if (body.sizeBytes > policy.maxBytes)
       throw new AppException('FILE_TOO_LARGE');
 
+    // Tối đa N tệp pending mỗi (người tải, hóa đơn); khóa tư vấn để hai request song song không cùng vượt.
+    await t.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${`files:${userId}:${body.entityId}`}, 0))`,
+    );
+    const [{ n } = { n: 0 }] = await t
+      .select({ n: sql<number>`count(*)::int` })
+      .from(files)
+      .where(
+        and(
+          eq(files.ownerUserId, userId),
+          eq(files.entityId, body.entityId),
+          eq(files.status, 'pending'),
+          sql`${files.createdAt} > now() - make_interval(hours => ${PENDING_TTL_HOURS})`,
+        ),
+      );
+    if (n >= MAX_PENDING_PER_ENTITY) throw new AppException('RATE_LIMITED');
+
     const mime = normalizeMime(body.mimeType);
     const id = uuidv7();
     const key = objectKeyOf({
@@ -94,14 +116,14 @@ export class FilesService {
       key,
       mime,
       body.sizeBytes,
-      PRESIGN_TTL_SEC,
+      PUT_TTL_SEC,
     );
     return {
       fileId: id,
       uploadUrl,
       method: 'PUT',
       headers: { 'Content-Type': mime },
-      expiresAt: new Date(Date.now() + PRESIGN_TTL_SEC * 1000).toISOString(),
+      expiresAt: new Date(Date.now() + PUT_TTL_SEC * 1000).toISOString(),
     };
   }
 
@@ -116,6 +138,9 @@ export class FilesService {
     });
     if (!file) throw new AppException('NOT_FOUND');
     if (file.status === 'ready') return toRecord(file);
+    // Quá hạn pending: job dọn có thể đang xóa; không cho hoàn tất tệp cũ.
+    if (Date.now() - file.createdAt.getTime() > PENDING_TTL_HOURS * 3_600_000)
+      throw new AppException('CONFLICT_STALE');
 
     const head = await this.storage.head(file.objectKey);
     if (!head) throw new AppException('CONFLICT_STALE');
@@ -132,6 +157,13 @@ export class FilesService {
         });
       return null;
     })();
+    if (!bad) {
+      // Chữ ký thật của nội dung phải khớp MIME đã khai (Content-Type do client tự khai).
+      const first = await this.storage.firstBytes(file.objectKey, MAGIC_BYTES);
+      if (!first) throw new AppException('CONFLICT_STALE');
+      if (!matchesMagic(file.mime, first))
+        return this.reject(file.objectKey, 'FILE_TYPE_NOT_ALLOWED');
+    }
     if (bad) {
       await this.storage.delete(file.objectKey);
       throw bad;
@@ -139,7 +171,7 @@ export class FilesService {
     return this.tx.run({ userId }, async (t) => {
       const [done] = await t
         .update(files)
-        .set({ status: 'ready', readyAt: sql`now()` })
+        .set({ status: 'ready', readyAt: sql`now()`, etag: head.etag })
         .where(
           and(
             eq(files.id, id),
@@ -154,6 +186,14 @@ export class FilesService {
       if (!again) throw new AppException('NOT_FOUND');
       return toRecord(again);
     });
+  }
+
+  private async reject(
+    key: string,
+    code: 'FILE_TYPE_NOT_ALLOWED',
+  ): Promise<never> {
+    await this.storage.delete(key);
+    throw new AppException(code);
   }
 
   /** RLS: người tải lên hoặc nhân sự tenant. Mọi trường hợp khác, kể cả `pending`, cùng 404. */

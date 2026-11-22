@@ -10,6 +10,7 @@ import { startTestS3, type TestS3 } from './containers.js';
 import { startTestApp, type TestApp } from './support/app.js';
 import {
   familyFixture,
+  JPEG,
   type Child,
   type Parent,
   type Teacher,
@@ -126,6 +127,10 @@ describe('files: presigned URL, complete, download-url', () => {
       await f.invoice(c3),
     ];
   }, 240_000);
+  // Mỗi ca bắt đầu không dính tệp pending của ca trước (giới hạn 5 pending mỗi người × hóa đơn).
+  beforeEach(async () => {
+    await f.q(`delete from files where status = 'pending'`);
+  });
   afterAll(async () => {
     await appPool?.end();
     s3c?.destroy();
@@ -134,7 +139,7 @@ describe('files: presigned URL, complete, download-url', () => {
   });
 
   it('luồng đủ: xin URL → PUT thẳng lên kho S3 → complete → tải về đúng nội dung; khóa không đoán được, tên gốc không vào khóa', async () => {
-    const body = Buffer.from('noi-dung-bien-lai-12345');
+    const body = Buffer.concat([JPEG, Buffer.from('noi-dung-bien-lai-12345')]);
     const up = await upload(P1.token, inv1, {
       fileName: 'ảnh biên lai (1).jpg',
       sizeBytes: body.length,
@@ -145,9 +150,9 @@ describe('files: presigned URL, complete, download-url', () => {
       method: 'PUT',
       headers: { 'Content-Type': 'image/jpeg' },
     });
-    expect(new URL(u.uploadUrl).searchParams.get('X-Amz-Expires')).toBe('600');
-    expect(new Date(u.expiresAt).getTime()).toBeGreaterThan(
-      Date.now() + 9 * 60_000,
+    expect(new URL(u.uploadUrl).searchParams.get('X-Amz-Expires')).toBe('120');
+    expect(new Date(u.expiresAt).getTime()).toBeLessThanOrEqual(
+      Date.now() + 121_000,
     );
 
     // Chưa tải lên: complete → 409; người xin URL mới được gọi.
@@ -504,5 +509,67 @@ describe('files: presigned URL, complete, download-url', () => {
       `select status, rows_affected from job_runs where job = 'files.purge-pending' order by started_at desc limit 1`,
     );
     expect(run).toMatchObject({ status: 'succeeded', rows_affected: n });
+  });
+
+  it('magic bytes: nội dung không phải JPEG/PNG/HEIC dù khai image/jpeg → 422 FILE_TYPE_NOT_ALLOWED và xóa đối tượng; PNG khai là JPEG cũng bị từ chối', async () => {
+    const html = Buffer.from('<html><script>alert(1)</script>');
+    const u = (
+      await upload(P1.token, inv1, { sizeBytes: html.length })
+    ).json() as UploadUrl;
+    expect((await put(u, html)).ok).toBe(true);
+    const r = await f.call(P1.token, 'POST', `/files/${u.fileId}/complete`);
+    expect(r.statusCode).toBe(422);
+    expect(r.json().code).toBe('FILE_TYPE_NOT_ALLOWED');
+    expect(await head((await objectOf(u.fileId)).object_key)).toBeNull();
+    const png = Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2,
+    ]);
+    const u2 = (
+      await upload(P1.token, inv1, { sizeBytes: png.length })
+    ).json() as UploadUrl;
+    expect((await put(u2, png)).ok).toBe(true);
+    expect(
+      (await f.call(P1.token, 'POST', `/files/${u2.fileId}/complete`))
+        .statusCode,
+    ).toBe(422);
+  });
+
+  it('tối đa 5 tệp pending mỗi (người tải, hóa đơn): thứ 6 → 429 RATE_LIMITED, hóa đơn khác và người khác không bị ảnh hưởng; complete trả chỗ', async () => {
+    const mine = await f.invoice(c1);
+    for (let i = 0; i < 5; i++)
+      expect((await upload(P1.token, mine)).statusCode).toBe(201);
+    const over = await upload(P1.token, mine);
+    expect(over.statusCode).toBe(429);
+    expect(over.json().code).toBe('RATE_LIMITED');
+    expect((await upload(P1.token, inv1)).statusCode).toBe(201);
+    await f.q(
+      `update files set status = 'ready', ready_at = now() where entity_id = $1 and id = (select id from files where entity_id = $1 limit 1)`,
+      [mine],
+    );
+    expect((await upload(P1.token, mine)).statusCode).toBe(201);
+  });
+
+  it('complete từ chối tệp pending quá 24 giờ → 409 CONFLICT_STALE', async () => {
+    const body = JPEG;
+    const u = (
+      await upload(P1.token, inv1, { sizeBytes: body.length })
+    ).json() as UploadUrl;
+    expect((await put(u, body)).ok).toBe(true);
+    await f.q(
+      `update files set created_at = now() - interval '25 hours' where id = $1`,
+      [u.fileId],
+    );
+    const r = await f.call(P1.token, 'POST', `/files/${u.fileId}/complete`);
+    expect(r.statusCode).toBe(409);
+    expect(r.json().code).toBe('CONFLICT_STALE');
+  });
+
+  it('complete lưu ETag; etag bất biến sau ready', async () => {
+    const id = await f.uploadReceipt(P1, inv1);
+    const [row] = await f.q(`select etag from files where id = $1`, [id]);
+    expect(row.etag).toMatch(/^"?[0-9a-f]{32}/);
+    await expect(
+      f.q(`update files set etag = 'khac' where id = $1`, [id]),
+    ).rejects.toThrow(/FILE_IMMUTABLE/);
   });
 });

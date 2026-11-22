@@ -1,4 +1,9 @@
 import { randomUUID } from 'node:crypto';
+import {
+  HeadObjectCommand,
+  PutObjectCommand,
+  type S3Client,
+} from '@aws-sdk/client-s3';
 import type { TestApp } from './app.js';
 import { seedTenant, type SeededTenant } from './seed.js';
 
@@ -12,7 +17,15 @@ const TERMS = '2026-12-01';
  * Dựng giáo viên, phụ huynh liên kết qua lời mời thật, hóa đơn đã phát hành, tệp biên lai (qua API + kho S3 thật hoặc dòng DB)
  * cho e2e của `files` và `payment_claims` (S8-BE). Mọi truy vấn dựng dữ liệu đi qua role worker (BYPASSRLS).
  */
-export function familyFixture(t: TestApp) {
+export const JPEG = Buffer.from([
+  0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4, 5, 6, 7, 8,
+]);
+
+export function familyFixture(
+  t: TestApp,
+  /** Có thì `dbFile` ready ghi thêm đối tượng thật vào kho S3 (claim HEAD lại để so ETag). */
+  store?: { client: S3Client; bucket: string },
+) {
   let seq = 0;
   const q = async (sql: string, params: unknown[] = []) =>
     (await t.worker.query(sql, params)).rows;
@@ -142,19 +155,43 @@ export function familyFixture(t: TestApp) {
     bucket?: string;
   }) => {
     const id = randomUUID();
+    const key = `${o.tenantId}/receipts/${o.entityId}/${id}.jpg`;
+    let etag: string | null = null;
+    let size = 1000;
+    let bucket = o.bucket ?? 'x';
+    if (store && (o.status ?? 'ready') === 'ready') {
+      bucket = store.bucket;
+      size = JPEG.length;
+      await store.client.send(
+        new PutObjectCommand({
+          Bucket: bucket,
+          Key: key,
+          Body: JPEG,
+          ContentType: 'image/jpeg',
+        }),
+      );
+      etag =
+        (
+          await store.client.send(
+            new HeadObjectCommand({ Bucket: bucket, Key: key }),
+          )
+        ).ETag ?? null;
+    }
     await q(
-      `insert into files (id, tenant_id, owner_user_id, purpose, entity_id, bucket, object_key, original_name, mime, size_bytes, status, created_at, ready_at)
-       values ($1, $2, $3, 'receipt', $4, $9, $5, 'bien-lai.jpg', 'image/jpeg', 1000, $6, now() - make_interval(hours => $7), $8)`,
+      `insert into files (id, tenant_id, owner_user_id, purpose, entity_id, bucket, object_key, original_name, mime, size_bytes, status, created_at, ready_at, etag)
+       values ($1, $2, $3, 'receipt', $4, $9, $5, 'bien-lai.jpg', 'image/jpeg', $10, $6, now() - make_interval(hours => $7), $8, $11)`,
       [
         id,
         o.tenantId,
         o.ownerUserId,
         o.entityId,
-        `${o.tenantId}/receipts/${o.entityId}/${id}.jpg`,
+        key,
         o.status ?? 'ready',
         o.ageHours ?? 0,
         (o.status ?? 'ready') === 'ready' ? new Date() : null,
-        o.bucket ?? 'x',
+        bucket,
+        size,
+        etag,
       ],
     );
     return id;
@@ -163,7 +200,7 @@ export function familyFixture(t: TestApp) {
   const uploadReceipt = async (
     p: Parent,
     invoiceId: string,
-    body: Buffer = Buffer.from('anh-bien-lai'),
+    body: Buffer = JPEG,
   ): Promise<string> => {
     const up = await call(p.token, 'POST', '/files/upload-urls', {
       purpose: 'receipt',

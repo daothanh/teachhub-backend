@@ -1,5 +1,6 @@
 import {
   extensionFor,
+  matchesMagic,
   normalizeMime,
   objectKeyOf,
   PURPOSE_POLICY,
@@ -32,5 +33,22 @@ describe('chính sách tệp', () => {
 
   it('chuẩn hóa MIME', () => {
     expect(normalizeMime(' Image/JPEG ;q=1')).toBe('image/jpeg');
+  });
+
+  it('magic bytes khớp MIME khai', () => {
+    const jpg = Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 0, 0]);
+    const png = Uint8Array.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    ]);
+    const heic = Uint8Array.from([0, 0, 0, 24, ...Buffer.from('ftypheic')]);
+    const html = Uint8Array.from(Buffer.from('<html><script>alert(1)'));
+    expect(matchesMagic('image/jpeg', jpg)).toBe(true);
+    expect(matchesMagic('image/png', png)).toBe(true);
+    expect(matchesMagic('image/heic', heic)).toBe(true);
+    expect(matchesMagic('image/jpeg', png)).toBe(false);
+    expect(matchesMagic('image/png', html)).toBe(false);
+    expect(matchesMagic('image/heic', jpg)).toBe(false);
+    expect(matchesMagic('image/jpeg', new Uint8Array())).toBe(false);
+    expect(matchesMagic('application/pdf', jpg)).toBe(false);
   });
 });

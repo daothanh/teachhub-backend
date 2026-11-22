@@ -75,9 +75,11 @@ export class ObjectStorage {
   }
 
   /** Kích thước và content-type thật của đối tượng; `null` nếu chưa có. Lỗi khác (mạng, quyền) ném ra. */
-  async head(
-    key: string,
-  ): Promise<{ sizeBytes: number; contentType: string | null } | null> {
+  async head(key: string): Promise<{
+    sizeBytes: number;
+    contentType: string | null;
+    etag: string | null;
+  } | null> {
     try {
       const r = await this.client.send(
         new HeadObjectCommand({ Bucket: this.privateBucket, Key: key }),
@@ -86,6 +88,7 @@ export class ObjectStorage {
       return {
         sizeBytes: r.ContentLength ?? 0,
         contentType: r.ContentType ?? null,
+        etag: r.ETag ?? null,
       };
     } catch (e) {
       const err = e as {
@@ -93,6 +96,29 @@ export class ObjectStorage {
         $metadata?: { httpStatusCode?: number };
       };
       if (err.name === 'NotFound' || err.$metadata?.httpStatusCode === 404)
+        return null;
+      throw e;
+    }
+  }
+
+  /** Vài byte đầu của đối tượng (GET Range) để kiểm magic bytes; đối tượng không có → `null`. */
+  async firstBytes(key: string, n: number): Promise<Uint8Array | null> {
+    try {
+      const r = await this.client.send(
+        new GetObjectCommand({
+          Bucket: this.privateBucket,
+          Key: key,
+          Range: `bytes=0-${n - 1}`,
+        }),
+        { abortSignal: AbortSignal.timeout(5000) },
+      );
+      return (await r.Body?.transformToByteArray()) ?? null;
+    } catch (e) {
+      const err = e as {
+        name?: string;
+        $metadata?: { httpStatusCode?: number };
+      };
+      if (err.name === 'NoSuchKey' || err.$metadata?.httpStatusCode === 404)
         return null;
       throw e;
     }
