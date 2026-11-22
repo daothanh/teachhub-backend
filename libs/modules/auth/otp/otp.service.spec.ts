@@ -150,6 +150,17 @@ describe('OtpService', () => {
     await expect(otp.verify(EMAIL, fresh, OWNER)).resolves.toBeUndefined();
   });
 
+  it('nhập đúng thì xóa bộ đếm lượt sai theo giờ của email', async () => {
+    const code = await otp.issue(EMAIL, OWNER);
+    expect(await fails(code, '203.0.113.50', 4)).toEqual(
+      Array(4).fill('OTP_INVALID'),
+    );
+    await expect(otp.verify(EMAIL, code, OWNER)).resolves.toBeUndefined();
+    expect([...redis.data.keys()].some((k) => k.startsWith('otp:cfail:'))).toBe(
+      false,
+    );
+  });
+
   it('không có mã thì nhập sai không đếm', async () => {
     for (let i = 0; i < 10; i++)
       await expect(otp.verify(EMAIL, '000000', ATTACKER)).rejects.toMatchObject(
