@@ -5,6 +5,7 @@ import {
   type StartedRedisContainer,
 } from '@testcontainers/redis';
 import { sql } from 'drizzle-orm';
+import type { Redis } from 'ioredis';
 import pg from 'pg';
 import { TxService } from '@teachhub/db';
 import { startTestDb, type TestDb } from './containers.js';
@@ -15,6 +16,8 @@ describe('phiên: /v1/auth/refresh, /v1/auth/logout, /v1/auth/me', () => {
   let redis: StartedRedisContainer;
   let worker: pg.Pool;
   let app: NestFastifyApplication;
+  let redisClient: Redis;
+  let session: typeof import('../libs/modules/auth/session/session.service.js');
 
   type Tokens = { access_token: string; refresh_token: string };
 
@@ -72,6 +75,9 @@ describe('phiên: /v1/auth/refresh, /v1/auth/logout, /v1/auth/me', () => {
     app = await createApp();
     await app.init();
     await app.getHttpAdapter().getInstance().ready();
+    // Import động: nạp sớm hơn sẽ đọc biến môi trường trước khi container sẵn sàng.
+    session = await import('../libs/modules/auth/session/session.service.js');
+    redisClient = app.get<Redis>((await import('@teachhub/infra')).REDIS);
   }, 180_000);
 
   afterAll(async () => {
@@ -105,24 +111,72 @@ describe('phiên: /v1/auth/refresh, /v1/auth/logout, /v1/auth/me', () => {
     expect(me.json()).toMatchObject({ id: s.userId, permissions: [] });
   });
 
-  it('dùng lại token đã xoay → 401 và thu hồi cả họ (token mới cũng chết)', async () => {
+  it('gửi lại token vừa xoay trong khoảng ân hạn (phản hồi bị rớt) → 200 cùng refresh token, họ không bị thu hồi', async () => {
     const s = await login();
     const next = (await refresh(s.refresh_token)).json() as Tokens;
+    const again = await refresh(s.refresh_token);
+    expect(again.statusCode).toBe(200);
+    expect(again.json().refresh_token).toBe(next.refresh_token);
+    const me = await withToken('GET', '/v1/auth/me', again.json().access_token);
+    expect(me.statusCode).toBe(200);
+    // Token đã trả vẫn dùng tiếp được: họ còn sống.
+    expect((await refresh(next.refresh_token)).statusCode).toBe(200);
+  });
+
+  it('ân hạn không cứu token đã xoay tiếp hoặc phiên đã đăng xuất', async () => {
+    const s = await login();
+    const next = (await refresh(s.refresh_token)).json() as Tokens;
+    await refresh(next.refresh_token);
+    // next đã bị xoay → lần gửi lại token gốc rơi về đường dùng lại, thu hồi cả họ.
+    expect((await refresh(s.refresh_token)).statusCode).toBe(401);
+
+    const b = await login();
+    const bNext = (await refresh(b.refresh_token)).json() as Tokens;
+    await withToken('POST', '/v1/auth/logout', bNext.access_token);
+    expect((await refresh(b.refresh_token)).statusCode).toBe(401);
+  });
+
+  it('dùng lại token đã xoay ngoài khoảng ân hạn → 401 và thu hồi cả họ (token mới cũng chết)', async () => {
+    const s = await login();
+    const next = (await refresh(s.refresh_token)).json() as Tokens;
+    // Hết REFRESH_GRACE_SEC: khóa ân hạn trong Redis đã hết TTL.
+    await redisClient.del(session.refreshGraceKey(s.refresh_token));
     const reuse = await refresh(s.refresh_token);
     expect(reuse.statusCode).toBe(401);
     expect(reuse.json().code).toBe('UNAUTHENTICATED');
     expect((await refresh(next.refresh_token)).statusCode).toBe(401);
+    const { rows } = await worker.query(
+      `select count(*)::int as live from refresh_tokens where family_id = $1 and revoked_at is null`,
+      [await family(s.refresh_token)],
+    );
+    expect(rows[0].live).toBe(0);
   });
 
-  it('hai lần làm mới cùng token đồng thời: chỉ một lần thành công', async () => {
+  it('khóa ân hạn có TTL bằng REFRESH_GRACE_SEC và không chứa token thô', async () => {
+    const s = await login();
+    const next = (await refresh(s.refresh_token)).json() as Tokens;
+    const key = session.refreshGraceKey(s.refresh_token);
+    const ttl = await redisClient.ttl(key);
+    expect(ttl).toBeGreaterThan(0);
+    expect(ttl).toBeLessThanOrEqual(session.REFRESH_GRACE_SEC);
+    expect(await redisClient.get(key)).not.toContain(next.refresh_token);
+  });
+
+  it('hai lần làm mới cùng token đồng thời: không bao giờ ra hai token sống', async () => {
     const s = await login();
     const res = await Promise.all([
       refresh(s.refresh_token),
       refresh(s.refresh_token),
     ]);
-    expect(res.map((r) => r.statusCode).sort((a, b) => a - b)).toEqual([
-      200, 401,
-    ]);
+    // Lần thứ hai hoặc trúng ân hạn (cùng token), hoặc bị coi là dùng lại (401, thu hồi họ).
+    const ok = res.filter((r) => r.statusCode === 200);
+    expect(ok.length).toBeGreaterThanOrEqual(1);
+    expect(new Set(ok.map((r) => r.json().refresh_token)).size).toBe(1);
+    const { rows } = await worker.query(
+      `select count(*)::int as live from refresh_tokens where family_id = $1 and revoked_at is null`,
+      [await family(s.refresh_token)],
+    );
+    expect(rows[0].live).toBeLessThanOrEqual(1);
   });
 
   it('tối đa 90 ngày kể từ lần đăng nhập, kể cả khi vẫn làm mới đều', async () => {

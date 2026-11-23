@@ -1,7 +1,12 @@
-import { createHash, randomBytes } from 'node:crypto';
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  randomBytes,
+} from 'node:crypto';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { Redis } from 'ioredis';
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { and, eq, gt, isNull, sql } from 'drizzle-orm';
 import { AppException, uuidv7 } from '@teachhub/core';
 import {
   memberships,
@@ -24,9 +29,41 @@ export const deletedKey = (userId: string) => `deleted:${userId}`;
 /** Hạn trượt 30 ngày; tối đa 90 ngày kiểm trong app_private.rotate_refresh_token (D20). */
 export const REFRESH_TTL_DAYS = 30;
 
+/**
+ * Khoảng ân hạn sau một lần xoay: client gửi refresh, server xoay xong nhưng phản hồi rớt (timeout, mất mạng) thì
+ * client chỉ còn token cũ. Gửi lại đúng token đó trong khoảng này → trả lại refresh token đã cấp ở lần xoay ấy thay vì
+ * coi là dùng lại và thu hồi cả họ. 30 giây đủ cho một lần thử lại của app, đủ ngắn để kẻ trộm token cũ khó tận dụng.
+ */
+export const REFRESH_GRACE_SEC = 30;
+export const refreshGraceKey = (oldToken: string) =>
+  `refresh-grace:${hashRefreshToken(oldToken)}`;
+
 export const hashRefreshToken = (token: string) =>
   createHash('sha256').update(token).digest('hex');
 const newRefreshToken = () => randomBytes(32).toString('base64url');
+
+type Grace = { userId: string; sessionId: string; refreshToken: string };
+// Khóa mã hóa suy từ token cũ (thô): bản dump Redis hay CSDL (chỉ có băm) đều không mở được token mới.
+const graceKey = (oldToken: string) =>
+  createHash('sha256').update(`refresh-grace\0${oldToken}`).digest();
+const sealGrace = (oldToken: string, g: Grace): string => {
+  const iv = randomBytes(12);
+  const c = createCipheriv('aes-256-gcm', graceKey(oldToken), iv);
+  const ct = Buffer.concat([c.update(JSON.stringify(g)), c.final()]);
+  return Buffer.concat([iv, c.getAuthTag(), ct]).toString('base64');
+};
+const openGrace = (oldToken: string, sealed: string): Grace => {
+  const raw = Buffer.from(sealed, 'base64');
+  const d = createDecipheriv(
+    'aes-256-gcm',
+    graceKey(oldToken),
+    raw.subarray(0, 12),
+  );
+  d.setAuthTag(raw.subarray(12, 28));
+  return JSON.parse(
+    Buffer.concat([d.update(raw.subarray(28)), d.final()]).toString('utf8'),
+  ) as Grace;
+};
 
 /** Phiên đăng nhập: mở (sau khi xác minh danh tính), làm mới (xoay vòng), đóng (đăng xuất). */
 @Injectable()
@@ -75,9 +112,12 @@ export class SessionService {
 
   /**
    * Đổi refresh token lấy cặp token mới; token cũ bị thu hồi. Token đã xoay mà bị dùng lại → thu hồi cả
-   * họ (phát hiện đánh cắp). Mọi lỗi là `UNAUTHENTICATED` — `TOKEN_EXPIRED` ở đây khiến client làm mới lặp.
+   * họ (phát hiện đánh cắp), trừ khi còn trong khoảng ân hạn `REFRESH_GRACE_SEC`. Mọi lỗi là `UNAUTHENTICATED` —
+   * `TOKEN_EXPIRED` ở đây khiến client làm mới lặp.
    */
   async refresh(refreshToken: string): Promise<RefreshResponse> {
+    const replay = await this.replayGrace(refreshToken);
+    if (replay) return replay;
     const next = newRefreshToken();
     const row = await this.tx.run({ userId: null }, async (t) => {
       const { rows } = await t.execute<{
@@ -96,7 +136,57 @@ export class SessionService {
     const mv = await this.tx.run({ userId }, (t) =>
       this.load(t, userId).then((r) => r.mv),
     );
+    try {
+      await this.redis.set(
+        refreshGraceKey(refreshToken),
+        sealGrace(refreshToken, { userId, sessionId, refreshToken: next }),
+        'EX',
+        REFRESH_GRACE_SEC,
+      );
+    } catch (e) {
+      // Mất ân hạn chỉ làm lần gửi lại (nếu có) bị thu hồi như trước; không được làm hỏng lần xoay đã commit.
+      this.log.error(
+        `không ghi được ân hạn refresh: ${e instanceof Error ? e.name : 'lỗi'}`,
+      );
+    }
     return this.tokens(userId, sessionId, mv, next);
+  }
+
+  /**
+   * Token vừa xoay trong `REFRESH_GRACE_SEC` → trả lại refresh token đã cấp (kèm access token mới), miễn token đó
+   * vẫn sống: đã bị xoay tiếp, đăng xuất hay thu hồi thì rơi về đường thường (thu hồi cả họ).
+   * shortcut: hai request cùng token chạy song song trước khi khóa ân hạn kịp ghi vẫn bị coi là dùng lại; client
+   * làm mới một luồng nên chấp nhận, cần chặt hơn thì ghi khóa ân hạn trong `rotate_refresh_token`.
+   */
+  private async replayGrace(
+    refreshToken: string,
+  ): Promise<RefreshResponse | null> {
+    let g: Grace;
+    try {
+      const sealed = await this.redis.get(refreshGraceKey(refreshToken));
+      if (!sealed) return null;
+      g = openGrace(refreshToken, sealed);
+    } catch (e) {
+      this.log.error(
+        `không đọc được ân hạn refresh: ${e instanceof Error ? e.name : 'lỗi'}`,
+      );
+      return null;
+    }
+    const mv = await this.tx.run({ userId: g.userId }, async (t) => {
+      const [live] = await t
+        .select({ id: refreshTokens.id })
+        .from(refreshTokens)
+        .where(
+          and(
+            eq(refreshTokens.tokenHash, hashRefreshToken(g.refreshToken)),
+            isNull(refreshTokens.revokedAt),
+            gt(refreshTokens.expiresAt, sql`now()`),
+          ),
+        );
+      return live ? (await this.load(t, g.userId)).mv : null;
+    });
+    if (mv === null) return null;
+    return this.tokens(g.userId, g.sessionId, mv, g.refreshToken);
   }
 
   /** Đăng xuất: thu hồi mọi refresh token của phiên hiện tại (access token tự hết hạn ≤ 15 phút). */
