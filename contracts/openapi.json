@@ -2003,7 +2003,7 @@
                     ]
                   },
                   "location": {
-                    "description": "Bắt buộc khi `mode = offline`",
+                    "description": "Không bắt buộc, kể cả lớp `offline` (onboarding tạo lớp chưa có địa điểm, nhập sau ở Cài đặt lớp)",
                     "example": "Nhà riêng, 12 Trần Phú",
                     "type": [
                       "string",
@@ -2261,7 +2261,7 @@
                     ]
                   },
                   "location": {
-                    "description": "Bắt buộc khi `mode = offline`",
+                    "description": "Không bắt buộc, kể cả lớp `offline` (onboarding tạo lớp chưa có địa điểm, nhập sau ở Cài đặt lớp)",
                     "example": "Nhà riêng, 12 Trần Phú",
                     "type": [
                       "string",
