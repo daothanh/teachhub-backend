@@ -176,7 +176,7 @@ export class AuthController {
   @ApiOperation({
     summary: 'Làm mới token (xoay vòng refresh token)',
     description:
-      'Dùng lại refresh token đã xoay → thu hồi cả phiên, 401 `UNAUTHENTICATED`. Hạn trượt 30 ngày, tối đa 90 ngày.',
+      'Dùng lại refresh token đã xoay → thu hồi cả phiên, 401 `UNAUTHENTICATED`. Ngoại lệ: gửi lại đúng token vừa xoay trong 30 giây (phản hồi lần trước bị rớt) → 200, trả lại refresh token đã cấp ở lần xoay đó kèm access token mới, phiên không bị thu hồi; token đó đã bị xoay tiếp hoặc phiên đã đăng xuất thì vẫn tính là dùng lại. Hạn trượt 30 ngày, tối đa 90 ngày.',
   })
   @ApiOkResponse({ standardSchema: refreshResponseSchema })
   @ApiErrors('VALIDATION_FAILED', 'TOKEN_EXPIRED', 'UNAUTHENTICATED')

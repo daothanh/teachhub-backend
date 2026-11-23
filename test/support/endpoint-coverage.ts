@@ -23,7 +23,7 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
   },
   'POST /v1/auth/refresh': {
     file: 'auth-session.e2e-spec.ts',
-    test: 'dùng lại token đã xoay → 401 và thu hồi cả họ (token mới cũng chết)',
+    test: 'dùng lại token đã xoay ngoài khoảng ân hạn → 401 và thu hồi cả họ (token mới cũng chết)',
   },
   'POST /v1/auth/logout': {
     file: 'auth-session.e2e-spec.ts',
