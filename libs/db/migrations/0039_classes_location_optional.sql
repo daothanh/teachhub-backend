@@ -1,0 +1,1 @@
+ALTER TABLE "classes" DROP CONSTRAINT "classes_offline_location_check";

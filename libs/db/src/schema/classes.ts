@@ -81,9 +81,5 @@ export const classes = pgTable(
       'classes_end_date_check',
       sql`${t.endDate} is null or ${t.endDate} >= ${t.startDate}`,
     ),
-    check(
-      'classes_offline_location_check',
-      sql`${t.mode} <> 'offline' or nullif(trim(${t.location}), '') is not null`,
-    ),
   ],
 );

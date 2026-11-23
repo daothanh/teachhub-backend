@@ -32,7 +32,8 @@ const classFields = z.object({
   grade: z.int().min(1).max(12).meta({ example: 9 }),
   mode: z.enum(['offline', 'online']),
   location: z.string().trim().max(200).nullish().meta({
-    description: 'Bắt buộc khi `mode = offline`',
+    description:
+      'Không bắt buộc, kể cả lớp `offline` (onboarding tạo lớp chưa có địa điểm, nhập sau ở Cài đặt lớp)',
     example: 'Nhà riêng, 12 Trần Phú',
   }),
   capacity: z.int().min(1).max(500).nullish().meta({ example: 20 }),
@@ -62,13 +63,6 @@ export const createClassRequestSchema = classFields
     }),
   })
   .superRefine((v, ctx) => {
-    if (v.mode === 'offline' && !v.location) {
-      ctx.addIssue({
-        code: 'custom',
-        message: 'Vui lòng nhập địa điểm cho lớp học tại chỗ.',
-        path: ['location'],
-      });
-    }
     endAfterStart(v, ctx);
   })
   .meta({

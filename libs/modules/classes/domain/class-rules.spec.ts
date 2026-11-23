@@ -16,13 +16,9 @@ describe('classDraftErrors', () => {
     );
   });
 
-  it('tại chỗ thiếu địa điểm (kể cả toàn khoảng trắng)', () => {
-    expect(Object.keys(classDraftErrors({ ...ok, location: null }))).toEqual([
-      'location',
-    ]);
-    expect(Object.keys(classDraftErrors({ ...ok, location: '  ' }))).toEqual([
-      'location',
-    ]);
+  it('tại chỗ chưa có địa điểm vẫn hợp lệ (onboarding nhập sau)', () => {
+    expect(classDraftErrors({ ...ok, location: null })).toEqual({});
+    expect(classDraftErrors({ ...ok, location: '  ' })).toEqual({});
   });
 
   it('ngày kết thúc trước ngày bắt đầu', () => {

@@ -66,10 +66,10 @@ describe('classes API', () => {
     expect(list.json().items[0].id).toBe(res.json().id);
   });
 
-  it('AC2: tại chỗ thiếu địa điểm, ngày kết thúc trước ngày bắt đầu, thiếu tên → 422 theo trường', async () => {
+  it('AC2: tại chỗ chưa có địa điểm vẫn tạo được; ngày kết thúc trước ngày bắt đầu, thiếu tên → 422 theo trường', async () => {
     const r1 = await call(A, 'POST', '/classes', body({ location: null }));
-    expect(r1.statusCode).toBe(422);
-    expect(Object.keys(r1.json().errors)).toEqual(['location']);
+    expect(r1.statusCode).toBe(201);
+    expect(r1.json().location).toBeNull();
     const r2 = await call(
       A,
       'POST',
@@ -114,10 +114,9 @@ describe('classes API', () => {
     });
     expect(bad.statusCode).toBe(422);
     expect(Object.keys(bad.json().errors)).toEqual(['endDate']);
-    // online -> offline mà xóa địa điểm
-    const bad2 = await call(A, 'PATCH', `/classes/${id}`, { location: null });
-    expect(bad2.statusCode).toBe(422);
-    expect(Object.keys(bad2.json().errors)).toEqual(['location']);
+    // xóa địa điểm của lớp tại chỗ: hợp lệ (địa điểm không bắt buộc)
+    const ok2 = await call(A, 'PATCH', `/classes/${id}`, { location: null });
+    expect(ok2.statusCode).toBe(200);
   });
 
   it('AC3: lưu trữ lớp → ẩn khỏi danh sách active, hiện ở archived; gọi lại vẫn 200 cùng lớp', async () => {

@@ -73,13 +73,6 @@ describe('classes: RLS chéo tenant, ràng buộc, audit', () => {
           values (${randomUUID()}, ${A.tenantId}, ${A.branchId}, 'x', 'x', 13, 'online', '2026-12-14')`,
       /classes_grade_check/,
     );
-    await expectInsertRejected(
-      tx,
-      A.userId,
-      sql`insert into classes (id, tenant_id, branch_id, name, subject, grade, mode, start_date)
-          values (${randomUUID()}, ${A.tenantId}, ${A.branchId}, 'x', 'x', 9, 'offline', '2026-12-14')`,
-      /classes_offline_location_check/,
-    );
   });
 
   it('chi nhánh của tenant khác bị FK kép chặn', async () => {
