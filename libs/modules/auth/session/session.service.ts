@@ -42,7 +42,7 @@ export const hashRefreshToken = (token: string) =>
   createHash('sha256').update(token).digest('hex');
 const newRefreshToken = () => randomBytes(32).toString('base64url');
 
-type Grace = { userId: string; sessionId: string; refreshToken: string };
+type Grace = { userId: string; refreshToken: string };
 // Khóa mã hóa suy từ token cũ (thô): bản dump Redis hay CSDL (chỉ có băm) đều không mở được token mới.
 const graceKey = (oldToken: string) =>
   createHash('sha256').update(`refresh-grace\0${oldToken}`).digest();
@@ -58,6 +58,7 @@ const openGrace = (oldToken: string, sealed: string): Grace => {
     'aes-256-gcm',
     graceKey(oldToken),
     raw.subarray(0, 12),
+    { authTagLength: 16 },
   );
   d.setAuthTag(raw.subarray(12, 28));
   return JSON.parse(
@@ -139,7 +140,7 @@ export class SessionService {
     try {
       await this.redis.set(
         refreshGraceKey(refreshToken),
-        sealGrace(refreshToken, { userId, sessionId, refreshToken: next }),
+        sealGrace(refreshToken, { userId, refreshToken: next }),
         'EX',
         REFRESH_GRACE_SEC,
       );
@@ -154,7 +155,8 @@ export class SessionService {
 
   /**
    * Token vừa xoay trong `REFRESH_GRACE_SEC` → trả lại refresh token đã cấp (kèm access token mới), miễn token đó
-   * vẫn sống: đã bị xoay tiếp, đăng xuất hay thu hồi thì rơi về đường thường (thu hồi cả họ).
+   * vẫn sống: đã bị xoay tiếp, đăng xuất hay thu hồi thì rơi về đường thường (thu hồi cả họ). Mỗi khóa ân hạn chỉ
+   * đổi được một lần (GETDEL): kẻ giữ token cũ chỉ có một lượt, lượt sau rơi về phát hiện dùng lại.
    * shortcut: hai request cùng token chạy song song trước khi khóa ân hạn kịp ghi vẫn bị coi là dùng lại; client
    * làm mới một luồng nên chấp nhận, cần chặt hơn thì ghi khóa ân hạn trong `rotate_refresh_token`.
    */
@@ -163,7 +165,7 @@ export class SessionService {
   ): Promise<RefreshResponse | null> {
     let g: Grace;
     try {
-      const sealed = await this.redis.get(refreshGraceKey(refreshToken));
+      const sealed = await this.redis.getdel(refreshGraceKey(refreshToken));
       if (!sealed) return null;
       g = openGrace(refreshToken, sealed);
     } catch (e) {
@@ -172,9 +174,9 @@ export class SessionService {
       );
       return null;
     }
-    const mv = await this.tx.run({ userId: g.userId }, async (t) => {
-      const [live] = await t
-        .select({ id: refreshTokens.id })
+    const live = await this.tx.run({ userId: g.userId }, async (t) => {
+      const [row] = await t
+        .select({ sessionId: refreshTokens.sessionId })
         .from(refreshTokens)
         .where(
           and(
@@ -183,10 +185,12 @@ export class SessionService {
             gt(refreshTokens.expiresAt, sql`now()`),
           ),
         );
-      return live ? (await this.load(t, g.userId)).mv : null;
+      return row
+        ? { sessionId: row.sessionId, mv: (await this.load(t, g.userId)).mv }
+        : null;
     });
-    if (mv === null) return null;
-    return this.tokens(g.userId, g.sessionId, mv, g.refreshToken);
+    if (!live) return null;
+    return this.tokens(g.userId, live.sessionId, live.mv, g.refreshToken);
   }
 
   /** Đăng xuất: thu hồi mọi refresh token của phiên hiện tại (access token tự hết hạn ≤ 15 phút). */

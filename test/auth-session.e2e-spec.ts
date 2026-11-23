@@ -123,6 +123,14 @@ describe('phiên: /v1/auth/refresh, /v1/auth/logout, /v1/auth/me', () => {
     expect((await refresh(next.refresh_token)).statusCode).toBe(200);
   });
 
+  it('khóa ân hạn chỉ đổi được một lần: lần gửi lại thứ hai → 401, thu hồi cả họ', async () => {
+    const s = await login();
+    const next = (await refresh(s.refresh_token)).json() as Tokens;
+    expect((await refresh(s.refresh_token)).statusCode).toBe(200);
+    expect((await refresh(s.refresh_token)).statusCode).toBe(401);
+    expect((await refresh(next.refresh_token)).statusCode).toBe(401);
+  });
+
   it('ân hạn không cứu token đã xoay tiếp hoặc phiên đã đăng xuất', async () => {
     const s = await login();
     const next = (await refresh(s.refresh_token)).json() as Tokens;
