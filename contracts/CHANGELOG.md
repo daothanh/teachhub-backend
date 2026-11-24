@@ -2,6 +2,13 @@
 
 `contracts/openapi.json` sinh từ schema zod bằng `pnpm openapi:gen`; file này ghi endpoint thêm mới theo sprint. Chỉ thêm, không đổi endpoint cũ (CI chặn bằng `oasdiff`).
 
+## OTP_INVALID kèm số lượt thử còn lại (chỉ thêm `details`, không đổi schema; `oasdiff` sạch)
+
+- Nhập sai mã OTP mà còn lượt → 401 `OTP_INVALID` kèm `details.attemptsLeft` (4, 3, 2, 1 theo số lượt đã sai từ cùng một IP; IPv6 gộp theo /64). Áp dụng cho mọi endpoint dùng OTP: `POST /auth/login`, `DELETE /me` (mục đích `delete_account`), `PUT/PATCH/DELETE /payout-accounts` (mục đích `payout_account`).
+- Lượt sai thứ 5 từ cùng IP vẫn là 429 `OTP_LOCKED` kèm `details.retryAfterSec` như trước. Hai trường hợp khác vẫn trả 401 không kèm `attemptsLeft`: không có mã trong Redis (mã hết hạn hoặc đã tiêu) và mọi IP cộng lại vượt trần `maxFailsPerHour` lượt sai trong giờ.
+- App hiện "Mã không đúng. Còn N lần thử." khi có `attemptsLeft`, thiếu trường thì lùi về "Mã không đúng.".
+- Chưa khai `details` này vào OpenAPI (`ApiErrorWithDetails`); cần chạy `pnpm openapi:gen` nếu muốn tài liệu hoá.
+
 ## Dời buổi đã điểm danh (chỉ đổi hành vi server và mô tả, không đổi schema; `oasdiff` sạch)
 
 - `POST /sessions/{id}/reschedule`: buổi `planned` đã có điểm danh → 409 `SESSION_HAS_ATTENDANCE` (như hủy), buổi giữ nguyên, không ghi outbox. App sửa điểm danh trước rồi mới dời. Thông điệp mã lỗi trong `error_codes.json` nói cả "hủy hoặc dời".

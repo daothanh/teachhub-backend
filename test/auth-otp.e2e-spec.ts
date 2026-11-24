@@ -179,6 +179,7 @@ describe('email OTP: /v1/auth/otp/send, /v1/auth/login', () => {
       const res = await login(email, wrong(code));
       expect(res.statusCode).toBe(401);
       expect(res.json().code).toBe('OTP_INVALID');
+      expect(res.json().details).toEqual({ attemptsLeft: 4 - i });
     }
     const fifth = await login(email, wrong(code));
     expect(fifth.statusCode).toBe(429);

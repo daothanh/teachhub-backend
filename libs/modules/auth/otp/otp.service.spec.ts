@@ -98,6 +98,24 @@ describe('OtpService', () => {
     await expect(otp.verify(EMAIL, code, OWNER)).resolves.toBeUndefined();
   });
 
+  it('mã sai trả về số lượt còn lại, giảm dần tới lượt bị khóa', async () => {
+    const code = await otp.issue(EMAIL, OWNER);
+    const details: unknown[] = [];
+    for (let i = 0; i < 4; i++)
+      details.push(
+        await otp.verify(EMAIL, wrong(code), ATTACKER).then(
+          () => 'OK',
+          (e: { details?: unknown }) => e.details,
+        ),
+      );
+    expect(details).toEqual([
+      { attemptsLeft: 4 },
+      { attemptsLeft: 3 },
+      { attemptsLeft: 2 },
+      { attemptsLeft: 1 },
+    ]);
+  });
+
   it('issue chỉ từ chối IP đang bị khóa với email đó', async () => {
     const code = await otp.issue(EMAIL, OWNER);
     await fails(code, ATTACKER, 5);
