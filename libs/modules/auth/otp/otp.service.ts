@@ -96,6 +96,7 @@ export class OtpService {
    * Đúng → mã bị hủy (dùng một lần). Sai/hết hạn → OTP_INVALID; lần thứ 5 sai từ cùng IP → khóa IP đó với email này
    * 15 phút, OTP_LOCKED. Mọi IP cộng lại quá `maxFailsPerHour` lượt sai trong giờ → hủy mã, OTP_INVALID tới hết cửa sổ.
    * Đếm lượt TRƯỚC khi so (INCR nguyên tử): request đoán mã gửi song song cũng không vượt được các trần trên.
+   * Sai mã mà còn lượt → kèm `details.attemptsLeft` (số lượt còn lại trước khi IP bị khóa) để client nhắc "Còn N lần thử".
    */
   async verify(
     email: string,
@@ -150,6 +151,8 @@ export class OtpService {
       return;
     }
     if (attempt >= OTP.maxFails) return lockNow();
-    throw new AppException('OTP_INVALID');
+    throw new AppException('OTP_INVALID', {
+      attemptsLeft: OTP.maxFails - attempt,
+    });
   }
 }
