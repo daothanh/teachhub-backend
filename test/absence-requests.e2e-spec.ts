@@ -137,9 +137,10 @@ describe('phụ huynh báo vắng trước', () => {
       await c.query('begin');
       await c.query(`select set_config('app.user_id', $1, true)`, [userId]);
       const r = await c.query(q, args);
-      await c.query('rollback');
       return r.rows as Record<string, unknown>[];
     } finally {
+      // Luôn rollback (kể cả khi câu lệnh lỗi) để connection trả về pool không kẹt trong transaction đã abort.
+      await c.query('rollback').catch(() => undefined);
       c.release();
     }
   };
@@ -173,6 +174,11 @@ describe('phụ huynh báo vắng trước', () => {
     P1 = await f.mkParent();
     P2 = await f.mkParent();
     X = await f.mkParent();
+    // X là phụ huynh thật (có vai trò parent) nhưng không liên kết con của ai trong các ca đầu: kiểm nhánh 404, không phải guard 403.
+    await f.q(
+      `insert into memberships (id, user_id, role) values ($1, $2, 'parent')`,
+      [randomUUID(), X.userId],
+    );
   }, 180_000);
 
   afterAll(async () => {
