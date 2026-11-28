@@ -288,6 +288,13 @@
       "when": 1795861387371,
       "tag": "0040_absence_requests",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1795878651229,
+      "tag": "0041_classes_notification_settings",
+      "breakpoints": true
     }
   ]
 }

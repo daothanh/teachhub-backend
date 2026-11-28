@@ -1,0 +1,1 @@
+ALTER TABLE "classes" ADD COLUMN "notification_settings" jsonb DEFAULT '{"absence":true,"grade":true,"homework":true,"invoice":true,"dunning":true,"schedule":true}'::jsonb NOT NULL;

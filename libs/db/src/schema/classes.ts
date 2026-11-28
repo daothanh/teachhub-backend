@@ -18,7 +18,7 @@ import { branches, tenants } from './tenancy.js';
 // Lớp (Technical Spec §4.4). RLS của các bảng Sprint 2 cho mọi vai trò nhân sự của tenant (`staff_tenant_ids()`);
 // quyền theo vai trò (hiện chỉ `tenant_owner`) nằm ở guard, không ở RLS. RLS, trigger updated_at/audit viết tay cuối file migration classes.
 // Học phí (S5-BE-01): fee_type + fee_amount cùng có hoặc cùng null; fee_rules null = mặc định của calculator.
-// Chưa có subject_kind, notification_settings: thêm cột tùy chọn ở sprint sau (US-1.2, US-9.3).
+// notification_settings (US-6.2): 6 loại thông báo bật/tắt theo lớp, thiếu khóa coi như bật. Chưa có subject_kind: thêm ở sprint sau (US-9.3).
 
 export const classes = pgTable(
   'classes',
@@ -40,6 +40,11 @@ export const classes = pgTable(
     feeType: text(),
     feeAmount: bigint({ mode: 'number' }),
     feeRules: jsonb(),
+    notificationSettings: jsonb()
+      .notNull()
+      .default(
+        sql`'{"absence":true,"grade":true,"homework":true,"invoice":true,"dunning":true,"schedule":true}'::jsonb`,
+      ),
     archivedAt: timestamp({ withTimezone: true }),
     createdBy: uuid(),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
