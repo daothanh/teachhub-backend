@@ -87,8 +87,8 @@ $$;
 
 -- Tạo báo vắng. Nguồn DUY NHẤT của luật thời gian (đồng hồ DB, `clock_timestamp()`), kiểm trong cùng giao dịch: lý do hợp lệ, user còn,
 -- liên kết, ghi danh, buổi (khóa `for share`) chưa bắt đầu và không hủy. Một dòng mỗi (buổi, con): đã có hiệu lực → trả bản đó
--- (`created = false`); đã hủy → HỒI SINH dòng (chống spam báo/hủy/báo), outbox `student_absence_reported` chỉ khi dòng hủy đã quá
--- 10 phút; chưa có → tạo mới + outbox. Trả jsonb {result: ok | not_found | cancelled | started, id, created}; `id` luôn có khi `ok`.
+-- (`created = false`); đã hủy → HỒI SINH dòng (chống spam báo/hủy/báo), outbox `student_absence_reported` khi dòng hủy đã quá
+-- 10 phút hoặc giáo viên chưa có thông báo nào cho (buổi, con); chưa có → tạo mới + outbox. Trả jsonb {result: ok | not_found | cancelled | started, id, created}; `id` luôn có khi `ok`.
 create or replace function app_private.create_absence_request(p_session_id uuid, p_student_id uuid, p_reason text, p_note text)
 returns jsonb
 language plpgsql security definer set search_path = '' as $$
@@ -127,7 +127,12 @@ begin
       update public.absence_requests
          set cancelled_at = null, reason = p_reason, note = nullif(p_note, ''), reported_by_user_id = uid, created_at = clock_timestamp()
        where id = a.id returning id into rid;
-      notify := a.cancelled_at < clock_timestamp() - interval '10 minutes';
+      -- Chưa có thông báo nào cho (buổi, con) (báo rồi hủy ngay, worker bỏ qua sự kiện đầu vì dòng đang hủy) thì luôn ghi outbox,
+      -- kẻo giáo viên không bao giờ biết; đã có thì chỉ khi lần hủy trước cách quá 10 phút.
+      notify := a.cancelled_at < clock_timestamp() - interval '10 minutes'
+        or not exists (select 1 from public.notifications n
+                        where n.tenant_id = ctx.tenant_id
+                          and n.dedupe_key = 'student_absence_reported:' || p_session_id || ':' || p_student_id);
       exit;
     end if;
     begin

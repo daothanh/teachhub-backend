@@ -144,6 +144,26 @@ describe('phụ huynh báo vắng trước', () => {
     }
   };
 
+  /** Notifier thật trên DB thật, chỉ giả phần gửi push; `deliver` đếm số lần gửi. */
+  const mkNotifier = async () => {
+    const { AbsenceReportedNotifier } =
+      await import('../libs/modules/notifications/application/absence-reported-notifier.service.js');
+    const schema = await import('../libs/db/src/schema/index.js');
+    const { TxService } = await import('../libs/db/src/tx.service.js');
+    const deliver = vi.fn().mockResolvedValue(true);
+    const notifier = new AbsenceReportedNotifier(
+      new TxService(drizzle(t.worker, { schema, casing: 'snake_case' })),
+      { deliver } as never,
+    );
+    const run = (absenceRequestId: string) =>
+      notifier.handle({
+        eventId: randomUUID(),
+        tenantId: A.tenantId,
+        payload: { absenceRequestId },
+      });
+    return { deliver, run };
+  };
+
   beforeAll(async () => {
     t = await startTestApp();
     f = familyFixture(t);
@@ -504,11 +524,14 @@ describe('phụ huynh báo vắng trước', () => {
   it('báo → hủy → báo lại 5 lần: một dòng, tối đa một outbox (chống spam giáo viên)', async () => {
     const c = await kid(A, P1);
     const s = await session(A, c.classId, 24);
+    const n = await mkNotifier();
     let id = '';
     for (let i = 0; i < 5; i++) {
       const res = await report(P1, s, c.studentId, { note: `lần ${i}` });
       expect(res.statusCode, res.body).toBe(201);
       id ||= (res.json() as Report).id;
+      // Worker xử lý sự kiện đầu khi dòng còn hiệu lực: từ đó giáo viên đã có thông báo cho (buổi, con).
+      if (i === 0) await n.run(id);
       expect((res.json() as Report).id).toBe(id);
       expect(
         (await req(P1.token, 'DELETE', `/family/absence-requests/${id}`))
@@ -616,6 +639,53 @@ describe('phụ huynh báo vắng trước', () => {
         )
       )[0].n,
     ).toBe(0);
+  });
+
+  it('báo rồi hủy ngay (worker bỏ qua sự kiện đầu) → báo lại trong 10 phút vẫn ghi outbox để giáo viên biết', async () => {
+    const c = await kid(A, P1);
+    const s = await session(A, c.classId, 24);
+    const n = await mkNotifier();
+    const id = ((await report(P1, s, c.studentId)).json() as Report).id;
+    await req(P1.token, 'DELETE', `/family/absence-requests/${id}`);
+    await n.run(id); // dòng đang hủy: không thông báo
+    expect(
+      await f.q(
+        `select 1 from notifications where payload->>'absenceRequestId' = $1`,
+        [id],
+      ),
+    ).toHaveLength(0);
+    expect((await report(P1, s, c.studentId)).statusCode).toBe(201);
+    expect(await outbox(A, id)).toBe(2);
+    await n.run(id);
+    expect(
+      await f.q(
+        `select 1 from notifications where payload->>'absenceRequestId' = $1`,
+        [id],
+      ),
+    ).toHaveLength(1);
+    expect(n.deliver).toHaveBeenCalledTimes(1);
+  });
+
+  it('push không lặp: thông báo đã gửi push xong thì sự kiện sau không gửi lại', async () => {
+    const c = await kid(A, P1);
+    const s = await session(A, c.classId, 24);
+    const n = await mkNotifier();
+    const id = ((await report(P1, s, c.studentId)).json() as Report).id;
+    await n.run(id);
+    expect(n.deliver).toHaveBeenCalledTimes(1);
+    // Chưa gửi được (retry của job): vẫn nhận lại dòng để gửi.
+    await n.run(id);
+    expect(n.deliver).toHaveBeenCalledTimes(2);
+    const [row] = await f.q(
+      `select id from notifications where payload->>'absenceRequestId' = $1`,
+      [id],
+    );
+    await f.q(
+      `insert into notification_deliveries (id, notification_id, channel, status, sent_at) values ($1, $2, 'push', 'sent', now())`,
+      [randomUUID(), row.id],
+    );
+    await n.run(id);
+    expect(n.deliver).toHaveBeenCalledTimes(2);
   });
 
   it('thông báo: student_absence_reported tới chủ tenant, không ghi chú; idempotent; bỏ qua khi đã hủy', async () => {
