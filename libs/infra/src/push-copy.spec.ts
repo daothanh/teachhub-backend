@@ -6,6 +6,7 @@ import { PUSH_COPY, pushCopyFor, type PushType } from './push-copy.js';
 const SENT_TYPES = [
   'student_absent',
   'student_absent_correction',
+  'student_absence_reported',
   'billing_ready',
   'invoice_issued',
   'payment_recorded',

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { JobsModule, MailerModule, PushModule } from '@teachhub/infra';
 import { AbsenceNotifier } from './application/absence-notifier.service.js';
+import { AbsenceReportedNotifier } from './application/absence-reported-notifier.service.js';
 import { BillingReadyNotifier } from './application/billing-ready-notifier.service.js';
 import { InvoiceIssuedNotifier } from './application/invoice-issued-notifier.service.js';
 import { PaymentClaimNotifier } from './application/payment-claim-notifier.service.js';
@@ -16,6 +17,7 @@ import { PurgeStaleDevicesJob } from './application/devices.service.js';
   providers: [
     PurgeStaleDevicesJob,
     AbsenceNotifier,
+    AbsenceReportedNotifier,
     BillingReadyNotifier,
     InvoiceIssuedNotifier,
     PaymentClaimNotifier,
@@ -27,6 +29,7 @@ import { PurgeStaleDevicesJob } from './application/devices.service.js';
   exports: [
     PurgeStaleDevicesJob,
     AbsenceNotifier,
+    AbsenceReportedNotifier,
     BillingReadyNotifier,
     InvoiceIssuedNotifier,
     PaymentClaimNotifier,

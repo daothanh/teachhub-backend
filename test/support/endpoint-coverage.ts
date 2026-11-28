@@ -213,6 +213,18 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
     file: 'family.e2e-spec.ts',
     test: 'cross-parent / cross-tenant',
   },
+  'POST /v1/family/absence-requests': {
+    file: 'absence-requests.e2e-spec.ts',
+    test: 'phân quyền: phụ huynh không liên kết, tenant khác, con không thuộc lớp → 404; thiếu consent → 403; giáo viên → 403; body sai → 422',
+  },
+  'GET /v1/family/absence-requests': {
+    file: 'absence-requests.e2e-spec.ts',
+    test: 'GET: chỉ báo vắng hiệu lực của buổi chưa bắt đầu, người giám hộ nào cũng thấy; không liên kết → 404',
+  },
+  'DELETE /v1/family/absence-requests/{id}': {
+    file: 'absence-requests.e2e-spec.ts',
+    test: 'hủy: người giám hộ liên kết hủy được, idempotent, điểm danh hết parentReport, báo lại tạo dòng mới (US-3.4 AC3)',
+  },
   'POST /v1/web-push/subscriptions': {
     notApplicable:
       'hợp đồng S3-FL-12, thân hàm trả 501 tới S4-BE-08b; test chéo tenant/học viên làm cùng task đó',

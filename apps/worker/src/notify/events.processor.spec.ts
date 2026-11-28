@@ -12,6 +12,9 @@ vi.mock('@teachhub/modules/billing', () => ({
   PAYMENT_RECORDED: 'payment_recorded',
   PAYMENT_REMINDER: 'payment_reminder',
 }));
+vi.mock('@teachhub/modules/family', () => ({
+  STUDENT_ABSENCE_REPORTED: 'student_absence_reported',
+}));
 vi.mock('@teachhub/modules/subscription', () => ({
   SUBSCRIPTION_EXPIRING: 'subscription_expiring',
   SUBSCRIPTION_ACTIVATED: 'subscription_activated',
@@ -23,6 +26,7 @@ vi.mock('@teachhub/modules/schedule', () => ({
   SCHEDULE_CHANGED: 'schedule_changed',
 }));
 vi.mock('@teachhub/modules/notifications', () => ({
+  AbsenceReportedNotifier: class {},
   BillingReadyNotifier: class {},
   InvoiceIssuedNotifier: class {},
   PaymentClaimNotifier: class {},
@@ -45,7 +49,9 @@ describe('EventsProcessor: phân loại sự kiện outbox', () => {
     const tax = vi.fn().mockResolvedValue(undefined);
     const claimCreated = vi.fn().mockResolvedValue(undefined);
     const claimRejected = vi.fn().mockResolvedValue(undefined);
+    const absenceReported = vi.fn().mockResolvedValue(undefined);
     return {
+      absenceReported,
       claimCreated,
       claimRejected,
       handle,
@@ -63,6 +69,7 @@ describe('EventsProcessor: phân loại sự kiện outbox', () => {
         { handleExpiring: expiring, handleActivated: activated } as never,
         { handle: tax } as never,
         { handleCreated: claimCreated, handleRejected: claimRejected } as never,
+        { handle: absenceReported } as never,
       ),
     };
   };
@@ -127,6 +134,14 @@ describe('EventsProcessor: phân loại sự kiện outbox', () => {
     await p.process(job('payment_claim_rejected', data));
     expect(claimRejected).toHaveBeenCalledExactlyOnceWith(data);
     expect(paid).not.toHaveBeenCalled();
+  });
+
+  it('student_absence_reported → AbsenceReportedNotifier.handle, không đụng notifier khác', async () => {
+    const { p, absenceReported, claimCreated } = make();
+    const data = { eventId: 'e', tenantId: 't', payload: {} };
+    await p.process(job('student_absence_reported', data));
+    expect(absenceReported).toHaveBeenCalledExactlyOnceWith(data);
+    expect(claimCreated).not.toHaveBeenCalled();
   });
 
   it('schedule_changed → chỉ ghi log, không gọi notifier', async () => {

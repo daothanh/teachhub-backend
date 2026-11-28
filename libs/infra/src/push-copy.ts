@@ -9,6 +9,7 @@ export interface PushCopy {
 export type PushType =
   | 'student_absent'
   | 'student_absent_correction'
+  | 'student_absence_reported'
   | 'invoice_issued'
   | 'payment_recorded'
   | 'payment_reminder'
@@ -35,6 +36,11 @@ export const PUSH_COPY: Record<PushType, PushCopy> = {
   student_absent_correction: {
     title: 'Điều chỉnh điểm danh',
     body: `Điểm danh của con bạn vừa được điều chỉnh. ${OPEN}`,
+    channelId: 'attendance',
+  },
+  student_absence_reported: {
+    title: 'Phụ huynh báo vắng trước',
+    body: `Có phụ huynh vừa báo học viên nghỉ một buổi sắp tới. ${OPEN}`,
     channelId: 'attendance',
   },
   invoice_issued: {
