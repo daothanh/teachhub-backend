@@ -23,7 +23,9 @@ export async function seedTenant(
     `${s.userId}@example.com`,
   ]);
   await worker.query(
-    `insert into tenants (id, type, name) values ($1, 'teacher', 'Lớp thử')`,
+    // Giờ yên lặng thu về 1 phút lúc 03:00 giờ VN: các e2e về thông báo không phụ thuộc giờ chạy CI (khung mặc định 21:30–07:00
+    // phủ nhiều giờ UTC). Test giờ yên lặng tự đặt khung của nó.
+    `insert into tenants (id, type, name, settings) values ($1, 'teacher', 'Lớp thử', '{"quietHours":{"start":"03:00","end":"03:01"}}'::jsonb)`,
     [s.tenantId],
   );
   await worker.query(
