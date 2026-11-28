@@ -5,8 +5,10 @@ set -euo pipefail
 [[ $# -eq 0 ]] || { echo "không nhận tham số" >&2; exit 2; }
 tag=${SSH_ORIGINAL_COMMAND:-}
 [[ $tag =~ {{ deploy_tag_regex }} ]] || { echo "tag không hợp lệ" >&2; exit 2; }
-IFS= read -r token
-[[ $token =~ ^[A-Za-z0-9_]+$ ]] || { echo "token không hợp lệ" >&2; exit 2; }
+if ! IFS= read -r token || [[ -z $token ]]; then
+  echo "thiếu token GHCR" >&2
+  exit 2
+fi
 
 cd {{ app_dir }}
 # Cấu hình docker tạm: token ngắn hạn của workflow không đè login PAT của Ansible, và bị xóa khi xong.
