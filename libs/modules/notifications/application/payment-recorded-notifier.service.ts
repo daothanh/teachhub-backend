@@ -10,6 +10,7 @@ import {
   type Pending,
   PushDeliveryError,
 } from './absence-notifier.service.js';
+import { quietUntilFor } from './delivery-plan.js';
 
 export const TYPE_PAYMENT_RECORDED = 'payment_recorded';
 
@@ -32,16 +33,16 @@ interface Recipient extends Pending {
 }
 
 // Tiêu đề và nội dung cố định: không tên con, không số tiền (đúng mô tả `paymentRecordedPayloadSchema`).
-const MAIL_SUBJECT = 'TeachHub: đã ghi nhận thanh toán học phí';
-const MAIL_TEXT =
+export const RECORDED_MAIL_SUBJECT = 'TeachHub: đã ghi nhận thanh toán học phí';
+export const RECORDED_MAIL_TEXT =
   'Giáo viên vừa ghi nhận một khoản thanh toán học phí cho con của bạn. Mở ứng dụng TeachHub để xem biên nhận.';
 
 /**
  * Xử lý sự kiện outbox `payment_recorded` (S6-BE-02, US-7.4 AC3): tạo thông báo `payment_recorded` cho phụ huynh đã có tài
  * khoản của học viên, gửi FCM (chữ khay chung, không PII) rồi email biên nhận. Idempotent theo `eventId` (khóa `(recipient, dedupe_key)`; lần
  * gửi theo `(notification, channel)`), nhận lại dòng `queued` bỏ dở sau 2 phút. Theo mẫu `InvoiceIssuedNotifier`.
- * shortcut: phụ huynh chưa kích hoạt tài khoản không nhận email (không có thông báo để làm khóa chống gửi trùng); chưa tôn
- * trọng giờ yên lặng (US-6.5).
+ * shortcut: phụ huynh chưa kích hoạt tài khoản không nhận email (không có thông báo để làm khóa chống gửi trùng).
+ * Giờ yên lặng (US-6.5): như `InvoiceIssuedNotifier`, tin hoãn do job `notify.deferred-push` gửi.
  */
 @Injectable()
 export class PaymentRecordedNotifier {
@@ -93,6 +94,7 @@ export class PaymentRecordedNotifier {
         status: payload.status,
         remainingAmount: payload.remainingAmount,
       };
+      const until = await quietUntilFor(tx, tenantId);
       const out: Recipient[] = [];
       let skippedNoRole = 0;
       for (const g of guardians) {
@@ -101,14 +103,15 @@ export class PaymentRecordedNotifier {
           continue;
         }
         const row = (
-          await tx.execute<{ id: string }>(sql`
-            insert into notifications (id, tenant_id, recipient_user_id, membership_id, type, urgency, payload, dedupe_key, event_at)
+          await tx.execute<{ id: string; deferred: boolean }>(sql`
+            insert into notifications (id, tenant_id, recipient_user_id, membership_id, type, urgency, payload, dedupe_key, event_at, send_after)
             values (${uuidv7()}, ${tenantId}, ${g.user_id}, ${g.membership_id}, ${TYPE_PAYMENT_RECORDED}, 'normal',
-                    ${JSON.stringify(body)}::jsonb, ${`${TYPE_PAYMENT_RECORDED}:${eventId}`}, now())
+                    ${JSON.stringify(body)}::jsonb, ${`${TYPE_PAYMENT_RECORDED}:${eventId}`}, now(), coalesce(${until}::timestamptz, now()))
             on conflict (recipient_user_id, dedupe_key) do update set dedupe_key = excluded.dedupe_key
-            returning id`)
+            returning id, send_after > now() as deferred`)
         ).rows[0];
-        if (row)
+        // Tin hoãn do giờ yên lặng: không gửi lúc này, job `notify.deferred-push` gửi khi tới `send_after`.
+        if (row && !row.deferred)
           out.push({
             notificationId: row.id,
             userId: g.user_id,
@@ -140,8 +143,8 @@ export class PaymentRecordedNotifier {
           this,
           p.notificationId,
           p.email,
-          MAIL_SUBJECT,
-          MAIL_TEXT,
+          RECORDED_MAIL_SUBJECT,
+          RECORDED_MAIL_TEXT,
         ))
       )
         failed++;

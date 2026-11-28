@@ -9,6 +9,7 @@ import {
   type AttendanceRecordedPayload,
 } from '@teachhub/modules/attendance';
 import { formatInZone } from '@teachhub/modules/schedule';
+import { isEnabled } from '../domain/notification-settings.js';
 
 export const TYPE_ABSENT = 'student_absent';
 export const TYPE_ABSENT_CORRECTION = 'student_absent_correction';
@@ -91,7 +92,8 @@ export class AbsenceNotifier {
         class_name: string;
         starts_at: Date;
         tz: string;
-      }>(sql`select s.class_id, c.name as class_name, s.starts_at, t.timezone as tz
+        settings: unknown;
+      }>(sql`select s.class_id, c.name as class_name, c.notification_settings as settings, s.starts_at, t.timezone as tz
         from sessions s join classes c on c.tenant_id = s.tenant_id and c.id = s.class_id
         join tenants t on t.id = s.tenant_id
         where s.tenant_id = ${tenantId} and s.id = ${payload.sessionId}`)
@@ -102,6 +104,8 @@ export class AbsenceNotifier {
       );
       return [];
     }
+    // US-6.2: lớp tắt báo vắng thì không tạo thông báo (không push, không xếp hàng gửi sau). Cả báo vắng lẫn đính chính.
+    if (!isEnabled(ctx.settings, TYPE_ABSENT)) return [];
     const recordedAt = new Date(payload.recordedAt);
     const out: Pending[] = [];
 

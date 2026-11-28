@@ -11,6 +11,8 @@ import {
   type Pending,
   PushDeliveryError,
 } from './absence-notifier.service.js';
+import { invoiceClassSettings, quietUntilFor } from './delivery-plan.js';
+import { isEnabledForAny } from '../domain/notification-settings.js';
 
 export const TYPE_PAYMENT_REMINDER = 'payment_reminder';
 
@@ -26,19 +28,29 @@ export const paymentReminderJobSchema = z.object({
   }),
 });
 
+/** Thân email nhắc nợ; job `notify.deferred-push` dựng lại từ payload của thông báo. */
+export function reminderMailText(p: {
+  invoiceId: string;
+  offsetDays: number;
+  remainingAmount: number;
+  dueDate: string;
+}): string {
+  return `${reminderCopy(p).body}\n\nMở đúng hóa đơn trong ứng dụng DayHoc: teachhub://invoices/${p.invoiceId}`;
+}
+
 interface Recipient extends Pending {
   email: string | null;
 }
 
 // Tiêu đề cố định (không tên con, không số tiền); thân email có số còn nợ và hạn (US-7.5 AC4), không có tên con.
-const MAIL_SUBJECT = 'DayHoc nhắc học phí';
+export const REMINDER_MAIL_SUBJECT = 'DayHoc nhắc học phí';
 
 /**
  * Xử lý sự kiện outbox `payment_reminder` (S6-BE-04, US-7.5): tạo thông báo `payment_reminder` cho phụ huynh đã có tài khoản
  * của học viên, gửi FCM (chữ khay chung, không PII, không số tiền) rồi email nhắc ("DayHoc nhắc…" kèm số còn nợ và hạn). Idempotent theo `eventId` (khóa `(recipient, dedupe_key)`; lần
  * gửi theo `(notification, channel)`), nhận lại dòng `queued` bỏ dở sau 2 phút. Theo mẫu `InvoiceIssuedNotifier`.
- * shortcut: phụ huynh chưa kích hoạt tài khoản không nhận email (không có thông báo để làm khóa chống gửi trùng); chưa tôn
- * trọng giờ yên lặng (US-6.5).
+ * shortcut: phụ huynh chưa kích hoạt tài khoản không nhận email (không có thông báo để làm khóa chống gửi trùng).
+ * Giờ yên lặng (US-6.5): như `InvoiceIssuedNotifier`, tin hoãn do job `notify.deferred-push` gửi.
  */
 @Injectable()
 export class PaymentReminderNotifier {
@@ -80,6 +92,14 @@ export class PaymentReminderNotifier {
         )
       ).rows[0];
       if (!student) return [];
+      // US-6.2: mọi lớp liên quan đều tắt loại `dunning` thì không nhắc.
+      const classes = await invoiceClassSettings(
+        tx,
+        tenantId,
+        payload.invoiceId,
+        payload.studentId,
+      );
+      if (!isEnabledForAny(classes, TYPE_PAYMENT_REMINDER)) return [];
       const guardians = (
         await tx.execute<{
           user_id: string;
@@ -103,6 +123,7 @@ export class PaymentReminderNotifier {
         remainingAmount: remaining,
         dueDate: payload.dueDate,
       };
+      const until = await quietUntilFor(tx, tenantId);
       const out: Recipient[] = [];
       let skippedNoRole = 0;
       for (const g of guardians) {
@@ -111,14 +132,15 @@ export class PaymentReminderNotifier {
           continue;
         }
         const row = (
-          await tx.execute<{ id: string }>(sql`
-            insert into notifications (id, tenant_id, recipient_user_id, membership_id, type, urgency, payload, dedupe_key, event_at)
+          await tx.execute<{ id: string; deferred: boolean }>(sql`
+            insert into notifications (id, tenant_id, recipient_user_id, membership_id, type, urgency, payload, dedupe_key, event_at, send_after)
             values (${uuidv7()}, ${tenantId}, ${g.user_id}, ${g.membership_id}, ${TYPE_PAYMENT_REMINDER}, 'normal',
-                    ${JSON.stringify(body)}::jsonb, ${`${TYPE_PAYMENT_REMINDER}:${eventId}`}, now())
+                    ${JSON.stringify(body)}::jsonb, ${`${TYPE_PAYMENT_REMINDER}:${eventId}`}, now(), coalesce(${until}::timestamptz, now()))
             on conflict (recipient_user_id, dedupe_key) do update set dedupe_key = excluded.dedupe_key
-            returning id`)
+            returning id, send_after > now() as deferred`)
         ).rows[0];
-        if (row)
+        // Tin hoãn do giờ yên lặng: không gửi lúc này, job `notify.deferred-push` gửi khi tới `send_after`.
+        if (row && !row.deferred)
           out.push({
             notificationId: row.id,
             userId: g.user_id,
@@ -134,7 +156,10 @@ export class PaymentReminderNotifier {
       return out;
     });
 
-    const mailText = `${reminderCopy({ ...payload, remainingAmount: remaining }).body}\n\nMở đúng hóa đơn trong ứng dụng DayHoc: teachhub://invoices/${payload.invoiceId}`;
+    const mailText = reminderMailText({
+      ...payload,
+      remainingAmount: remaining,
+    });
     let failed = 0;
     for (const p of pending) {
       try {
@@ -151,7 +176,7 @@ export class PaymentReminderNotifier {
           this,
           p.notificationId,
           p.email,
-          MAIL_SUBJECT,
+          REMINDER_MAIL_SUBJECT,
           mailText,
         ))
       )
