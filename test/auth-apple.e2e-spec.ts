@@ -100,6 +100,7 @@ describe('SSO Apple: /v1/auth/sso/apple', () => {
       // Cố ý thêm Services ID vào cấu hình native để kiểm route native vẫn từ chối.
       APPLE_BUNDLE_ID: 'vn.dayhoc.test,vn.dayhoc.app.web',
       APPLE_ANDROID_ENABLED: 'true',
+      APPLE_ANDROID_RETURN_URL: 'https://api-dev.dayhoc.app/v1/auth/sso/apple/android/callback',
       APPLE_JWKS_URL: `http://127.0.0.1:${(jwks.address() as AddressInfo).port}/keys`,
     });
     worker = new pg.Pool({ connectionString: db.url('teachhub_worker') });
@@ -181,7 +182,7 @@ describe('SSO Apple: /v1/auth/sso/apple', () => {
     expect(a.url.origin + a.url.pathname).toBe('https://appleid.apple.com/auth/authorize');
     expect(Object.fromEntries(a.url.searchParams)).toMatchObject({
       client_id: 'vn.dayhoc.app.web',
-      redirect_uri: 'https://app.dayhoc.app/auth/apple/callback',
+      redirect_uri: 'https://api-dev.dayhoc.app/v1/auth/sso/apple/android/callback',
       response_type: 'code id_token',
       response_mode: 'form_post',
       scope: 'name email',

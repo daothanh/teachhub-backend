@@ -98,6 +98,8 @@ export const envSchema = z
     /** Khóa công khai của Apple; test trỏ về JWKS giả. */
     APPLE_JWKS_URL: z.url().default('https://appleid.apple.com/auth/keys'),
     APPLE_ANDROID_ENABLED: z.stringbool().default(false),
+    /** Return URL đăng ký cho Services ID; Apple POST form về đây. Mỗi môi trường một URL (dev trỏ thẳng api-dev). */
+    APPLE_ANDROID_RETURN_URL: z.url().default('https://app.dayhoc.app/auth/apple/callback'),
     /** Số proxy tin cậy phía trước api (đọc lúc dựng Fastify trong app.ts). */
     TRUST_PROXY_HOPS: z.coerce.number().int().min(0).default(1),
     /** Nhân mọi giới hạn tần suất theo IP (test e2e đặt lớn để không vướng). */

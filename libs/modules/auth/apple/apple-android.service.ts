@@ -11,7 +11,6 @@ import {
   AppleIdTokenService,
 } from './apple-id-token.service.js';
 
-const RETURN_URL = 'https://app.dayhoc.app/auth/apple/callback';
 const APP_LINK = 'dayhoc://auth/apple/callback';
 const STATE_TTL_SEC = 300;
 const CODE_TTL_SEC = 60;
@@ -89,7 +88,7 @@ export class AppleAndroidService {
     const url = new URL('https://appleid.apple.com/auth/authorize');
     url.search = new URLSearchParams({
       client_id: APPLE_ANDROID_SERVICES_ID,
-      redirect_uri: RETURN_URL,
+      redirect_uri: this.config.get('APPLE_ANDROID_RETURN_URL'),
       response_type: 'code id_token',
       response_mode: 'form_post',
       scope: 'name email',
