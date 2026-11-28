@@ -1,4 +1,5 @@
 import {
+  asAbsenceReason,
   addDays,
   adjustedUpdatedAt,
   clockSkewMs,
@@ -92,6 +93,13 @@ describe('LWW', () => {
       winsLww(at('2026-12-15T11:00:00Z'), at('2026-12-15T12:00:00Z')),
     ).toBe(false);
     expect(winsLww(at('2026-12-15T11:00:00Z'), null)).toBe(true);
+  });
+});
+
+describe('lý do báo vắng trước', () => {
+  it('chỉ nhận sick/family/other, lạ thì ném', () => {
+    expect(asAbsenceReason('sick')).toBe('sick');
+    expect(() => asAbsenceReason('bored')).toThrow(/bored/);
   });
 });
 

@@ -100,7 +100,7 @@ export class FamilyController {
     description:
       'Chỉ buổi CHƯA bắt đầu (`startsAt` > giờ máy chủ) và không hủy, của lớp con đang ghi danh. Con không liên kết với user này, buổi của tenant khác/không tồn tại, con không thuộc lớp của buổi → cùng 404 `NOT_FOUND` (không lộ tồn tại). ' +
       'Buổi đã bắt đầu → 409 `ABSENCE_SESSION_STARTED` (US-3.4 AC2); buổi đã hủy → 409 `SESSION_CANCELLED`. ' +
-      'Con đã có báo vắng đang hiệu lực cho buổi này (kể cả do người giám hộ khác báo) → 200 trả đúng bản đang có, không tạo trùng, không thông báo lại; tạo mới → 201. Cùng `Idempotency-Key` trả lại đúng phản hồi cũ. ' +
+      'Con đã có báo vắng đang hiệu lực cho buổi này (kể cả do người giám hộ khác báo) → 200 trả đúng bản đang có, không tạo trùng, không thông báo lại; tạo mới hoặc báo lại sau khi hủy → 201 (báo lại HỒI SINH đúng dòng cũ, không tạo dòng mới; giáo viên chỉ được thông báo lại nếu lần hủy trước cách quá 10 phút, và tối đa một thông báo mỗi buổi và học sinh). Cùng `Idempotency-Key` trả lại đúng phản hồi cũ. ' +
       'Tạo mới đưa sự kiện outbox `student_absence_reported` để giáo viên nhận thông báo (US-3.4 AC1); loại `student_absence_reported` chưa khai vào `oneOf` của `Notification` (cùng ngoại lệ `oasdiff` chung với các loại mới khác), payload hộp thư `{ absenceRequestId, studentId, studentName, classId, className, sessionId, sessionStartsAt, reason }`. ' +
       'Điểm danh của buổi trả kèm `parentReport` để app giáo viên điền sẵn "Vắng có phép" (US-3.1 AC5). Chưa đồng ý điều khoản → 403 `CONSENT_REQUIRED`. Giới hạn 20 lần/phút/user.',
   })

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { cursorPageSchema, cursorQuerySchema } from '@teachhub/core';
+import { ABSENCE_REASONS } from '../domain/attendance-policy.js';
 import { MUTATION_ERROR_CODES } from './mutation-error-codes.js';
 import { sessionStatusSchema } from '@teachhub/modules/schedule';
 
@@ -18,7 +19,7 @@ const noteSchema = z.string().trim().max(500).nullable();
 const lwwTime = z.iso.datetime({ offset: true });
 
 /** Lý do phụ huynh báo vắng trước (US-3.4): ốm, việc gia đình, khác. */
-export const absenceReasonSchema = z.enum(['sick', 'family', 'other']).meta({
+export const absenceReasonSchema = z.enum(ABSENCE_REASONS).meta({
   id: 'AbsenceReason',
   description: 'sick = ốm, family = việc gia đình, other = khác',
 });

@@ -21,6 +21,7 @@ import {
 } from '@teachhub/modules/schedule';
 import {
   addDays,
+  asAbsenceReason,
   asStatus,
   ATTENDANCE_RECORDED,
   type AttendanceRecordedPayload,
@@ -124,7 +125,7 @@ export class AttendanceService {
         recordedByName: (r?.recordedBy && names.get(r.recordedBy)) || null,
         parentReport: report
           ? {
-              reason: report.reason as 'sick' | 'family' | 'other',
+              reason: asAbsenceReason(report.reason),
               note: report.note,
               reportedAt: formatInZone(report.createdAt, tz),
             }
@@ -553,7 +554,10 @@ export class AttendanceService {
       .orderBy(asc(students.fullName), asc(students.id));
   }
 
-  /** Tên người ghi (RLS của `users` chỉ cho thấy chính user; người khác trả không có tên). */
+  /**
+   * Tên người ghi (RLS của `users` chỉ cho thấy chính user; người khác trả không có tên).
+   * shortcut: tenant có nhiều nhân sự sẽ thấy `null` cho dòng do người khác ghi; cần hàm security definer đọc tên nhân sự cùng tenant.
+   */
   private async recorderNames(tx: Tx, ids: string[]) {
     if (!ids.length) return new Map<string, string>();
     const rows = await tx

@@ -203,7 +203,7 @@ export class ScheduleService {
       // Buổi đã dời là ngoại lệ của giáo viên: lịch lặp không xóa, không ghi đè.
       isNull(sessions.rescheduledFrom),
       gt(sessions.startsAt, now),
-      // shortcut: kiểm tra này và lệnh xóa không cùng khóa, nên điểm danh vừa lưu đúng lúc reconcile xóa buổi vẫn có thể đua; FK sẽ chặn xóa (lỗi, không mất dữ liệu). Cần khóa buổi khi tải tăng.
+      // shortcut: kiểm tra này và lệnh xóa không cùng khóa, nên điểm danh vừa lưu đúng lúc reconcile xóa buổi vẫn có thể đua; FK `attendance` sẽ chặn xóa (lỗi, không mất dữ liệu). Cần khóa buổi khi tải tăng. Báo vắng trước của phụ huynh (`absence_requests`) thì FK `ON DELETE CASCADE`: buổi mất thì báo vắng mất theo (phụ huynh đã được báo đổi lịch, US-2.2).
       // Buổi đã có điểm danh (lưu mà chưa chuyển "đã dạy") không bị xóa theo lịch.
       sql`not exists (select 1 from attendance a where a.session_id = ${sessions.id})`,
       extra,

@@ -2,6 +2,17 @@
 
 export type AttendanceStatus = 'present' | 'late' | 'excused' | 'unexcused';
 
+/** Lý do phụ huynh báo vắng trước (US-3.4). */
+export const ABSENCE_REASONS = ['sick', 'family', 'other'] as const;
+export type AbsenceReason = (typeof ABSENCE_REASONS)[number];
+
+/** Thu hẹp chuỗi đọc từ CSDL về `AbsenceReason`; giá trị lạ (CHECK đã chặn) là lỗi dữ liệu nên ném. */
+export function asAbsenceReason(value: string): AbsenceReason {
+  const r = ABSENCE_REASONS.find((x) => x === value);
+  if (!r) throw new Error(`Lý do báo vắng lạ: ${value}`);
+  return r;
+}
+
 /** Buổi chỉ sửa được tới hết ngày thứ 7 kể từ ngày buổi học (theo múi giờ tenant). */
 export const EDIT_WINDOW_DAYS = 7;
 /** Lệch đồng hồ tối đa tin được; thiết bị lệch hơn thế (sai ngày giờ) bị kẹp, không kéo mốc LWW đi xa. */

@@ -1,5 +1,5 @@
 {
-  "id": "6605e8f0-05ba-46cb-8592-61d9e6589ceb",
+  "id": "4f595f97-d712-4d00-8ca1-3fc4c2c63621",
   "prevId": "b3ed213d-ac93-4688-87c0-5b53904f921c",
   "version": "7",
   "dialect": "postgresql",
@@ -65,28 +65,6 @@
         }
       },
       "indexes": {
-        "absence_requests_active_uq": {
-          "name": "absence_requests_active_uq",
-          "columns": [
-            {
-              "expression": "session_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "student_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"absence_requests\".\"cancelled_at\" is null",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "absence_requests_student_idx": {
           "name": "absence_requests_student_idx",
           "columns": [
@@ -158,7 +136,7 @@
             "tenant_id",
             "id"
           ],
-          "onDelete": "no action",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         },
         "absence_requests_tenant_student_fk": {
@@ -178,7 +156,16 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "absence_requests_session_student_uq": {
+          "name": "absence_requests_session_student_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "session_id",
+            "student_id"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {
         "absence_requests_reason_check": {

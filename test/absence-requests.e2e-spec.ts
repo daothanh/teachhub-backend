@@ -40,10 +40,12 @@ describe('phụ huynh báo vắng trước', () => {
 
   const req = (
     token: string,
-    method: 'GET' | 'POST' | 'DELETE',
+    method: 'GET' | 'POST' | 'PUT' | 'DELETE',
     url: string,
     payload?: object,
-    key: string | null = method === 'POST' ? randomUUID() : null,
+    key: string | null = method === 'POST' || method === 'PUT'
+      ? randomUUID()
+      : null,
   ) =>
     t.app.inject({
       method,
@@ -316,7 +318,7 @@ describe('phụ huynh báo vắng trước', () => {
     ).toBe(422);
   });
 
-  it('hủy: người giám hộ liên kết hủy được, idempotent, điểm danh hết parentReport, báo lại tạo dòng mới (US-3.4 AC3)', async () => {
+  it('hủy: người giám hộ liên kết hủy được, idempotent, điểm danh hết parentReport, báo lại hồi sinh đúng dòng cũ (US-3.4 AC3)', async () => {
     const c = await kid(A, P1);
     const s = await session(A, c.classId, 24);
     const r = (await report(P1, s, c.studentId)).json() as Report;
@@ -348,7 +350,7 @@ describe('phụ huynh báo vắng trước', () => {
       note: undefined,
     });
     expect(again.statusCode, again.body).toBe(201);
-    expect((again.json() as Report).id).not.toBe(r.id);
+    expect((again.json() as Report).id).toBe(r.id);
     expect(
       (
         await f.q(
@@ -356,7 +358,7 @@ describe('phụ huynh báo vắng trước', () => {
           [c.studentId],
         )
       )[0].n,
-    ).toBe(2);
+    ).toBe(1);
   });
 
   it('hủy sau giờ bắt đầu → 409 ABSENCE_SESSION_STARTED, báo vắng giữ nguyên; id lạ → 404', async () => {
@@ -497,6 +499,123 @@ describe('phụ huynh báo vắng trước', () => {
       [r.id],
     );
     expect(gone[0].cancelled_at).toBeNull();
+  });
+
+  it('báo → hủy → báo lại 5 lần: một dòng, tối đa một outbox (chống spam giáo viên)', async () => {
+    const c = await kid(A, P1);
+    const s = await session(A, c.classId, 24);
+    let id = '';
+    for (let i = 0; i < 5; i++) {
+      const res = await report(P1, s, c.studentId, { note: `lần ${i}` });
+      expect(res.statusCode, res.body).toBe(201);
+      id ||= (res.json() as Report).id;
+      expect((res.json() as Report).id).toBe(id);
+      expect(
+        (await req(P1.token, 'DELETE', `/family/absence-requests/${id}`))
+          .statusCode,
+      ).toBe(204);
+    }
+    expect(
+      (
+        await f.q(
+          `select count(*)::int as n from absence_requests where student_id = $1`,
+          [c.studentId],
+        )
+      )[0].n,
+    ).toBe(1);
+    expect(await outbox(A, id)).toBe(1);
+    // hủy đã quá 10 phút thì báo lại được thông báo lại
+    await f.q(
+      `update absence_requests set cancelled_at = now() - interval '11 minutes', created_at = now() - interval '12 minutes' where id = $1`,
+      [id],
+    );
+    expect((await report(P1, s, c.studentId, { note: 'lại' })).statusCode).toBe(
+      201,
+    );
+    expect(await outbox(A, id)).toBe(2);
+  });
+
+  it('hai người giám hộ báo đồng thời → đúng một báo vắng và một outbox', async () => {
+    const c = await kid(A, P1);
+    await link(A.tenantId, c.studentId, P2);
+    const s = await session(A, c.classId, 24);
+    const [a, b] = await Promise.all([
+      report(P1, s, c.studentId),
+      report(P2, s, c.studentId),
+    ]);
+    expect([a.statusCode, b.statusCode].sort()).toEqual([200, 201]);
+    expect((a.json() as Report).id).toBe((b.json() as Report).id);
+    expect(await outbox(A, (a.json() as Report).id)).toBe(1);
+  });
+
+  it('ghi danh: rời đúng ngày buổi hoặc học viên đã nghỉ học → 404', async () => {
+    const c = await kid(A, P1);
+    const s = await session(A, c.classId, 24);
+    await f.q(
+      `update enrollments set left_on = (select session_date from sessions where id = $1) where student_id = $2`,
+      [s, c.studentId],
+    );
+    expect((await report(P1, s, c.studentId)).statusCode).toBe(404);
+    await f.q(`update enrollments set left_on = null where student_id = $1`, [
+      c.studentId,
+    ]);
+    expect((await report(P1, s, c.studentId)).statusCode).toBe(201);
+    const c2 = await kid(A, P1);
+    const s2 = await session(A, c2.classId, 24);
+    await f.q(`update students set status = 'left' where id = $1`, [
+      c2.studentId,
+    ]);
+    expect((await report(P1, s2, c2.studentId)).statusCode).toBe(404);
+  });
+
+  it('đổi lịch lặp xóa buổi tương lai có báo vắng → 200, báo vắng mất theo (FK cascade)', async () => {
+    const c = await f.child(A, P1);
+    const cls = await req(A.token, 'POST', '/classes', {
+      name: 'Lý 9B',
+      subject: 'Lý',
+      grade: 9,
+      mode: 'online',
+      startDate: new Date(Date.now() + 86_400_000).toISOString().slice(0, 10),
+      endDate: new Date(Date.now() + 20 * 86_400_000)
+        .toISOString()
+        .slice(0, 10),
+    });
+    expect(cls.statusCode, cls.body).toBe(201);
+    const classId = (cls.json() as { id: string }).id;
+    await f.q(
+      `insert into enrollments (id, tenant_id, class_id, student_id, joined_on) values ($1, $2, $3, $4, current_date - 1)`,
+      [randomUUID(), A.tenantId, classId, c.studentId],
+    );
+    const rules = [1, 2, 3, 4, 5, 6, 7].map((weekday) => ({
+      weekday,
+      startTime: '18:00',
+      durationMin: 90,
+    }));
+    const put = (r: object[]) =>
+      req(
+        A.token,
+        'PUT',
+        `/classes/${classId}/schedule-rules`,
+        { rules: r },
+        randomUUID(),
+      );
+    expect((await put(rules)).statusCode).toBe(200);
+    const [row] = await f.q(
+      `select id from sessions where class_id = $1 and status = 'planned' and starts_at > now() + interval '2 hours' order by starts_at limit 1`,
+      [classId],
+    );
+    const r = await report(P1, row.id as string, c.studentId);
+    expect(r.statusCode, r.body).toBe(201);
+    const res = await put([]);
+    expect(res.statusCode, res.body).toBe(200);
+    expect(
+      (
+        await f.q(
+          `select count(*)::int as n from absence_requests where student_id = $1`,
+          [c.studentId],
+        )
+      )[0].n,
+    ).toBe(0);
   });
 
   it('thông báo: student_absence_reported tới chủ tenant, không ghi chú; idempotent; bỏ qua khi đã hủy', async () => {

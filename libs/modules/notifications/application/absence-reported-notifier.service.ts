@@ -20,7 +20,7 @@ export const absenceReportedJobSchema = z.object({
 
 /**
  * Xử lý sự kiện outbox `student_absence_reported` (US-3.4 AC1): phụ huynh vừa báo con vắng trước → thông báo + push cho giáo viên
- * (chủ tenant đang hoạt động; lớp chưa có trường giáo viên riêng). Idempotent theo `eventId` (khóa `(recipient, dedupe_key)`); phần
+ * (chủ tenant đang hoạt động; lớp chưa có trường giáo viên riêng). Idempotent theo (buổi, học sinh) (khóa `(recipient, dedupe_key)`): vòng báo → hủy → báo lại cho giáo viên tối đa MỘT thông báo; phần
  * gửi dùng lại `AbsenceNotifier.deliver`. Kiểm lại lúc xử lý: báo vắng đã hủy trước khi worker chạy thì không báo. Thông báo
  * trong hộp mang tên con, lớp, buổi, lý do (không có ghi chú tự do); push chỉ có chữ khay chung. Loại này chưa nằm trong `oneOf` của
  * `Notification` (ngoại lệ oasdiff chung, xem contracts/CHANGELOG.md).
@@ -36,7 +36,7 @@ export class AbsenceReportedNotifier {
   ) {}
 
   async handle(job: unknown): Promise<void> {
-    const { eventId, tenantId, payload } = absenceReportedJobSchema.parse(job);
+    const { tenantId, payload } = absenceReportedJobSchema.parse(job);
     const pending = await this.tx.run({ userId: null }, async (tx) => {
       const a = (
         await tx.execute<{
@@ -80,7 +80,7 @@ export class AbsenceReportedNotifier {
           await tx.execute<{ id: string }>(sql`
             insert into notifications (id, tenant_id, recipient_user_id, membership_id, type, urgency, payload, dedupe_key, event_at)
             values (${uuidv7()}, ${tenantId}, ${o.user_id}, ${o.membership_id}, ${TYPE_STUDENT_ABSENCE_REPORTED}, 'normal',
-                    ${JSON.stringify(body)}::jsonb, ${`${TYPE_STUDENT_ABSENCE_REPORTED}:${eventId}`}, now())
+                    ${JSON.stringify(body)}::jsonb, ${`${TYPE_STUDENT_ABSENCE_REPORTED}:${a.session_id}:${a.student_id}`}, now())
             on conflict (recipient_user_id, dedupe_key) do update set dedupe_key = excluded.dedupe_key
             returning id`)
         ).rows[0];

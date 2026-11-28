@@ -223,7 +223,7 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
   },
   'DELETE /v1/family/absence-requests/{id}': {
     file: 'absence-requests.e2e-spec.ts',
-    test: 'hủy: người giám hộ liên kết hủy được, idempotent, điểm danh hết parentReport, báo lại tạo dòng mới (US-3.4 AC3)',
+    test: 'hủy: người giám hộ liên kết hủy được, idempotent, điểm danh hết parentReport, báo lại hồi sinh đúng dòng cũ (US-3.4 AC3)',
   },
   'POST /v1/web-push/subscriptions': {
     notApplicable:
