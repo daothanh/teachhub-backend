@@ -1,5 +1,8 @@
 import { z } from 'zod';
-import { attendanceStatusSchema } from '@teachhub/modules/attendance';
+import {
+  absenceReasonSchema,
+  attendanceStatusSchema,
+} from '@teachhub/modules/attendance';
 import { sessionStatusSchema } from '@teachhub/modules/schedule';
 
 // Dữ liệu đã lọc cho phụ huynh (Spec §4.5): không có liên hệ phụ huynh khác, ghi chú giáo viên, học phí.
@@ -130,3 +133,71 @@ export const familyAttendanceWeekSchema = z
     },
   });
 export type FamilyAttendanceWeek = z.infer<typeof familyAttendanceWeekSchema>;
+
+// ---- Báo vắng trước (US-3.4) ----
+
+export const createAbsenceRequestSchema = z
+  .object({
+    sessionId: z.uuid(),
+    studentId: z.uuid(),
+    reason: absenceReasonSchema,
+    note: z.string().trim().max(300).optional().meta({
+      description: 'Ghi chú tự do, tối đa 300 ký tự; rỗng = không có',
+    }),
+  })
+  .meta({
+    id: 'CreateAbsenceRequest',
+    example: {
+      sessionId: '019b2c41-0001-7a10-8a01-000000000001',
+      studentId: '019b2c4f-0001-7b30-8c01-000000000001',
+      reason: 'sick',
+      note: 'Con sốt, xin nghỉ buổi tối',
+    },
+  });
+export type CreateAbsenceRequest = z.infer<typeof createAbsenceRequestSchema>;
+
+export const absenceRequestSchema = z
+  .object({
+    id: z.uuid(),
+    sessionId: z.uuid(),
+    studentId: z.uuid(),
+    classId: z.uuid(),
+    className: z.string(),
+    sessionStartsAt: z.iso.datetime({ offset: true }),
+    reason: absenceReasonSchema,
+    note: z.string().nullable(),
+    reportedAt: z.iso.datetime({ offset: true }),
+  })
+  .meta({
+    id: 'AbsenceRequest',
+    description:
+      'Báo vắng trước đang hiệu lực (chưa hủy). Giờ theo múi giờ của tenant có buổi học.',
+    example: {
+      id: '019b2c70-0001-7a10-8a01-000000000001',
+      sessionId: '019b2c41-0001-7a10-8a01-000000000001',
+      studentId: '019b2c4f-0001-7b30-8c01-000000000001',
+      classId: '019b2c3f-5e01-7c20-9b01-000000000001',
+      className: 'Toán 9A',
+      sessionStartsAt: '2026-12-15T18:00:00+07:00',
+      reason: 'sick',
+      note: 'Con sốt, xin nghỉ buổi tối',
+      reportedAt: '2026-12-15T08:10:00+07:00',
+    },
+  });
+export type AbsenceRequest = z.infer<typeof absenceRequestSchema>;
+
+export const absenceRequestListQuerySchema = z.object({
+  studentId: z.uuid(),
+});
+export type AbsenceRequestListQuery = z.infer<
+  typeof absenceRequestListQuerySchema
+>;
+
+export const absenceRequestListSchema = z
+  .object({ items: z.array(absenceRequestSchema) })
+  .meta({
+    id: 'AbsenceRequestList',
+    description:
+      'Báo vắng đang hiệu lực của một con cho các buổi CHƯA bắt đầu, buổi gần nhất trước',
+  });
+export type AbsenceRequestList = z.infer<typeof absenceRequestListSchema>;

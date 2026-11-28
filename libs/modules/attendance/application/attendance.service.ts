@@ -100,6 +100,8 @@ export class AttendanceService {
         note: r?.note ?? null,
         clientUpdatedAt: r ? formatInZone(r.clientUpdatedAt, tz) : null,
         syncedAt: r ? formatInZone(r.syncedAt, tz) : null,
+        recordedByName: null,
+        parentReport: null,
       };
     });
     const windowOpen = isWithinEditWindow(s.sessionDate, localDate(now, tz));

@@ -17,6 +17,24 @@ const noteSchema = z.string().trim().max(500).nullable();
 
 const lwwTime = z.iso.datetime({ offset: true });
 
+/** Lý do phụ huynh báo vắng trước (US-3.4): ốm, việc gia đình, khác. */
+export const absenceReasonSchema = z.enum(['sick', 'family', 'other']).meta({
+  id: 'AbsenceReason',
+  description: 'sick = ốm, family = việc gia đình, other = khác',
+});
+
+/** Báo vắng trước đang hiệu lực của một học viên cho một buổi (US-3.1 AC5, US-3.4). */
+export const parentReportSchema = z
+  .object({
+    reason: absenceReasonSchema,
+    note: z
+      .string()
+      .nullable()
+      .meta({ description: 'Ghi chú của phụ huynh, tối đa 300 ký tự' }),
+    reportedAt: lwwTime,
+  })
+  .meta({ id: 'ParentAbsenceReport' });
+
 const summarySchema = z
   .object({
     present: z.int().min(0),
@@ -52,6 +70,14 @@ export const attendanceItemSchema = z
     }),
     syncedAt: lwwTime.nullable().meta({
       description: 'Giờ server nhận bản đang lưu',
+    }),
+    recordedByName: z.string().nullable().meta({
+      description:
+        'Tên hiển thị người ghi bản đang lưu, để app hiện "Sửa lần cuối bởi … lúc `syncedAt`" (US-3.3). `null` khi chưa có dòng hoặc không đọc được tên. Chỉ tên, không trả userId hay email.',
+    }),
+    parentReport: parentReportSchema.nullable().meta({
+      description:
+        'Báo vắng trước đang hiệu lực (chưa hủy) của phụ huynh cho buổi này; `null` nếu không có. App điền sẵn "Vắng có phép" cho học viên chưa có dòng điểm danh (US-3.1 AC5).',
     }),
   })
   .meta({ id: 'AttendanceItem' });
@@ -104,6 +130,8 @@ export const sessionAttendanceSchema = z
           note: null,
           clientUpdatedAt: '2026-12-15T19:35:00+07:00',
           syncedAt: '2026-12-15T19:35:02+07:00',
+          recordedByName: 'Cô Lan',
+          parentReport: null,
         },
         {
           studentId: '019b2c42-0001-7a10-8a01-000000000002',
@@ -112,6 +140,12 @@ export const sessionAttendanceSchema = z
           note: null,
           clientUpdatedAt: '2026-12-15T19:35:00+07:00',
           syncedAt: '2026-12-15T19:35:02+07:00',
+          recordedByName: 'Cô Lan',
+          parentReport: {
+            reason: 'sick',
+            note: 'Con sốt, xin nghỉ buổi tối',
+            reportedAt: '2026-12-15T08:10:00+07:00',
+          },
         },
       ],
       summary: { present: 1, late: 0, excused: 0, unexcused: 1 },
@@ -225,7 +259,7 @@ export const attendanceSyncResultSchema = z
     }),
     parentsToNotify: z.int().min(0).meta({
       description:
-        'Số phụ huynh sẽ nhận báo vắng từ lô này (gửi bất đồng bộ qua outbox)',
+        'Số phụ huynh sẽ nhận báo vắng từ lô này (gửi bất đồng bộ qua outbox). Chỉ tính học viên mới vắng KHÔNG phép; "vắng có phép" (kể cả do phụ huynh đã báo trước) không báo lại (US-3.2 AC2).',
     }),
   })
   .meta({
