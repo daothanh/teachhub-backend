@@ -18,6 +18,8 @@
       - 305225338991-eg6h9lb26na0br8qph3gaff5041dga2f.apps.googleusercontent.com
       - 305225338991-r640djv4j04rhv3uqq8g4m56bs3n901a.apps.googleusercontent.com
       - 305225338991-5m421cgrtvgf1flv3dhgu8i50uotj9n9.apps.googleusercontent.com
+    # Apple trên Android: Apple POST thẳng về api-dev (không qua Caddy host app).
+    apple_android_return_url: https://api-dev.dayhoc.app/v1/auth/sso/apple/android/callback
   roles:
     - docker
     - tailscale
