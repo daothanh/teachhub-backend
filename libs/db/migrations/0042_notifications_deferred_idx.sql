@@ -1,0 +1,1 @@
+CREATE INDEX "notifications_deferred_idx" ON "notifications" USING btree ("send_after") WHERE "notifications"."send_after" > "notifications"."created_at";
