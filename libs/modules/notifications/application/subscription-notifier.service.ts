@@ -8,6 +8,7 @@ import {
   type Pending,
   PushDeliveryError,
 } from './absence-notifier.service.js';
+import { quietUntilFor } from './delivery-plan.js';
 
 export const TYPE_SUBSCRIPTION_EXPIRING = 'subscription_expiring';
 export const TYPE_SUBSCRIPTION_ACTIVATED = 'subscription_activated';
@@ -36,7 +37,7 @@ export const subscriptionActivatedJobSchema = z.object({
  * `subscription_expiring` được kiểm lại lúc xử lý: gói đã gia hạn (hạn khác hạn trong sự kiện) hoặc không còn trả phí thì bỏ.
  * Hai loại này đã nằm trong `oneOf` của `Notification` (ngoại lệ oasdiff một lần, xem contracts/CHANGELOG.md): chưa có deepLink,
  * app đọc trạng thái từ `GET /plan-usage`.
- * shortcut: chưa tôn trọng giờ yên lặng (`send_after` = lúc tạo), như `BillingReadyNotifier`.
+ * Giờ yên lặng (US-6.5): tin trong khung có `send_after` = hết khung, push do job `notify.deferred-push` gửi.
  */
 @Injectable()
 export class SubscriptionNotifier {
@@ -86,17 +87,19 @@ export class SubscriptionNotifier {
           select m.user_id, m.id as membership_id from memberships m
           where m.tenant_id = ${tenantId} and m.role = 'tenant_owner' and m.status = 'active'`)
       ).rows;
+      const until = await quietUntilFor(tx, tenantId);
       const out: Pending[] = [];
       for (const o of owners) {
         const row = (
-          await tx.execute<{ id: string }>(sql`
-            insert into notifications (id, tenant_id, recipient_user_id, membership_id, type, urgency, payload, dedupe_key, event_at)
+          await tx.execute<{ id: string; deferred: boolean }>(sql`
+            insert into notifications (id, tenant_id, recipient_user_id, membership_id, type, urgency, payload, dedupe_key, event_at, send_after)
             values (${uuidv7()}, ${tenantId}, ${o.user_id}, ${o.membership_id}, ${type}, 'normal',
-                    ${JSON.stringify(payload)}::jsonb, ${`${type}:${eventId}`}, now())
+                    ${JSON.stringify(payload)}::jsonb, ${`${type}:${eventId}`}, now(), coalesce(${until}::timestamptz, now()))
             on conflict (recipient_user_id, dedupe_key) do update set dedupe_key = excluded.dedupe_key
-            returning id`)
+            returning id, send_after > now() as deferred`)
         ).rows[0];
-        if (row)
+        // Tin hoãn do giờ yên lặng: không gửi lúc này, job `notify.deferred-push` gửi khi tới `send_after`.
+        if (row && !row.deferred)
           out.push({
             notificationId: row.id,
             userId: o.user_id,

@@ -8,6 +8,7 @@ import {
   type Pending,
   PushDeliveryError,
 } from './absence-notifier.service.js';
+import { quietUntilFor } from './delivery-plan.js';
 
 export const TYPE_PAYMENT_CLAIM_CREATED = 'payment_claim_created';
 export const TYPE_PAYMENT_CLAIM_REJECTED = 'payment_claim_rejected';
@@ -30,8 +31,8 @@ interface Target {
  * báo "cần xác nhận"; `rejected` chỉ gửi khi lần báo còn `rejected`. Thông báo trong hộp (đã đăng nhập) mang `claimId`, `invoiceId`
  * và, với `rejected`, `reason` của giáo viên (hợp đồng: lý do gửi kèm thông báo cho phụ huynh); push không có lý do.
  * Hai loại này chưa nằm trong `oneOf` của `Notification` (ngoại lệ oasdiff chung, xem contracts/CHANGELOG.md): app đọc trạng thái trực tiếp.
- * shortcut: chưa tôn trọng giờ yên lặng (`send_after` = lúc tạo), như `SubscriptionNotifier`; người nhận `rejected` chỉ là phụ huynh
- * đã báo (không phải mọi người giám hộ của con).
+ * Giờ yên lặng (US-6.5): tin không khẩn trong khung có `send_after` = hết khung, push do job `notify.deferred-push` gửi.
+ * shortcut: người nhận `rejected` chỉ là phụ huynh đã báo (không phải mọi người giám hộ của con).
  */
 @Injectable()
 export class PaymentClaimNotifier {
@@ -122,17 +123,19 @@ export class PaymentClaimNotifier {
   ): Promise<void> {
     const pending = await this.tx.run({ userId: null }, async (tx) => {
       const p = await plan(tx);
+      const until = await quietUntilFor(tx, tenantId);
       const out: Pending[] = [];
       for (const t of p?.targets ?? []) {
         const row = (
-          await tx.execute<{ id: string }>(sql`
-            insert into notifications (id, tenant_id, recipient_user_id, membership_id, type, urgency, payload, dedupe_key, event_at)
+          await tx.execute<{ id: string; deferred: boolean }>(sql`
+            insert into notifications (id, tenant_id, recipient_user_id, membership_id, type, urgency, payload, dedupe_key, event_at, send_after)
             values (${uuidv7()}, ${tenantId}, ${t.userId}, ${t.membershipId}, ${type}, 'normal',
-                    ${JSON.stringify(p!.body)}::jsonb, ${`${type}:${eventId}`}, now())
+                    ${JSON.stringify(p!.body)}::jsonb, ${`${type}:${eventId}`}, now(), coalesce(${until}::timestamptz, now()))
             on conflict (recipient_user_id, dedupe_key) do update set dedupe_key = excluded.dedupe_key
-            returning id`)
+            returning id, send_after > now() as deferred`)
         ).rows[0];
-        if (row)
+        // Tin hoãn do giờ yên lặng: không gửi lúc này, job `notify.deferred-push` gửi khi tới `send_after`.
+        if (row && !row.deferred)
           out.push({
             notificationId: row.id,
             userId: t.userId,

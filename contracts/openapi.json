@@ -2690,6 +2690,37 @@
                         "type": "null"
                       }
                     ]
+                  },
+                  "notificationSettings": {
+                    "description": "Chỉ gửi khóa đổi, server gộp với giá trị đã lưu; khóa lạ → 422 `VALIDATION_FAILED`",
+                    "type": "object",
+                    "properties": {
+                      "absence": {
+                        "type": "boolean",
+                        "description": "Báo vắng và đính chính (`student_absent`, `student_absent_correction`)"
+                      },
+                      "grade": {
+                        "type": "boolean",
+                        "description": "Điểm mới. Chưa có nơi phát sinh, khóa đã lưu sẵn"
+                      },
+                      "homework": {
+                        "type": "boolean",
+                        "description": "Bài tập. Chưa có nơi phát sinh, khóa đã lưu sẵn"
+                      },
+                      "invoice": {
+                        "type": "boolean",
+                        "description": "Hóa đơn mới (`invoice_issued`). Hóa đơn gộp nhiều lớp chỉ bị bỏ khi mọi lớp liên quan đều tắt"
+                      },
+                      "dunning": {
+                        "type": "boolean",
+                        "description": "Nhắc nợ (`payment_reminder`). Quy tắc nhiều lớp như `invoice`"
+                      },
+                      "schedule": {
+                        "type": "boolean",
+                        "description": "Đổi lịch buổi học (`schedule_changed`)"
+                      }
+                    },
+                    "additionalProperties": false
                   }
                 },
                 "example": {
@@ -5897,6 +5928,130 @@
         "summary": "Hủy Web Push subscription (gọi trước khi đăng xuất)",
         "tags": [
           "web-push"
+        ]
+      }
+    },
+    "/v1/tenant/settings/quiet-hours": {
+      "get": {
+        "description": "Tenant chưa chỉnh lần nào trả mặc định `21:30` đến `07:00` (giờ tenant).",
+        "operationId": "quietHours_get",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuietHours"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Xem giờ yên lặng của tenant (US-6.5)",
+        "tags": [
+          "notifications"
+        ]
+      },
+      "put": {
+        "description": "Thay toàn bộ khung, áp cho cả tenant. Tin không khẩn đã hoãn trước đó giữ mốc gửi cũ; chỉ tin phát sinh sau khi lưu theo khung mới. `start` và `end` dạng `HH:MM` (00:00 đến 23:59), không trùng nhau; `end` nhỏ hơn `start` là khung qua nửa đêm. Sai → 422 `VALIDATION_FAILED`. Giới hạn 20 lần/phút/user (429 `RATE_LIMITED`).",
+        "operationId": "quietHours_put",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateQuietHoursRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuietHours"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Đổi giờ yên lặng của tenant (US-6.5 AC3)",
+        "tags": [
+          "notifications"
         ]
       }
     },
@@ -11962,6 +12117,14 @@
                   "durationMin": 90
                 }
               ],
+              "notificationSettings": {
+                "absence": true,
+                "grade": true,
+                "homework": true,
+                "invoice": true,
+                "dunning": true,
+                "schedule": true
+              },
               "createdAt": "2026-12-14T09:30:00+07:00"
             }
           ],
@@ -12082,6 +12245,9 @@
               "$ref": "#/components/schemas/ScheduleRule"
             }
           },
+          "notificationSettings": {
+            "$ref": "#/components/schemas/ClassNotificationSettings"
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time",
@@ -12104,6 +12270,7 @@
           "feeAmount",
           "feeRules",
           "scheduleRules",
+          "notificationSettings",
           "createdAt"
         ],
         "additionalProperties": false,
@@ -12141,6 +12308,14 @@
               "durationMin": 90
             }
           ],
+          "notificationSettings": {
+            "absence": true,
+            "grade": true,
+            "homework": true,
+            "invoice": true,
+            "dunning": true,
+            "schedule": true
+          },
           "createdAt": "2026-12-14T09:30:00+07:00"
         }
       },
@@ -12228,6 +12403,53 @@
           "weekday": 2,
           "startTime": "18:00",
           "durationMin": 90
+        }
+      },
+      "ClassNotificationSettings": {
+        "type": "object",
+        "properties": {
+          "absence": {
+            "type": "boolean",
+            "description": "Báo vắng và đính chính (`student_absent`, `student_absent_correction`)"
+          },
+          "grade": {
+            "type": "boolean",
+            "description": "Điểm mới. Chưa có nơi phát sinh, khóa đã lưu sẵn"
+          },
+          "homework": {
+            "type": "boolean",
+            "description": "Bài tập. Chưa có nơi phát sinh, khóa đã lưu sẵn"
+          },
+          "invoice": {
+            "type": "boolean",
+            "description": "Hóa đơn mới (`invoice_issued`). Hóa đơn gộp nhiều lớp chỉ bị bỏ khi mọi lớp liên quan đều tắt"
+          },
+          "dunning": {
+            "type": "boolean",
+            "description": "Nhắc nợ (`payment_reminder`). Quy tắc nhiều lớp như `invoice`"
+          },
+          "schedule": {
+            "type": "boolean",
+            "description": "Đổi lịch buổi học (`schedule_changed`)"
+          }
+        },
+        "required": [
+          "absence",
+          "grade",
+          "homework",
+          "invoice",
+          "dunning",
+          "schedule"
+        ],
+        "additionalProperties": false,
+        "description": "Loại bị tắt thì không gửi và không xếp hàng gửi lại sau (US-6.2 AC3). Lớp mới bật cả 6 loại",
+        "example": {
+          "absence": true,
+          "grade": true,
+          "homework": true,
+          "invoice": true,
+          "dunning": true,
+          "schedule": true
         }
       },
       "ClassCreated": {
@@ -12342,6 +12564,9 @@
               "$ref": "#/components/schemas/ScheduleRule"
             }
           },
+          "notificationSettings": {
+            "$ref": "#/components/schemas/ClassNotificationSettings"
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time",
@@ -12385,6 +12610,7 @@
           "feeAmount",
           "feeRules",
           "scheduleRules",
+          "notificationSettings",
           "createdAt",
           "warnings"
         ],
@@ -12423,6 +12649,14 @@
               "durationMin": 90
             }
           ],
+          "notificationSettings": {
+            "absence": true,
+            "grade": true,
+            "homework": true,
+            "invoice": true,
+            "dunning": true,
+            "schedule": true
+          },
           "createdAt": "2026-12-14T09:30:00+07:00",
           "warnings": []
         }
@@ -15801,6 +16035,41 @@
         },
         "required": [
           "endpoint"
+        ]
+      },
+      "QuietHours": {
+        "type": "object",
+        "properties": {
+          "start": {
+            "type": "string",
+            "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+            "description": "Bắt đầu yên lặng, giờ tenant, bao gồm mốc này",
+            "example": "21:30"
+          },
+          "end": {
+            "type": "string",
+            "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+            "description": "Kết thúc yên lặng, giờ tenant, không bao gồm mốc này. Nhỏ hơn `start` = khung qua nửa đêm",
+            "example": "07:00"
+          }
+        },
+        "required": [
+          "start",
+          "end"
+        ],
+        "additionalProperties": false,
+        "description": "Khung giờ yên lặng của tenant (múi giờ của tenant). Tin không khẩn phát sinh trong khung được giữ tới `end`; tin khẩn (vắng học, đổi lịch trong 24 giờ tới) gửi ngay",
+        "example": {
+          "start": "21:30",
+          "end": "07:00"
+        }
+      },
+      "UpdateQuietHoursRequest": {
+        "description": "Thay toàn bộ khung: cả `start` và `end` đều bắt buộc",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/QuietHours"
+          }
         ]
       },
       "CreateInviteRequest": {

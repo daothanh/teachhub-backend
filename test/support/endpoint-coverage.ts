@@ -333,6 +333,14 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
     file: 'dunning.e2e-spec.ts',
     test: 'DoD 6.4: chỉ chủ tenant; 404 chéo tenant; id lạ 404; ghi danh đã rời 409; RLS: B không thấy dunning_jobs của A',
   },
+  'GET /v1/tenant/settings/quiet-hours': {
+    file: 'notification-settings.e2e-spec.ts',
+    test: 'quiet-hours: chỉ chủ tenant; tenant B không thấy khung của A',
+  },
+  'PUT /v1/tenant/settings/quiet-hours': {
+    file: 'notification-settings.e2e-spec.ts',
+    test: 'quiet-hours: chỉ chủ tenant; tenant B không thấy khung của A',
+  },
   'GET /v1/tenant/settings/dunning/preview': {
     file: 'dunning.e2e-spec.ts',
     test: 'DoD 6.4: chỉ chủ tenant; 404 chéo tenant; id lạ 404; ghi danh đã rời 409; RLS: B không thấy dunning_jobs của A',

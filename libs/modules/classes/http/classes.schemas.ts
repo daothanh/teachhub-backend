@@ -44,6 +44,45 @@ const classFields = z.object({
     .meta({ description: 'Bỏ trống = lớp không kỳ hạn' }),
 });
 
+/** Bật/tắt 6 loại thông báo theo lớp (US-6.2). */
+export const classNotificationSettingsSchema = z
+  .object({
+    absence: z.boolean().meta({
+      description:
+        'Báo vắng và đính chính (`student_absent`, `student_absent_correction`)',
+    }),
+    grade: z.boolean().meta({
+      description: 'Điểm mới. Chưa có nơi phát sinh, khóa đã lưu sẵn',
+    }),
+    homework: z.boolean().meta({
+      description: 'Bài tập. Chưa có nơi phát sinh, khóa đã lưu sẵn',
+    }),
+    invoice: z.boolean().meta({
+      description:
+        'Hóa đơn mới (`invoice_issued`). Hóa đơn gộp nhiều lớp chỉ bị bỏ khi mọi lớp liên quan đều tắt',
+    }),
+    dunning: z.boolean().meta({
+      description:
+        'Nhắc nợ (`payment_reminder`). Quy tắc nhiều lớp như `invoice`',
+    }),
+    schedule: z.boolean().meta({
+      description: 'Đổi lịch buổi học (`schedule_changed`)',
+    }),
+  })
+  .meta({
+    id: 'ClassNotificationSettings',
+    description:
+      'Loại bị tắt thì không gửi và không xếp hàng gửi lại sau (US-6.2 AC3). Lớp mới bật cả 6 loại',
+    example: {
+      absence: true,
+      grade: true,
+      homework: true,
+      invoice: true,
+      dunning: true,
+      schedule: true,
+    },
+  });
+
 type ClassDates = { startDate?: string; endDate?: string | null };
 
 const endAfterStart = (v: ClassDates, ctx: z.RefinementCtx) => {
@@ -99,6 +138,16 @@ const feeUpdateFields = {
 export const updateClassRequestSchema = classFields
   .partial()
   .extend(feeUpdateFields)
+  .extend({
+    notificationSettings: classNotificationSettingsSchema
+      .partial()
+      .strict()
+      .optional()
+      .meta({
+        description:
+          'Chỉ gửi khóa đổi, server gộp với giá trị đã lưu; khóa lạ → 422 `VALIDATION_FAILED`',
+      }),
+  })
   .superRefine((v, ctx) => {
     endAfterStart(v, ctx);
     if (v.feeType === null && v.feeAmount != null) {
@@ -171,6 +220,14 @@ const classExample = {
       durationMin: 90,
     },
   ],
+  notificationSettings: {
+    absence: true,
+    grade: true,
+    homework: true,
+    invoice: true,
+    dunning: true,
+    schedule: true,
+  },
   createdAt: '2026-12-14T09:30:00+07:00',
 };
 
@@ -196,6 +253,7 @@ export const classSchema = z
         'Quy tắc hiệu lực khi có học phí (đã điền mặc định), null khi không có học phí',
     }),
     scheduleRules: z.array(scheduleRuleSchema),
+    notificationSettings: classNotificationSettingsSchema,
     createdAt: z.iso.datetime({ offset: true }),
   })
   .meta({ id: 'Class', example: classExample });

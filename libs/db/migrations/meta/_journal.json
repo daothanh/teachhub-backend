@@ -288,6 +288,20 @@
       "when": 1795861387371,
       "tag": "0040_absence_requests",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1795878651229,
+      "tag": "0041_classes_notification_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1795878868601,
+      "tag": "0042_notifications_deferred_idx",
+      "breakpoints": true
     }
   ]
 }

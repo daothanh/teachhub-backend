@@ -30,6 +30,8 @@ import {
   PurgePendingFilesJob,
 } from '@teachhub/modules/files';
 import {
+  DeferredPushJob,
+  JOB_NOTIFY_DEFERRED_PUSH,
   JOB_PURGE_STALE_DEVICES,
   PurgeStaleDevicesJob,
 } from '@teachhub/modules/notifications';
@@ -60,6 +62,7 @@ export class CronProcessor
     private readonly dunning: DunningJob,
     private readonly purge: PurgeIdempotencyKeysJob,
     private readonly purgeDevices: PurgeStaleDevicesJob,
+    private readonly deferredPush: DeferredPushJob,
     private readonly lifecycle: SubscriptionLifecycleJob,
     private readonly taxThreshold: TaxThresholdJob,
     private readonly purgeFiles: PurgePendingFilesJob,
@@ -118,6 +121,12 @@ export class CronProcessor
       { pattern: '45 1 * * *', tz: TZ },
       { name: JOB_PURGE_STALE_DEVICES, opts },
     );
+    // Mỗi 5 phút: gửi tin không khẩn bị hoãn khi tới `send_after` (hết giờ yên lặng, US-6.5).
+    await this.queue.upsertJobScheduler(
+      JOB_NOTIFY_DEFERRED_PUSH,
+      { pattern: '*/5 * * * *', tz: TZ },
+      { name: JOB_NOTIFY_DEFERRED_PUSH, opts },
+    );
     await this.queue.upsertJobScheduler(
       JOB_PURGE_PENDING_FILES,
       { pattern: '0 4 * * *', tz: TZ },
@@ -157,6 +166,8 @@ export class CronProcessor
         return this.purge.run();
       case JOB_PURGE_STALE_DEVICES:
         return this.purgeDevices.run();
+      case JOB_NOTIFY_DEFERRED_PUSH:
+        return this.deferredPush.run();
       case JOB_PURGE_PENDING_FILES:
         return this.purgeFiles.run();
       case JOB_ENSURE_AUDIT_PARTITIONS:

@@ -10,6 +10,8 @@ import {
   type Pending,
   PushDeliveryError,
 } from './absence-notifier.service.js';
+import { invoiceClassSettings, quietUntilFor } from './delivery-plan.js';
+import { isEnabledForAny } from '../domain/notification-settings.js';
 
 export const TYPE_INVOICE_ISSUED = 'invoice_issued';
 
@@ -30,8 +32,8 @@ interface Recipient extends Pending {
 }
 
 // Tiêu đề và nội dung cố định: không tên con, không số tiền (đúng mô tả `invoiceIssuedPayloadSchema`).
-const MAIL_SUBJECT = 'TeachHub: có hóa đơn học phí mới';
-const MAIL_TEXT =
+export const INVOICE_MAIL_SUBJECT = 'TeachHub: có hóa đơn học phí mới';
+export const INVOICE_MAIL_TEXT =
   'Giáo viên vừa gửi một hóa đơn học phí mới cho con của bạn. Mở ứng dụng TeachHub để xem chi tiết và mã QR chuyển khoản.';
 
 /**
@@ -40,7 +42,7 @@ const MAIL_TEXT =
  * `(notification, channel)`).
  * shortcut: phụ huynh chưa kích hoạt tài khoản (guardians.user_id null) không nhận email, vì không có thông báo để làm khóa
  * chống gửi trùng và họ chưa mở được hóa đơn trong app; mở rộng cùng luồng mời phụ huynh.
- * shortcut: chưa tôn trọng giờ yên lặng (US-6.5).
+ * Giờ yên lặng (US-6.5): trong khung thì `send_after` = hết khung và không gửi push/email lúc này; job `notify.deferred-push` gửi cả hai khi tới giờ.
  */
 @Injectable()
 export class InvoiceIssuedNotifier {
@@ -67,6 +69,14 @@ export class InvoiceIssuedNotifier {
         )
       ).rows[0];
       if (!student || !inv || inv.status === 'void') return [];
+      // US-6.2: mọi lớp liên quan đều tắt loại `invoice` thì không báo (không tạo dòng, không push, không email).
+      const classes = await invoiceClassSettings(
+        tx,
+        tenantId,
+        payload.invoiceId,
+        payload.studentId,
+      );
+      if (!isEnabledForAny(classes, TYPE_INVOICE_ISSUED)) return [];
       const guardians = (
         await tx.execute<{
           user_id: string;
@@ -90,6 +100,7 @@ export class InvoiceIssuedNotifier {
         totalAmount: payload.totalAmount,
         dueDate: payload.dueDate,
       };
+      const until = await quietUntilFor(tx, tenantId);
       const out: Recipient[] = [];
       let skippedNoRole = 0;
       for (const g of guardians) {
@@ -98,14 +109,15 @@ export class InvoiceIssuedNotifier {
           continue;
         }
         const row = (
-          await tx.execute<{ id: string }>(sql`
-            insert into notifications (id, tenant_id, recipient_user_id, membership_id, type, urgency, payload, dedupe_key, event_at)
+          await tx.execute<{ id: string; deferred: boolean }>(sql`
+            insert into notifications (id, tenant_id, recipient_user_id, membership_id, type, urgency, payload, dedupe_key, event_at, send_after)
             values (${uuidv7()}, ${tenantId}, ${g.user_id}, ${g.membership_id}, ${TYPE_INVOICE_ISSUED}, 'normal',
-                    ${JSON.stringify(body)}::jsonb, ${`${TYPE_INVOICE_ISSUED}:${eventId}`}, now())
+                    ${JSON.stringify(body)}::jsonb, ${`${TYPE_INVOICE_ISSUED}:${eventId}`}, now(), coalesce(${until}::timestamptz, now()))
             on conflict (recipient_user_id, dedupe_key) do update set dedupe_key = excluded.dedupe_key
-            returning id`)
+            returning id, send_after > now() as deferred`)
         ).rows[0];
-        if (row)
+        // Tin hoãn do giờ yên lặng: không gửi lúc này, job `notify.deferred-push` gửi khi tới `send_after`.
+        if (row && !row.deferred)
           out.push({
             notificationId: row.id,
             userId: g.user_id,
@@ -137,8 +149,8 @@ export class InvoiceIssuedNotifier {
           this,
           p.notificationId,
           p.email,
-          MAIL_SUBJECT,
-          MAIL_TEXT,
+          INVOICE_MAIL_SUBJECT,
+          INVOICE_MAIL_TEXT,
         ))
       )
         failed++;

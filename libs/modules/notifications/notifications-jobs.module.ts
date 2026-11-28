@@ -9,6 +9,7 @@ import { PaymentRecordedNotifier } from './application/payment-recorded-notifier
 import { PaymentReminderNotifier } from './application/payment-reminder-notifier.service.js';
 import { TaxThresholdNotifier } from './application/tax-threshold-notifier.service.js';
 import { SubscriptionNotifier } from './application/subscription-notifier.service.js';
+import { DeferredPushJob } from './application/deferred-push.job.js';
 import { PurgeStaleDevicesJob } from './application/devices.service.js';
 
 /** Phần không có controller của module notifications cho `worker` dùng (job nền, báo vắng). */
@@ -16,6 +17,7 @@ import { PurgeStaleDevicesJob } from './application/devices.service.js';
   imports: [JobsModule, PushModule, MailerModule],
   providers: [
     PurgeStaleDevicesJob,
+    DeferredPushJob,
     AbsenceNotifier,
     AbsenceReportedNotifier,
     BillingReadyNotifier,
@@ -28,6 +30,7 @@ import { PurgeStaleDevicesJob } from './application/devices.service.js';
   ],
   exports: [
     PurgeStaleDevicesJob,
+    DeferredPushJob,
     AbsenceNotifier,
     AbsenceReportedNotifier,
     BillingReadyNotifier,

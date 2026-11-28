@@ -94,6 +94,10 @@ export const notifications = pgTable(
         sql`(${t.payload} ->> 'studentId')`,
       )
       .where(sql`${t.type} = 'student_absent'`),
+    // Job `notify.deferred-push` (US-6.5) chỉ quét tin từng bị hoãn: index nhỏ, không quét cả bảng.
+    index('notifications_deferred_idx')
+      .on(t.sendAfter)
+      .where(sql`${t.sendAfter} > ${t.createdAt}`),
     check(
       'notifications_urgency_check',
       sql`${t.urgency} in ('urgent', 'normal')`,

@@ -7,6 +7,7 @@ export {
   PurgeStaleDevicesJob,
 } from './application/devices.service.js';
 export * from './application/billing-ready-notifier.service.js';
+export * from './application/deferred-push.job.js';
 export * from './application/invoice-issued-notifier.service.js';
 export * from './application/payment-claim-notifier.service.js';
 export * from './application/payment-recorded-notifier.service.js';
