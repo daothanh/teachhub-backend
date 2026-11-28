@@ -2,6 +2,16 @@
 
 `contracts/openapi.json` sinh từ schema zod bằng `pnpm openapi:gen`; file này ghi endpoint thêm mới theo sprint. Chỉ thêm, không đổi endpoint cũ (CI chặn bằng `oasdiff`).
 
+## Phụ huynh báo vắng trước + điểm danh trả thêm 2 trường (US-3.4, US-3.1 AC5, US-3.3; chỉ thêm, `oasdiff breaking` sạch)
+
+- `GET /sessions/{id}/attendance`: mỗi `AttendanceItem` thêm `recordedByName: string|null` (tên người ghi bản đang lưu; "Sửa lần cuối bởi … lúc `syncedAt`", US-3.3) và `parentReport: {reason, note, reportedAt}|null` (báo vắng trước đang hiệu lực, để app điền sẵn "Vắng có phép", US-3.1 AC5). Chọn mức THEO TỪNG HỌC VIÊN thay vì `lastEditedByName`/`lastEditedAt` cả buổi: mỗi dòng có người ghi và `syncedAt` riêng, app suy "lần sửa cuối của buổi" bằng max, còn mức buổi sẽ sai khi nhiều người ghi các dòng khác nhau.
+- `POST /family/absence-requests` (`sessionId`, `studentId`, `reason` `sick|family|other`, `note` ≤ 300): 201 tạo mới, 200 khi con đã có báo vắng hiệu lực cho buổi (trả bản đang có). `GET /family/absence-requests?studentId=`: báo vắng đang hiệu lực cho buổi chưa bắt đầu. `DELETE /family/absence-requests/{id}`: 204, hủy trước giờ bắt đầu, idempotent. Tên theo Technical Spec §5 (`absence-requests`, bảng `absence_requests`).
+- `AttendanceItem` thêm 2 trường NULLABLE nhưng LUÔN CÓ MẶT trong JSON (`recordedByName`, `parentReport`: giá trị `null`, không bỏ khóa); client phải bỏ qua trường lạ chưa biết. `note` của báo vắng (và `parentReport.note`) là văn bản THUẦN ≤ 300 ký tự, client hiển thị dạng text, không diễn giải markup.
+- Hủy rồi báo lại cùng (buổi, con) HỒI SINH đúng báo vắng cũ (cùng `id`, cập nhật `reason`/`note`/`reportedAt`), trả 201; không tạo dòng mới. Giáo viên chỉ nhận thông báo lại khi lần hủy trước cách quá 10 phút, và tối đa một thông báo mỗi (buổi, học sinh). Buổi bị xóa do đổi lịch lặp thì báo vắng của buổi đó mất theo (FK `ON DELETE CASCADE`; phụ huynh đã được báo đổi lịch, US-2.2).
+- Mã lỗi mới `ABSENCE_SESSION_STARTED` (409): buổi đã bắt đầu thì không báo hay hủy báo vắng (US-3.4 AC2). Buổi đã hủy dùng `SESSION_CANCELLED` có sẵn.
+- Loại thông báo mới `student_absence_reported` (giáo viên nhận khi phụ huynh báo vắng): chưa khai vào `oneOf` của `Notification`, cùng nhóm ngoại lệ `oasdiff` đã chốt cho `payment_claim_*`; client bỏ qua `type` lạ.
+- `AttendanceSyncResult.parentsToNotify`: chỉ đổi mô tả, hành vi không đổi: chỉ vắng KHÔNG phép mới báo phụ huynh, "vắng có phép" (kể cả do phụ huynh đã báo) không gửi lại (US-3.2 AC2).
+
 ## OTP_INVALID kèm số lượt thử còn lại (chỉ thêm `details`, không đổi schema; `oasdiff` sạch)
 
 - Nhập sai mã OTP mà còn lượt → 401 `OTP_INVALID` kèm `details.attemptsLeft` (4, 3, 2, 1 theo số lượt đã sai từ cùng một IP; IPv6 gộp theo /64). Áp dụng cho mọi endpoint dùng OTP: `POST /auth/login`, `DELETE /me` (mục đích `delete_account`), `PUT/PATCH/DELETE /payout-accounts` (mục đích `payout_account`).

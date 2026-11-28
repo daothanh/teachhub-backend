@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { and, asc, eq, gt, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import { AppException, uuidv7 } from '@teachhub/core';
 import {
+  absenceRequests,
   attendance,
   classes,
   enrollments,
@@ -20,6 +21,7 @@ import {
 } from '@teachhub/modules/schedule';
 import {
   addDays,
+  asAbsenceReason,
   asStatus,
   ATTENDANCE_RECORDED,
   type AttendanceRecordedPayload,
@@ -91,8 +93,28 @@ export class AttendanceService {
         ),
       );
     const byStudent = new Map(rows.map((r) => [r.studentId, r]));
+    const names = await this.recorderNames(
+      tx,
+      rows.flatMap((r) => (r.recordedBy ? [r.recordedBy] : [])),
+    );
+    // Báo vắng trước đang hiệu lực (chưa hủy) của phụ huynh; tối đa một dòng mỗi học viên (unique một phần).
+    const reports = new Map(
+      (
+        await tx
+          .select()
+          .from(absenceRequests)
+          .where(
+            and(
+              eq(absenceRequests.tenantId, tenantId),
+              eq(absenceRequests.sessionId, sessionId),
+              isNull(absenceRequests.cancelledAt),
+            ),
+          )
+      ).map((a) => [a.studentId, a]),
+    );
     const items = roster.map((st) => {
       const r = byStudent.get(st.id);
+      const report = reports.get(st.id);
       return {
         studentId: st.id,
         fullName: st.fullName,
@@ -100,6 +122,14 @@ export class AttendanceService {
         note: r?.note ?? null,
         clientUpdatedAt: r ? formatInZone(r.clientUpdatedAt, tz) : null,
         syncedAt: r ? formatInZone(r.syncedAt, tz) : null,
+        recordedByName: (r?.recordedBy && names.get(r.recordedBy)) || null,
+        parentReport: report
+          ? {
+              reason: asAbsenceReason(report.reason),
+              note: report.note,
+              reportedAt: formatInZone(report.createdAt, tz),
+            }
+          : null,
       };
     });
     const windowOpen = isWithinEditWindow(s.sessionDate, localDate(now, tz));
@@ -524,7 +554,10 @@ export class AttendanceService {
       .orderBy(asc(students.fullName), asc(students.id));
   }
 
-  /** Tên người ghi (RLS của `users` chỉ cho thấy chính user; người khác trả không có tên). */
+  /**
+   * Tên người ghi (RLS của `users` chỉ cho thấy chính user; người khác trả không có tên).
+   * shortcut: tenant có nhiều nhân sự sẽ thấy `null` cho dòng do người khác ghi; cần hàm security definer đọc tên nhân sự cùng tenant.
+   */
   private async recorderNames(tx: Tx, ids: string[]) {
     if (!ids.length) return new Map<string, string>();
     const rows = await tx

@@ -12,6 +12,7 @@ import {
   PAYMENT_REMINDER,
 } from '@teachhub/modules/billing';
 import {
+  AbsenceReportedNotifier,
   BillingReadyNotifier,
   InvoiceIssuedNotifier,
   PaymentClaimNotifier,
@@ -20,6 +21,7 @@ import {
   SubscriptionNotifier,
   TaxThresholdNotifier,
 } from '@teachhub/modules/notifications';
+import { STUDENT_ABSENCE_REPORTED } from '@teachhub/modules/family';
 import {
   SCHEDULE_CHANGED,
   type ScheduleChangedPayload,
@@ -38,7 +40,7 @@ interface ScheduleChangedJob {
 
 /**
  * Consumer duy nhất của hàng đợi `events` (một hàng đợi chỉ nên có một processor), phân loại theo tên sự kiện:
- * `billing_drafts_ready` (S5-BE-05) → thông báo + push giáo viên; `invoice_issued` (S5-BE-07) → thông báo + push + email phụ huynh; `payment_recorded` (S6-BE-02) → biên nhận push + email phụ huynh; `payment_reminder` (S6-BE-04) → nhắc nợ push + email phụ huynh; `payment_claim_created` / `payment_claim_rejected` (S8-BE-claims, US-7.7) → thông báo + push giáo viên / phụ huynh đã báo; `subscription_expiring` (nhắc gia hạn) và `subscription_activated` (Pro kích hoạt) → thông báo + push chủ tenant; `tax_threshold_alert` (S8, US-9.5) → thông báo + push chủ tenant; `schedule_changed` (S4-BE-07) → chỉ ghi log.
+ * `billing_drafts_ready` (S5-BE-05) → thông báo + push giáo viên; `invoice_issued` (S5-BE-07) → thông báo + push + email phụ huynh; `payment_recorded` (S6-BE-02) → biên nhận push + email phụ huynh; `payment_reminder` (S6-BE-04) → nhắc nợ push + email phụ huynh; `payment_claim_created` / `payment_claim_rejected` (S8-BE-claims, US-7.7) → thông báo + push giáo viên / phụ huynh đã báo; `student_absence_reported` (US-3.4) → thông báo + push giáo viên; `subscription_expiring` (nhắc gia hạn) và `subscription_activated` (Pro kích hoạt) → thông báo + push chủ tenant; `tax_threshold_alert` (S8, US-9.5) → thông báo + push chủ tenant; `schedule_changed` (S4-BE-07) → chỉ ghi log.
  * shortcut (schedule_changed): chưa tạo thông báo cho phụ huynh. Loại `schedule_changed` chưa có trong oneOf notification
  * của hợp đồng (Owner chưa chốt), nên chưa tạo dòng `notifications` và chưa gửi push. Khi chốt: lấy phụ huynh có
  * `guardians.user_id` của học viên đang học lớp `payload.classId`, tạo thông báo idempotent theo `eventId` như báo vắng.
@@ -56,6 +58,7 @@ export class EventsProcessor extends WorkerHost {
     private readonly subscription: SubscriptionNotifier,
     private readonly taxThreshold: TaxThresholdNotifier,
     private readonly paymentClaim: PaymentClaimNotifier,
+    private readonly absenceReported: AbsenceReportedNotifier,
   ) {
     super();
   }
@@ -73,6 +76,8 @@ export class EventsProcessor extends WorkerHost {
       return this.paymentClaim.handleCreated(job.data);
     if (job.name === PAYMENT_CLAIM_REJECTED)
       return this.paymentClaim.handleRejected(job.data);
+    if (job.name === STUDENT_ABSENCE_REPORTED)
+      return this.absenceReported.handle(job.data);
     if (job.name === PAYMENT_RECORDED)
       return this.paymentRecorded.handle(job.data);
     if (job.name === PAYMENT_REMINDER)

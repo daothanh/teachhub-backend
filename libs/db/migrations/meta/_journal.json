@@ -281,6 +281,13 @@
       "when": 1795400136588,
       "tag": "0039_classes_location_optional",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1795861387371,
+      "tag": "0040_absence_requests",
+      "breakpoints": true
     }
   ]
 }

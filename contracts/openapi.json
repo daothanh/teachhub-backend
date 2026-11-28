@@ -6695,6 +6695,294 @@
         ]
       }
     },
+    "/v1/family/absence-requests": {
+      "post": {
+        "description": "Chỉ buổi CHƯA bắt đầu (`startsAt` > giờ máy chủ) và không hủy, của lớp con đang ghi danh. Con không liên kết với user này, buổi của tenant khác/không tồn tại, con không thuộc lớp của buổi → cùng 404 `NOT_FOUND` (không lộ tồn tại). Buổi đã bắt đầu → 409 `ABSENCE_SESSION_STARTED` (US-3.4 AC2); buổi đã hủy → 409 `SESSION_CANCELLED`. Con đã có báo vắng đang hiệu lực cho buổi này (kể cả do người giám hộ khác báo) → 200 trả đúng bản đang có, không tạo trùng, không thông báo lại; tạo mới hoặc báo lại sau khi hủy → 201 (báo lại HỒI SINH đúng dòng cũ, không tạo dòng mới; giáo viên chỉ được thông báo lại nếu lần hủy trước cách quá 10 phút, và tối đa một thông báo mỗi buổi và học sinh). Cùng `Idempotency-Key` trả lại đúng phản hồi cũ. Tạo mới đưa sự kiện outbox `student_absence_reported` để giáo viên nhận thông báo (US-3.4 AC1); loại `student_absence_reported` chưa khai vào `oneOf` của `Notification` (cùng ngoại lệ `oasdiff` chung với các loại mới khác), payload hộp thư `{ absenceRequestId, studentId, studentName, classId, className, sessionId, sessionStartsAt, reason }`. Điểm danh của buổi trả kèm `parentReport` để app giáo viên điền sẵn \"Vắng có phép\" (US-3.1 AC5). Chưa đồng ý điều khoản → 403 `CONSENT_REQUIRED`. Giới hạn 20 lần/phút/user.",
+        "operationId": "family_create",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "UUID, giữ nguyên khi thử lại hoặc phát lại từ outbox",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAbsenceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Đã có báo vắng đang hiệu lực: trả bản đang có",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AbsenceRequest"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AbsenceRequest"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN, CONSENT_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ABSENCE_SESSION_STARTED, SESSION_CANCELLED\n\nIDEMPOTENCY_IN_PROGRESS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED\n\nIDEMPOTENCY_KEY_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Phụ huynh báo con vắng trước một buổi (P02, US-3.4 AC1)",
+        "tags": [
+          "family"
+        ]
+      },
+      "get": {
+        "description": "Báo vắng đang hiệu lực của một con cho các buổi chưa bắt đầu, buổi gần nhất trước. `studentId` không phải con đã liên kết → 404 `NOT_FOUND`.",
+        "operationId": "family_list",
+        "parameters": [
+          {
+            "name": "studentId",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AbsenceRequestList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN, CONSENT_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Báo vắng sắp tới của con (P02, US-3.4)",
+        "tags": [
+          "family"
+        ]
+      }
+    },
+    "/v1/family/absence-requests/{id}": {
+      "delete": {
+        "description": "Người giám hộ đã liên kết với con (không riêng người báo) hủy được trước giờ bắt đầu buổi: đặt `cancelled_at`, điểm danh không còn `parentReport`. Buổi đã bắt đầu → 409 `ABSENCE_SESSION_STARTED`. Id không phải báo vắng của con đã liên kết → 404 `NOT_FOUND`. Idempotent: gọi lại trên báo vắng đã hủy trả 204. Không thông báo lại cho giáo viên.",
+        "operationId": "family_cancel",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "401": {
+            "description": "UNAUTHENTICATED, TOKEN_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN, CONSENT_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ABSENCE_SESSION_STARTED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Phụ huynh hủy báo vắng trước (P02, US-3.4 AC3)",
+        "tags": [
+          "family"
+        ]
+      }
+    },
     "/v1/billing-periods": {
       "get": {
         "description": "Mới nhất trước, phân trang offset. Kỳ tháng M do tác vụ nền `billing.close` (02:00) tạo vào ngày chốt `billingCloseDay` (1 đến 28, mặc định 1) của tháng M+1, ví dụ kỳ 12/2026 chốt 01/01/2027; lỡ ngày chốt thì kỳ vẫn được tạo ở lần chạy sau; chạy lại không tạo bản nháp trùng (US-7.2 AC1). `month=YYYY-MM` lọc đúng một tháng. Kỳ gồm tiền: mọi số tiền là số nguyên đồng.",
@@ -13895,7 +14183,9 @@
               "status": "present",
               "note": null,
               "clientUpdatedAt": "2026-12-15T19:35:00+07:00",
-              "syncedAt": "2026-12-15T19:35:02+07:00"
+              "syncedAt": "2026-12-15T19:35:02+07:00",
+              "recordedByName": "Cô Lan",
+              "parentReport": null
             },
             {
               "studentId": "019b2c42-0001-7a10-8a01-000000000002",
@@ -13903,7 +14193,13 @@
               "status": "unexcused",
               "note": null,
               "clientUpdatedAt": "2026-12-15T19:35:00+07:00",
-              "syncedAt": "2026-12-15T19:35:02+07:00"
+              "syncedAt": "2026-12-15T19:35:02+07:00",
+              "recordedByName": "Cô Lan",
+              "parentReport": {
+                "reason": "sick",
+                "note": "Con sốt, xin nghỉ buổi tối",
+                "reportedAt": "2026-12-15T08:10:00+07:00"
+              }
             }
           ],
           "summary": {
@@ -13960,6 +14256,24 @@
             ],
             "format": "date-time",
             "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "recordedByName": {
+            "description": "Tên hiển thị người ghi bản đang lưu, để app hiện \"Sửa lần cuối bởi … lúc `syncedAt`\" (US-3.3). `null` khi chưa có dòng hoặc không đọc được tên. Chỉ tên, không trả userId hay email.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "parentReport": {
+            "description": "Báo vắng trước đang hiệu lực (chưa hủy) của phụ huynh cho buổi này; `null` nếu không có. App điền sẵn \"Vắng có phép\" cho học viên chưa có dòng điểm danh (US-3.1 AC5).",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ParentAbsenceReport"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -13968,7 +14282,9 @@
           "status",
           "note",
           "clientUpdatedAt",
-          "syncedAt"
+          "syncedAt",
+          "recordedByName",
+          "parentReport"
         ],
         "additionalProperties": false
       },
@@ -13981,6 +14297,41 @@
           "unexcused"
         ],
         "description": "present = có mặt, late = đi muộn, excused = vắng có phép, unexcused = vắng không phép"
+      },
+      "ParentAbsenceReport": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "$ref": "#/components/schemas/AbsenceReason"
+          },
+          "note": {
+            "description": "Ghi chú của phụ huynh, tối đa 300 ký tự",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reportedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          }
+        },
+        "required": [
+          "reason",
+          "note",
+          "reportedAt"
+        ],
+        "additionalProperties": false
+      },
+      "AbsenceReason": {
+        "type": "string",
+        "enum": [
+          "sick",
+          "family",
+          "other"
+        ],
+        "description": "sick = ốm, family = việc gia đình, other = khác"
       },
       "AttendanceSummary": {
         "type": "object",
@@ -14153,7 +14504,7 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 9007199254740991,
-            "description": "Số phụ huynh sẽ nhận báo vắng từ lô này (gửi bất đồng bộ qua outbox)"
+            "description": "Số phụ huynh sẽ nhận báo vắng từ lô này (gửi bất đồng bộ qua outbox). Chỉ tính học viên mới vắng KHÔNG phép; \"vắng có phép\" (kể cả do phụ huynh đã báo trước) không báo lại (US-3.2 AC2)."
           }
         },
         "required": [
@@ -16014,6 +16365,127 @@
             }
           ]
         }
+      },
+      "CreateAbsenceRequest": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "studentId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/AbsenceReason"
+          },
+          "note": {
+            "description": "Ghi chú tự do, tối đa 300 ký tự; rỗng = không có",
+            "type": "string",
+            "maxLength": 300
+          }
+        },
+        "required": [
+          "sessionId",
+          "studentId",
+          "reason"
+        ],
+        "example": {
+          "sessionId": "019b2c41-0001-7a10-8a01-000000000001",
+          "studentId": "019b2c4f-0001-7b30-8c01-000000000001",
+          "reason": "sick",
+          "note": "Con sốt, xin nghỉ buổi tối"
+        }
+      },
+      "AbsenceRequest": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "sessionId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "studentId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "classId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "className": {
+            "type": "string"
+          },
+          "sessionStartsAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/AbsenceReason"
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reportedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          }
+        },
+        "required": [
+          "id",
+          "sessionId",
+          "studentId",
+          "classId",
+          "className",
+          "sessionStartsAt",
+          "reason",
+          "note",
+          "reportedAt"
+        ],
+        "additionalProperties": false,
+        "description": "Báo vắng trước đang hiệu lực (chưa hủy). Giờ theo múi giờ của tenant có buổi học.",
+        "example": {
+          "id": "019b2c70-0001-7a10-8a01-000000000001",
+          "sessionId": "019b2c41-0001-7a10-8a01-000000000001",
+          "studentId": "019b2c4f-0001-7b30-8c01-000000000001",
+          "classId": "019b2c3f-5e01-7c20-9b01-000000000001",
+          "className": "Toán 9A",
+          "sessionStartsAt": "2026-12-15T18:00:00+07:00",
+          "reason": "sick",
+          "note": "Con sốt, xin nghỉ buổi tối",
+          "reportedAt": "2026-12-15T08:10:00+07:00"
+        }
+      },
+      "AbsenceRequestList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AbsenceRequest"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "additionalProperties": false,
+        "description": "Báo vắng đang hiệu lực của một con cho các buổi CHƯA bắt đầu, buổi gần nhất trước"
       },
       "BillingPeriodPage": {
         "type": "object",

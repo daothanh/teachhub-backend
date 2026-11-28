@@ -1,15 +1,45 @@
-import { Controller, Get, Param, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+  Req,
+  Res,
+} from '@nestjs/common';
 import {
   ApiBearerAuth,
+  ApiCreatedResponse,
+  ApiNoContentResponse,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { ApiErrors, Ctx, type RequestContext } from '@teachhub/core';
+import {
+  ApiErrors,
+  ApiIdempotencyKey,
+  Ctx,
+  type RequestContext,
+} from '@teachhub/core';
+import { Idempotency } from '@teachhub/infra';
 import { RequiresRole } from '@teachhub/modules/identity';
+import { AbsenceRequestsService } from '../application/absence-requests.service.js';
 import { FamilyService } from '../application/family.service.js';
 import {
+  type AbsenceRequest,
+  absenceRequestListQuerySchema,
+  type AbsenceRequestList,
+  absenceRequestListSchema,
+  type AbsenceRequestListQuery,
+  absenceRequestSchema,
+  type CreateAbsenceRequest,
+  createAbsenceRequestSchema,
   type FamilyAttendanceQuery,
   familyAttendanceQuerySchema,
   type FamilyAttendanceWeek,
@@ -27,7 +57,11 @@ const idParam = z.uuid();
 @ApiErrors('UNAUTHENTICATED', 'TOKEN_EXPIRED', 'FORBIDDEN', 'CONSENT_REQUIRED')
 @Controller('family')
 export class FamilyController {
-  constructor(private readonly family: FamilyService) {}
+  constructor(
+    private readonly family: FamilyService,
+    private readonly absences: AbsenceRequestsService,
+    private readonly idem: Idempotency,
+  ) {}
 
   @Get('students')
   @ApiOperation({
@@ -57,5 +91,80 @@ export class FamilyController {
     query: FamilyAttendanceQuery,
   ): Promise<FamilyAttendanceWeek> {
     return this.family.attendance(ctx.userId!, studentId, query.week);
+  }
+
+  @Post('absence-requests')
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'Phụ huynh báo con vắng trước một buổi (P02, US-3.4 AC1)',
+    description:
+      'Chỉ buổi CHƯA bắt đầu (`startsAt` > giờ máy chủ) và không hủy, của lớp con đang ghi danh. Con không liên kết với user này, buổi của tenant khác/không tồn tại, con không thuộc lớp của buổi → cùng 404 `NOT_FOUND` (không lộ tồn tại). ' +
+      'Buổi đã bắt đầu → 409 `ABSENCE_SESSION_STARTED` (US-3.4 AC2); buổi đã hủy → 409 `SESSION_CANCELLED`. ' +
+      'Con đã có báo vắng đang hiệu lực cho buổi này (kể cả do người giám hộ khác báo) → 200 trả đúng bản đang có, không tạo trùng, không thông báo lại; tạo mới hoặc báo lại sau khi hủy → 201 (báo lại HỒI SINH đúng dòng cũ, không tạo dòng mới; giáo viên chỉ được thông báo lại nếu lần hủy trước cách quá 10 phút, và tối đa một thông báo mỗi buổi và học sinh). Cùng `Idempotency-Key` trả lại đúng phản hồi cũ. ' +
+      'Tạo mới đưa sự kiện outbox `student_absence_reported` để giáo viên nhận thông báo (US-3.4 AC1); loại `student_absence_reported` chưa khai vào `oneOf` của `Notification` (cùng ngoại lệ `oasdiff` chung với các loại mới khác), payload hộp thư `{ absenceRequestId, studentId, studentName, classId, className, sessionId, sessionStartsAt, reason }`. ' +
+      'Điểm danh của buổi trả kèm `parentReport` để app giáo viên điền sẵn "Vắng có phép" (US-3.1 AC5). Chưa đồng ý điều khoản → 403 `CONSENT_REQUIRED`. Giới hạn 20 lần/phút/user.',
+  })
+  @ApiCreatedResponse({ standardSchema: absenceRequestSchema })
+  @ApiOkResponse({
+    standardSchema: absenceRequestSchema,
+    description: 'Đã có báo vắng đang hiệu lực: trả bản đang có',
+  })
+  @ApiIdempotencyKey()
+  @ApiErrors(
+    'VALIDATION_FAILED',
+    'NOT_FOUND',
+    'ABSENCE_SESSION_STARTED',
+    'SESSION_CANCELLED',
+    'RATE_LIMITED',
+  )
+  create(
+    @Ctx() ctx: RequestContext,
+    @Req() req: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @Body({ schema: createAbsenceRequestSchema }) body: CreateAbsenceRequest,
+  ): Promise<AbsenceRequest> {
+    return this.idem.run(req, reply, ctx, async (t) => {
+      const r = await this.absences.create(t, ctx.userId!, body);
+      return { status: r.created ? 201 : 200, body: r.request };
+    });
+  }
+
+  @Get('absence-requests')
+  @ApiOperation({
+    summary: 'Báo vắng sắp tới của con (P02, US-3.4)',
+    description:
+      'Báo vắng đang hiệu lực của một con cho các buổi chưa bắt đầu, buổi gần nhất trước. `studentId` không phải con đã liên kết → 404 `NOT_FOUND`.',
+  })
+  @ApiOkResponse({ standardSchema: absenceRequestListSchema })
+  @ApiErrors('VALIDATION_FAILED', 'NOT_FOUND')
+  list(
+    @Ctx() ctx: RequestContext,
+    @Query({ schema: absenceRequestListQuerySchema })
+    query: AbsenceRequestListQuery,
+  ): Promise<AbsenceRequestList> {
+    return this.absences.list(ctx.userId!, query.studentId);
+  }
+
+  @Delete('absence-requests/:id')
+  @HttpCode(204)
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'Phụ huynh hủy báo vắng trước (P02, US-3.4 AC3)',
+    description:
+      'Người giám hộ đã liên kết với con (không riêng người báo) hủy được trước giờ bắt đầu buổi: đặt `cancelled_at`, điểm danh không còn `parentReport`. Buổi đã bắt đầu → 409 `ABSENCE_SESSION_STARTED`. Id không phải báo vắng của con đã liên kết → 404 `NOT_FOUND`. ' +
+      'Idempotent: gọi lại trên báo vắng đã hủy trả 204. Không thông báo lại cho giáo viên.',
+  })
+  @ApiNoContentResponse()
+  @ApiErrors(
+    'VALIDATION_FAILED',
+    'NOT_FOUND',
+    'ABSENCE_SESSION_STARTED',
+    'RATE_LIMITED',
+  )
+  async cancel(
+    @Ctx() ctx: RequestContext,
+    @Param('id', { schema: idParam }) id: string,
+  ): Promise<void> {
+    await this.absences.cancel(ctx.userId!, id);
   }
 }

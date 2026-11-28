@@ -1,4 +1,5 @@
 import {
+  asAbsenceReason,
   addDays,
   adjustedUpdatedAt,
   clockSkewMs,
@@ -95,12 +96,21 @@ describe('LWW', () => {
   });
 });
 
+describe('lý do báo vắng trước', () => {
+  it('chỉ nhận sick/family/other, lạ thì ném', () => {
+    expect(asAbsenceReason('sick')).toBe('sick');
+    expect(() => asAbsenceReason('bored')).toThrow(/bored/);
+  });
+});
+
 describe('báo vắng và đính chính', () => {
   it('vắng không phép mới / đính chính', () => {
     expect(isNewAbsence(null, 'unexcused')).toBe(true);
     expect(isNewAbsence('present', 'unexcused')).toBe(true);
     expect(isNewAbsence('unexcused', 'unexcused')).toBe(false);
     expect(isNewAbsence('present', 'excused')).toBe(false);
+    // US-3.2 AC2: vắng có phép (kể cả do phụ huynh đã báo trước) không phải "vắng mới" nên không báo lại.
+    expect(isNewAbsence(null, 'excused')).toBe(false);
     expect(isAbsenceRetracted('unexcused', 'present')).toBe(true);
     expect(isAbsenceRetracted('unexcused', 'late')).toBe(true);
     expect(isAbsenceRetracted('unexcused', 'excused')).toBe(false);
