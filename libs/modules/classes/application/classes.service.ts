@@ -40,6 +40,7 @@ import {
   resolveFeeRules,
 } from '../domain/class-fee.js';
 import { classDraftErrors } from '../domain/class-rules.js';
+import { mergeNotificationSettings } from '../domain/notification-settings.js';
 import { classWarnings } from '../domain/class-warnings.js';
 import type {
   Class,
@@ -188,7 +189,8 @@ export class ClassesService {
       .for('update');
     if (!cur) throw new AppException('NOT_FOUND');
     if (cur.status === 'archived') throw new AppException('CONFLICT_STALE');
-    const { feeType, feeAmount, feeRules, ...rest } = body;
+    const { feeType, feeAmount, feeRules, notificationSettings, ...rest } =
+      body;
     const patch = Object.fromEntries(
       Object.entries(rest).filter(([, v]) => v !== undefined),
     ) as UpdateClassRequest;
@@ -240,7 +242,15 @@ export class ClassesService {
           feeRules: resolveFeeRules(nextType, nextRules),
         }
       : {};
-    const set = { ...patch, ...feePatch };
+    const settingsPatch = notificationSettings
+      ? {
+          notificationSettings: mergeNotificationSettings(
+            cur.notificationSettings,
+            notificationSettings,
+          ),
+        }
+      : {};
+    const set = { ...patch, ...feePatch, ...settingsPatch };
     // Patch rỗng: Drizzle không nhận `set({})`, không có gì để ghi thì giữ nguyên dòng.
     const [row] = Object.keys(set).length
       ? await tx
@@ -371,6 +381,7 @@ export class ClassesService {
         r.feeRules as Partial<FeeRules> | null,
       ),
       scheduleRules: rules.get(r.id) ?? [],
+      notificationSettings: mergeNotificationSettings(r.notificationSettings),
       createdAt: r.createdAt.toISOString(),
     }));
   }
