@@ -20,6 +20,7 @@ describe('contracts/openapi.json', () => {
       S3_ACCESS_KEY_ID: 'x',
       S3_SECRET_ACCESS_KEY: 'x',
       S3_BUCKET_PRIVATE: 'x',
+      APPLE_ANDROID_ENABLED: 'false',
     });
     const { createApp } = await import('./app.js');
     app = await createApp();
@@ -35,6 +36,46 @@ describe('contracts/openapi.json', () => {
       readFileSync(FILE, 'utf8'),
       'contracts/openapi.json lệch với mã — chạy `pnpm openapi:gen` rồi commit',
     ).toBe(generated);
+  });
+
+  it('callback Apple Android chỉ khai form URL-encoded và trả 303', async () => {
+    const { buildOpenApiDocument } = await import('./openapi.js');
+    const operation = buildOpenApiDocument(app).paths[
+      '/v1/auth/sso/apple/android/callback'
+    ]?.post;
+    const body = operation?.requestBody;
+    expect(body && 'content' in body && Object.keys(body.content)).toEqual([
+      'application/x-www-form-urlencoded',
+    ]);
+    expect(operation?.responses['303']).toHaveProperty('headers.Location');
+  });
+
+  it('Fastify đọc form callback và trả no-store kể cả khi luồng chưa bật', async () => {
+    const { RedisThrottlerStorage } = await import('@teachhub/infra');
+    const throttle = vi.spyOn(RedisThrottlerStorage.prototype, 'increment').mockResolvedValue({
+      totalHits: 1,
+      timeToExpire: 60,
+      isBlocked: false,
+      timeToBlockExpire: 0,
+    });
+    try {
+      await app.init();
+      const response = await app.getHttpAdapter().getInstance().inject({
+        method: 'POST',
+        url: '/v1/auth/sso/apple/android/callback',
+        headers: { 'content-type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+        payload: new URLSearchParams({
+          state: 'A'.repeat(43),
+          error: 'user_cancelled_authorize',
+        }).toString(),
+      });
+      expect(response.statusCode).toBe(404);
+      expect(response.json()).toMatchObject({ code: 'NOT_FOUND' });
+      expect(response.headers['cache-control']).toBe('no-store');
+      expect(response.headers['referrer-policy']).toBe('no-referrer');
+    } finally {
+      throttle.mockRestore();
+    }
   });
 
   // POST mặc định 201: route khai thành công 200/204 mà quên @HttpCode thì hợp đồng nói dối.

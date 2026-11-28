@@ -16,8 +16,23 @@ https://{{ hosts.api }} {
 	reverse_proxy api:3000
 }
 
-# Web phụ huynh và admin triển khai ở S0-WEB-03.
-https://{{ hosts.app }}, https://{{ hosts.admin }} {
+# Chỉ chuyển tiếp form POST của Apple khi lưu lượng host app đi qua origin này.
+https://{{ hosts.app }} {
+	import origin_tls
+	@apple_android_callback {
+		method POST
+		path /auth/apple/callback
+	}
+	handle @apple_android_callback {
+		rewrite * /v1/auth/sso/apple/android/callback
+		reverse_proxy api:3000
+	}
+	handle {
+		respond "Chưa triển khai" 503
+	}
+}
+
+https://{{ hosts.admin }} {
 	import origin_tls
 	respond "Chưa triển khai" 503
 }

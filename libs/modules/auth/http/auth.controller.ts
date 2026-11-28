@@ -1,14 +1,25 @@
-import { Body, Controller, Get, HttpCode, Post, Req } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Post,
+  Req,
+  Res,
+  UnsupportedMediaTypeException,
+} from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import {
   ApiBearerAuth,
+  ApiConsumes,
   ApiNoContentResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
 import { sql } from 'drizzle-orm';
-import type { FastifyRequest } from 'fastify';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import {
   ApiErrors,
   AppException,
@@ -19,11 +30,22 @@ import {
 } from '@teachhub/core';
 import { TxService } from '@teachhub/db';
 import { Mailer } from '@teachhub/infra';
+import { AppleAndroidService } from '../apple/apple-android.service.js';
 import { AppleIdTokenService } from '../apple/apple-id-token.service.js';
 import { GoogleIdTokenService } from '../google/google-id-token.service.js';
 import { OTP, OtpService } from '../otp/otp.service.js';
 import { SessionService } from '../session/session.service.js';
 import {
+  type AppleAndroidCallback,
+  type AppleAndroidRedeemRequest,
+  type AppleAndroidRedeemResponse,
+  type AppleAndroidStartRequest,
+  type AppleAndroidStartResponse,
+  appleAndroidCallbackSchema,
+  appleAndroidRedeemRequestSchema,
+  appleAndroidRedeemResponseSchema,
+  appleAndroidStartRequestSchema,
+  appleAndroidStartResponseSchema,
   type AppleSsoRequest,
   appleSsoRequestSchema,
   type GoogleSsoRequest,
@@ -53,6 +75,7 @@ export class AuthController {
     private readonly session: SessionService,
     private readonly google: GoogleIdTokenService,
     private readonly apple: AppleIdTokenService,
+    private readonly appleAndroid: AppleAndroidService,
   ) {}
 
   @Public()
@@ -167,6 +190,80 @@ export class AuthController {
       await this.apple.release(body.id_token);
       throw e;
     }
+  }
+
+  @Public()
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @Post('sso/apple/android/start')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Bắt đầu đăng nhập Apple trên Android bằng S256' })
+  @ApiOkResponse({ standardSchema: appleAndroidStartResponseSchema })
+  @ApiErrors('VALIDATION_FAILED', 'NOT_FOUND', 'RATE_LIMITED', 'SERVICE_UNAVAILABLE')
+  appleAndroidStart(
+    @Body({ schema: appleAndroidStartRequestSchema }) body: AppleAndroidStartRequest,
+  ): Promise<AppleAndroidStartResponse> {
+    return this.appleAndroid.start(body.code_challenge);
+  }
+
+  @Public()
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @Post('sso/apple/android/callback')
+  @HttpCode(303)
+  @ApiConsumes('application/x-www-form-urlencoded')
+  @ApiOperation({ summary: 'Nhận form POST từ Apple và đưa trình duyệt về app Android' })
+  @ApiResponse({
+    status: 303,
+    description: 'Mở app qua deep link chỉ mang mã dùng một lần',
+    headers: { Location: { schema: { type: 'string' } } },
+  })
+  @ApiResponse({ status: 415, description: 'Chỉ nhận form URL-encoded' })
+  @ApiErrors(
+    'BAD_REQUEST',
+    'VALIDATION_FAILED',
+    'UNAUTHENTICATED',
+    'NOT_FOUND',
+    'RATE_LIMITED',
+    'SERVICE_UNAVAILABLE',
+  )
+  async appleAndroidCallback(
+    @Req() req: FastifyRequest,
+    @Res() reply: FastifyReply,
+    @Body({ schema: appleAndroidCallbackSchema }) body: AppleAndroidCallback,
+  ): Promise<void> {
+    const mediaType = req.headers['content-type']?.split(';')[0]?.trim().toLowerCase();
+    if (mediaType !== 'application/x-www-form-urlencoded') {
+      throw new UnsupportedMediaTypeException();
+    }
+    const location = await this.appleAndroid.callback(body);
+    void reply.redirect(location, 303);
+  }
+
+  @Public()
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @Post('sso/apple/android/redeem')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Đổi mã Apple Android lấy phiên TeachHub hoặc kết quả hủy' })
+  @ApiOkResponse({ standardSchema: appleAndroidRedeemResponseSchema })
+  @ApiErrors(
+    'VALIDATION_FAILED',
+    'UNAUTHENTICATED',
+    'NOT_FOUND',
+    'RATE_LIMITED',
+    'SERVICE_UNAVAILABLE',
+  )
+  async appleAndroidRedeem(
+    @Body({ schema: appleAndroidRedeemRequestSchema }) body: AppleAndroidRedeemRequest,
+  ): Promise<AppleAndroidRedeemResponse> {
+    const result = await this.appleAndroid.redeem(body.code, body.code_verifier);
+    if (result.status === 'cancelled') return result;
+    return this.signIn(
+      'apple',
+      result.subject,
+      result.email ?? '',
+      result.name,
+      result.email !== null,
+      true,
+    );
   }
 
   @Public()
