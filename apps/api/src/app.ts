@@ -35,13 +35,13 @@ export async function createApp(): Promise<NestFastifyApplication> {
     .addHook('onSend', async (req, reply) => {
       void reply.header('x-request-id', req.id);
     });
-  // Route nhận token/mã mời: không cache, không lộ qua Referer (kể cả khi lỗi, nên đặt ở hook chứ không ở handler).
+  // Route nhận token/mã mời hoặc trả mã đăng nhập: không cache, không lộ qua Referer, kể cả khi lỗi.
   app
     .getHttpAdapter()
     .getInstance()
     .addHook('onSend', async (req, reply) => {
       if (
-        /^\/v1\/invites\/(preview|accept|redeem-code)$/.test(
+        /^\/v1\/(?:invites\/(?:preview|accept|redeem-code)|auth\/sso\/apple\/android\/(?:start|callback|redeem))$/.test(
           req.url.split('?')[0]!,
         )
       ) {

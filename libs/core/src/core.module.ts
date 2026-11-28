@@ -29,6 +29,7 @@ import { reqLogSerializer } from './log-serializer.js';
             'req.headers.authorization',
             'req.headers.cookie',
             'req.headers["x-admin-secret"]',
+            'res.headers.location', // Deep link Apple Android chứa mã dùng một lần.
           ],
         },
       }),

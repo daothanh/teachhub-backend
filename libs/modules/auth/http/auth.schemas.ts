@@ -52,6 +52,40 @@ export const appleSsoRequestSchema = z.object({
 });
 export type AppleSsoRequest = z.infer<typeof appleSsoRequestSchema>;
 
+const opaqueS256 = z.string().regex(/^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/);
+
+export const appleAndroidStartRequestSchema = z.object({
+  code_challenge: opaqueS256,
+});
+export type AppleAndroidStartRequest = z.infer<
+  typeof appleAndroidStartRequestSchema
+>;
+export type AppleAndroidStartResponse = z.infer<
+  typeof appleAndroidStartResponseSchema
+>;
+
+export const appleAndroidStartResponseSchema = z.object({
+  authorization_url: z.url(),
+  expires_in: z.int().positive(),
+});
+
+export const appleAndroidCallbackSchema = z.object({
+  state: opaqueS256,
+  code: z.string().min(1).max(4096).optional(),
+  id_token: z.string().min(1).max(4096).optional(),
+  user: z.string().max(4096).optional(),
+  error: z.enum(['user_cancelled_authorize', 'access_denied']).optional(),
+});
+export type AppleAndroidCallback = z.infer<typeof appleAndroidCallbackSchema>;
+
+export const appleAndroidRedeemRequestSchema = z.object({
+  code: opaqueS256,
+  code_verifier: z.string().regex(/^[A-Za-z0-9._~-]{43,128}$/),
+});
+export type AppleAndroidRedeemRequest = z.infer<
+  typeof appleAndroidRedeemRequestSchema
+>;
+
 export const refreshRequestSchema = z.object({
   refresh_token: z.string().min(1),
 });
@@ -94,6 +128,14 @@ const tokens = {
 
 export const loginResponseSchema = z.object({ ...tokens, user: userSchema });
 export type LoginResponse = z.infer<typeof loginResponseSchema>;
+
+export const appleAndroidRedeemResponseSchema = z.union([
+  loginResponseSchema,
+  z.object({ status: z.literal('cancelled') }),
+]);
+export type AppleAndroidRedeemResponse = z.infer<
+  typeof appleAndroidRedeemResponseSchema
+>;
 
 export const refreshResponseSchema = z.object(tokens);
 export type RefreshResponse = z.infer<typeof refreshResponseSchema>;

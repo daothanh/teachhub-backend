@@ -24,8 +24,14 @@ const ISSUER = 'https://appleid.apple.com';
 const RELAY_DOMAIN = 'privaterelay.appleid.com';
 const sha256Hex = (s: string) => createHash('sha256').update(s).digest('hex');
 const replayKey = (idToken: string) => `apple:used:${sha256Hex(idToken)}`;
-const sameHex = (a: string, b: string) =>
-  a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
+export const APPLE_ANDROID_SERVICES_ID = 'vn.dayhoc.app.web';
+
+const sameClaim = (claim: unknown, expected: string): boolean => {
+  if (typeof claim !== 'string') return false;
+  const actual = Buffer.from(claim);
+  const wanted = Buffer.from(expected);
+  return actual.length === wanted.length && timingSafeEqual(actual, wanted);
+};
 
 /**
  * Xác minh identityToken của Sign in with Apple: chữ ký RS256/ES256 theo JWKS Apple (cache 10 phút, timeout 5 giây),
@@ -52,19 +58,54 @@ export class AppleIdTokenService {
     await this.redis.del(replayKey(idToken)).catch(() => undefined);
   }
 
-  async verify(idToken: string, rawNonce: string): Promise<AppleIdentity> {
-    if (this.bundleIds.length === 0) throw new AppException('UNAUTHENTICATED');
+  verify(idToken: string, rawNonce: string): Promise<AppleIdentity> {
+    return this.verifyToken(idToken, sha256Hex(rawNonce));
+  }
+
+  verifyAndroid(
+    idToken: string,
+    nonce: string,
+    code: string,
+  ): Promise<AppleIdentity> {
+    return this.verifyToken(idToken, nonce, code);
+  }
+
+  private async verifyToken(
+    idToken: string,
+    nonce: string,
+    authorizationCode?: string,
+  ): Promise<AppleIdentity> {
+    const android = authorizationCode !== undefined;
+    if (!android && this.bundleIds.length === 0) {
+      throw new AppException('UNAUTHENTICATED');
+    }
     try {
       const { payload } = await jwtVerify(idToken, this.keys, {
         algorithms: ['RS256', 'ES256'],
         issuer: ISSUER,
-        audience: this.bundleIds,
+        audience: android ? APPLE_ANDROID_SERVICES_ID : this.bundleIds,
         clockTolerance: '5s',
         requiredClaims: ['sub', 'exp'],
       });
-      if (
+      if (android) {
+        // Cả RS256 và ES256 dùng SHA-256; c_hash là nửa đầu của digest.
+        const codeHash = createHash('sha256')
+          .update(authorizationCode)
+          .digest()
+          .subarray(0, 16)
+          .toString('base64url');
+        if (
+          payload.aud !== APPLE_ANDROID_SERVICES_ID ||
+          !sameClaim(payload.nonce, nonce) ||
+          !sameClaim(payload.c_hash, codeHash) ||
+          !payload.sub
+        ) {
+          throw new AppException('UNAUTHENTICATED');
+        }
+      } else if (
+        [payload.aud].flat().includes(APPLE_ANDROID_SERVICES_ID) ||
         typeof payload.nonce !== 'string' ||
-        !sameHex(payload.nonce.toLowerCase(), sha256Hex(rawNonce))
+        !sameClaim(payload.nonce.toLowerCase(), nonce)
       ) {
         throw new AppException('UNAUTHENTICATED');
       }
@@ -85,9 +126,9 @@ export class AppleIdTokenService {
       const isPrivateRelay = !!email && email.endsWith(`@${RELAY_DOMAIN}`);
       return {
         subject: payload.sub!,
-        email,
+        email: android && !verified ? null : email,
         emailMergeable: !!email && verified && !isPrivateRelay,
-        isPrivateRelay,
+        isPrivateRelay: isPrivateRelay && (!android || verified),
       };
     } catch (e) {
       throw mapIdTokenError(e);

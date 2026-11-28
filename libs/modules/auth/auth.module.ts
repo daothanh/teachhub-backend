@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { AuthController } from './http/auth.controller.js';
 import { JwksController } from './http/jwks.controller.js';
+import { AppleAndroidService } from './apple/apple-android.service.js';
 import { AppleIdTokenService } from './apple/apple-id-token.service.js';
 import { GoogleIdTokenService } from './google/google-id-token.service.js';
 import { JwtAuthGuard } from './jwt/jwt-auth.guard.js';
@@ -16,6 +17,7 @@ import { SessionService } from './session/session.service.js';
     OtpService,
     GoogleIdTokenService,
     AppleIdTokenService,
+    AppleAndroidService,
     SessionService,
     { provide: APP_GUARD, useClass: JwtAuthGuard },
   ],

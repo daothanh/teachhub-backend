@@ -2,6 +2,7 @@ import {
   createHash,
   generateKeyPairSync,
   type KeyObject,
+  randomBytes,
   randomUUID,
 } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
@@ -96,7 +97,9 @@ describe('SSO Apple: /v1/auth/sso/apple', () => {
       S3_ACCESS_KEY_ID: 'x',
       S3_SECRET_ACCESS_KEY: 'x',
       S3_BUCKET_PRIVATE: 'x',
-      APPLE_BUNDLE_ID: 'vn.dayhoc.test',
+      // Cố ý thêm Services ID vào cấu hình native để kiểm route native vẫn từ chối.
+      APPLE_BUNDLE_ID: 'vn.dayhoc.test,vn.dayhoc.app.web',
+      APPLE_ANDROID_ENABLED: 'true',
       APPLE_JWKS_URL: `http://127.0.0.1:${(jwks.address() as AddressInfo).port}/keys`,
     });
     worker = new pg.Pool({ connectionString: db.url('teachhub_worker') });
@@ -111,6 +114,178 @@ describe('SSO Apple: /v1/auth/sso/apple', () => {
     await worker?.end();
     jwks?.close();
     await Promise.all([db?.container.stop(), redis?.stop()]);
+  });
+
+  const androidPath = '/v1/auth/sso/apple/android';
+  const s256 = (value: string) =>
+    createHash('sha256').update(value).digest('base64url');
+  const startAndroid = (code_challenge: string) =>
+    app.inject({
+      method: 'POST',
+      url: `${androidPath}/start`,
+      payload: { code_challenge },
+    });
+  const beginAndroid = async () => {
+    const verifier = randomBytes(32).toString('base64url');
+    const res = await startAndroid(s256(verifier));
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['cache-control']).toBe('no-store');
+    const body = res.json<{ authorization_url: string; expires_in: number }>();
+    const url = new URL(body.authorization_url);
+    return {
+      verifier,
+      url,
+      expiresIn: body.expires_in,
+      state: url.searchParams.get('state')!,
+      nonce: url.searchParams.get('nonce')!,
+    };
+  };
+  const appleCode = 'apple-code-for-test';
+  const androidToken = (
+    nonce: string,
+    claims: Record<string, unknown> = {},
+    aud = 'vn.dayhoc.app.web',
+  ) =>
+    identityToken('n-raw', {
+      nonce,
+      c_hash: createHash('sha256')
+        .update(appleCode)
+        .digest()
+        .subarray(0, 16)
+        .toString('base64url'),
+      ...claims,
+    }, { aud });
+  const callbackAndroid = (payload: Record<string, string>) =>
+    app.inject({
+      method: 'POST',
+      url: `${androidPath}/callback`,
+      headers: { 'content-type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+      payload: new URLSearchParams(payload).toString(),
+    });
+  const redeemAndroid = (code: string, code_verifier: string) =>
+    app.inject({
+      method: 'POST',
+      url: `${androidPath}/redeem`,
+      payload: { code, code_verifier },
+    });
+  const appCode = (location: unknown) => {
+    expect(location).toMatch(/^dayhoc:\/\/auth\/apple\/callback\?code=[A-Za-z0-9_-]{43}$/);
+    return new URL(location as string).searchParams.get('code')!;
+  };
+
+  it('Android: start kiểm S256 và tạo URL Apple với state và nonce riêng', async () => {
+    expect((await startAndroid('plain-verifier')).statusCode).toBe(422);
+    const a = await beginAndroid();
+    const b = await beginAndroid();
+    expect(a.expiresIn).toBe(300);
+    expect(a.url.origin + a.url.pathname).toBe('https://appleid.apple.com/auth/authorize');
+    expect(Object.fromEntries(a.url.searchParams)).toMatchObject({
+      client_id: 'vn.dayhoc.app.web',
+      redirect_uri: 'https://app.dayhoc.app/auth/apple/callback',
+      response_type: 'code id_token',
+      response_mode: 'form_post',
+      scope: 'name email',
+    });
+    expect(a.state).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(a.nonce).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(new Set([a.state, a.nonce, b.state, b.nonce]).size).toBe(4);
+    expect(a.url.searchParams.has('code_challenge')).toBe(false);
+  });
+
+  it('Android: callback từ chối sai media type, state, audience, nonce và c_hash', async () => {
+    const { state, nonce } = await beginAndroid();
+    const good = await androidToken(nonce);
+    const wrongMedia = await app.inject({
+      method: 'POST',
+      url: `${androidPath}/callback`,
+      payload: { state, code: appleCode, id_token: good },
+    });
+    expect(wrongMedia.statusCode).toBe(415);
+    expect(wrongMedia.headers.location).toBeUndefined();
+    const unknown = await callbackAndroid({
+      state: randomBytes(32).toString('base64url'),
+      error: 'user_cancelled_authorize',
+    });
+    expect(unknown.statusCode).toBe(401);
+    expect(unknown.headers.location).toBeUndefined();
+    for (const id_token of [
+      await androidToken(nonce, {}, 'vn.dayhoc.test'),
+      await androidToken('wrong-nonce'),
+      await androidToken(nonce, { c_hash: 'wrong-hash' }),
+    ]) {
+      const res = await callbackAndroid({ state, code: appleCode, id_token });
+      expect(res.statusCode).toBe(401);
+      expect(res.headers.location).toBeUndefined();
+    }
+    expect((await sso(await androidToken(sha('n-raw')))).statusCode).toBe(401);
+    expect((await callbackAndroid({ state, code: appleCode, id_token: good })).statusCode).toBe(303);
+  });
+
+  it('Android: verifier sai không đốt mã, đổi đồng thời chỉ mở một phiên', async () => {
+    const { state, nonce, verifier } = await beginAndroid();
+    const email = 'android-verified@example.com';
+    const id_token = await androidToken(nonce, { sub: 'android-ok', email });
+    const form = {
+      state,
+      code: appleCode,
+      id_token,
+      user: JSON.stringify({
+        name: { firstName: '\u202eCô\n', lastName: ' Lan! ' },
+        email: 'ignored@example.com',
+      }),
+    };
+    const callbacks = await Promise.all([callbackAndroid(form), callbackAndroid(form)]);
+    expect(callbacks.map((r) => r.statusCode).sort((a, b) => a - b)).toEqual([303, 401]);
+    const success = callbacks.find((r) => r.statusCode === 303)!;
+    expect(success.body).toBe('');
+    expect(success.headers['cache-control']).toBe('no-store');
+    expect(success.headers['referrer-policy']).toBe('no-referrer');
+    const code = appCode(success.headers.location);
+    expect((await redeemAndroid(code, 'a'.repeat(43))).statusCode).toBe(401);
+    const results = await Promise.all([redeemAndroid(code, verifier), redeemAndroid(code, verifier)]);
+    expect(results.map((r) => r.statusCode).sort((a, b) => a - b)).toEqual([200, 401]);
+    expect(results.find((r) => r.statusCode === 200)?.json()).toMatchObject({
+      access_token: expect.any(String),
+      refresh_token: expect.any(String),
+      user: { email, displayName: 'Cô Lan' },
+    });
+  });
+
+  it('Android: kết quả hủy cần đúng verifier, chỉ dùng được một lần và không có token', async () => {
+    const { state, verifier } = await beginAndroid();
+    const payload = { state, error: 'user_cancelled_authorize' };
+    const res = await callbackAndroid(payload);
+    expect(res.statusCode).toBe(303);
+    const code = appCode(res.headers.location);
+    expect((await callbackAndroid(payload)).statusCode).toBe(401);
+    expect((await redeemAndroid(code, 'b'.repeat(43))).statusCode).toBe(401);
+    const cancelled = await redeemAndroid(code, verifier);
+    expect(cancelled.statusCode).toBe(200);
+    expect(cancelled.json()).toEqual({ status: 'cancelled' });
+    expect((await redeemAndroid(code, verifier)).statusCode).toBe(401);
+  });
+
+  it('Android: email relay chưa xác minh và email trong form không được dùng để gộp hay tạo user', async () => {
+    const { state, nonce, verifier } = await beginAndroid();
+    const email = 'android-unverified@privaterelay.appleid.com';
+    await signInOtp(email);
+    const id_token = await androidToken(nonce, {
+      sub: 'android-unverified',
+      email,
+      email_verified: false,
+    });
+    const callback = await callbackAndroid({
+      state,
+      id_token,
+      code: appleCode,
+      user: JSON.stringify({ email: 'ignored@example.com' }),
+    });
+    expect(callback.statusCode).toBe(303);
+    const code = appCode(callback.headers.location);
+    const redeem = await redeemAndroid(code, verifier);
+    expect(redeem.statusCode).toBe(401);
+    expect(redeem.json().details).toEqual({ reason: 'EMAIL_REQUIRES_OTP' });
+    expect((await redeemAndroid(code, verifier)).json().details).toBeUndefined();
   });
 
   it('lần đầu → tạo user, tên fullName; lần sau → cùng user, fullName không đè', async () => {

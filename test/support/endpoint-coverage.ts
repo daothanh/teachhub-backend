@@ -65,6 +65,18 @@ export const ENDPOINT_COVERAGE: Record<string, CrossCoverage> = {
     file: 'auth-apple.e2e-spec.ts',
     test: 'email chưa xác minh trùng user có sẵn → không gộp, không tạo, yêu cầu OTP',
   },
+  'POST /v1/auth/sso/apple/android/start': {
+    file: 'auth-apple.e2e-spec.ts',
+    test: 'Android: start kiểm S256 và tạo URL Apple với state và nonce riêng',
+  },
+  'POST /v1/auth/sso/apple/android/callback': {
+    file: 'auth-apple.e2e-spec.ts',
+    test: 'Android: callback từ chối sai media type, state, audience, nonce và c_hash',
+  },
+  'POST /v1/auth/sso/apple/android/redeem': {
+    file: 'auth-apple.e2e-spec.ts',
+    test: 'Android: verifier sai không đốt mã, đổi đồng thời chỉ mở một phiên',
+  },
   'GET /v1/classes': {
     file: 'classes.e2e-spec.ts',
     test: 'tenant B không xem/sửa/lưu trữ lớp của A → 404, lớp A không đổi; danh sách B trống',
