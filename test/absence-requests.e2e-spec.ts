@@ -371,6 +371,8 @@ describe('phụ huynh báo vắng trước', () => {
       (await items(A, s)).find((i) => i.studentId === c.studentId)!
         .parentReport,
     ).toBeNull();
+    // người giám hộ thứ hai của cùng con báo lại → hồi sinh đúng dòng cũ
+    await link(A.tenantId, c.studentId, P2);
     const again = await report(P2, s, c.studentId, {
       reason: 'other',
       note: undefined,
